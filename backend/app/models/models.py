@@ -1,0 +1,102 @@
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy.orm import relationship
+from enum import Enum
+
+from app.core.database import Base
+
+
+# ── Enums ─────────────────────────────────────────────────────────────
+
+class AgentStatus(str, Enum):
+    IDLE = "idle"
+    WORKING = "working"
+    DONE = "done"
+    ERROR = "error"
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class ReviewStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+# ── Tables ────────────────────────────────────────────────────────────
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    password_hash = Column(String(128), nullable=False)
+    display_name = Column(String(100), default="")
+
+    agents = relationship("Agent", back_populates="creator")
+
+
+class Project(Base):
+    __tablename__ = "projects"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, default="")
+    owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    workspace_path = Column(String(500), default="")
+
+    owner = relationship("User")
+
+
+class Agent(Base):
+    __tablename__ = "agents"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    role = Column(String(100), nullable=False)       # code_gen / reviewer / security
+    system_prompt = Column(Text, default="")
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
+
+    creator = relationship("User", back_populates="agents")
+
+
+class Task(Base):
+    __tablename__ = "tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, default="")
+    status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
+
+
+class Review(Base):
+    __tablename__ = "reviews"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    diff_content = Column(Text, default="")
+    agent_review_summary = Column(Text, default="")
+    status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING)
+    human_feedback = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Version(Base):
+    __tablename__ = "versions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    commit_hash = Column(String(40), nullable=False)
+    commit_message = Column(String(500), default="")
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
