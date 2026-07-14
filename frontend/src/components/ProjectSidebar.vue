@@ -76,7 +76,7 @@ const activePath = computed(() => route.path)
 
 // Minimal inline SVG icons — clean 18px line icons
 const icons: Record<string, string> = {
-  grid:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
+  grid:   '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
   folder: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
   bot:    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>',
   check:  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
@@ -114,13 +114,15 @@ const icons: Record<string, string> = {
 </template>
 
 <style scoped>
-/* ── Global project picker ───────────────────────── */
+/* ── Global project picker ─────────────────────────────────────── */
 .project-picker {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px; margin: 4px 10px 0;
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
 }
+.project-picker:hover { border-color: var(--ring); }
 .picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
 .project-select {
   flex: 1; min-width: 0; padding: 4px 0;
@@ -158,7 +160,7 @@ const icons: Record<string, string> = {
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;
-  transition: all 0.12s;
+  transition: all var(--transition-fast);
   cursor: pointer;
   position: relative;
 }
@@ -169,8 +171,8 @@ const icons: Record<string, string> = {
 }
 
 .nav-item.active {
-  background: var(--surface-selected);
-  color: var(--foreground);
+  background: var(--primary-light);
+  color: var(--primary);
   font-weight: 600;
 }
 
@@ -192,12 +194,12 @@ const icons: Record<string, string> = {
   line-height: 1;
 }
 
-/* ── Badge ─────────────────────────────────── */
+/* ── Badge ─────────────────────────────────────────────────────── */
 .nav-badge {
   margin-left: auto;
   min-width: 18px; height: 18px;
   display: inline-flex; align-items: center; justify-content: center;
-  background: oklch(0.577 0.245 27); /* red */
+  background: var(--danger);
   color: #fff;
   font-size: 10px; font-weight: 700; line-height: 1;
   border-radius: 9px; padding: 0 5px;

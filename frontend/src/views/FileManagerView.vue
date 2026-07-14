@@ -4,7 +4,7 @@ import { useProjectStore } from '../stores/project'
 import FileTree from '../components/FileTree.vue'
 import MonacoEditor from '../components/MonacoEditor.vue'
 import api from '../api'
-import { ElMessage } from 'element-plus'
+import { MessagePlugin } from 'tdesign-vue-next'
 
 const store = useProjectStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree>>()
@@ -14,7 +14,6 @@ const selectedFile = ref('')
 const fileContent = ref('')
 const loadingFile = ref(false)
 
-// Create dialogs
 const showNewFile = ref(false)
 const showNewFolder = ref(false)
 const newFileName = ref('')
@@ -29,27 +28,20 @@ async function handleUpload(e: Event) {
   const input = e.target as HTMLInputElement
   const fileList = input.files
   if (!fileList || fileList.length === 0 || !selectedProjectId.value) return
-
   uploading.value = true
   try {
     const form = new FormData()
-    for (const f of fileList) {
-      form.append('files', f)
-    }
+    for (const f of fileList) form.append('files', f)
     form.append('path', '')
     await api.post(`/projects/${selectedProjectId.value}/upload`, form, {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
-    ElMessage.success(`${fileList.length} 个文件已上传`)
+    MessagePlugin.success(`${fileList.length} 个文件已上传`)
     fileTreeRef.value?.loadFiles()
-  } catch { ElMessage.error('上传失败') }
-  finally {
-    uploading.value = false
-    input.value = ''
-  }
+  } catch { MessagePlugin.error('上传失败') }
+  finally { uploading.value = false; input.value = '' }
 }
 
-// Reset file view when project changes
 watch(() => store.currentProject?.id, () => {
   selectedFile.value = ''
   fileContent.value = ''
@@ -62,9 +54,7 @@ async function handleSelect(path: string) {
   try {
     const { data } = await api.get(`/projects/${selectedProjectId.value}/file`, { params: { path } })
     fileContent.value = data.content
-  } finally {
-    loadingFile.value = false
-  }
+  } finally { loadingFile.value = false }
 }
 
 function getLanguage() { return selectedFile.value || 'plaintext' }
@@ -74,10 +64,10 @@ async function createFile() {
   creating.value = true
   try {
     await api.post(`/projects/${selectedProjectId.value}/file`, null, { params: { path: newFileName.value, content: '' } })
-    ElMessage.success(`文件 ${newFileName.value} 已创建`)
+    MessagePlugin.success(`文件 ${newFileName.value} 已创建`)
     showNewFile.value = false; newFileName.value = ''
     fileTreeRef.value?.loadFiles()
-  } catch { ElMessage.error('创建失败') }
+  } catch { MessagePlugin.error('创建失败') }
   finally { creating.value = false }
 }
 
@@ -86,10 +76,10 @@ async function createFolder() {
   creating.value = true
   try {
     await api.post(`/projects/${selectedProjectId.value}/folder`, null, { params: { path: newFolderName.value } })
-    ElMessage.success(`文件夹 ${newFolderName.value} 已创建`)
+    MessagePlugin.success(`文件夹 ${newFolderName.value} 已创建`)
     showNewFolder.value = false; newFolderName.value = ''
     fileTreeRef.value?.loadFiles()
-  } catch { ElMessage.error('创建失败') }
+  } catch { MessagePlugin.error('创建失败') }
   finally { creating.value = false }
 }
 </script>
@@ -104,7 +94,9 @@ async function createFolder() {
     </div>
 
     <div v-if="!selectedProjectId" class="empty-card">
-      <div class="empty-icon">📁</div>
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </div>
       <h3>请先选择一个项目</h3>
       <p>在上方下拉菜单中选择项目，或前往项目看板创建</p>
     </div>
@@ -114,11 +106,22 @@ async function createFolder() {
         <div class="tree-toolbar">
           <span class="tree-title">文件列表</span>
           <div class="tree-actions">
-            <button class="btn-icon" title="新建文件" @click="showNewFile = true">📄</button>
-            <button class="btn-icon" title="新建文件夹" @click="showNewFolder = true">📁</button>
-            <button class="btn-icon" title="上传文件" :disabled="uploading" @click="triggerUpload">
-              {{ uploading ? '⏳' : '⬆️' }}
-            </button>
+            <t-button shape="square" variant="text" size="small" title="新建文件" @click="showNewFile = true">
+              <template #icon>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+              </template>
+            </t-button>
+            <t-button shape="square" variant="text" size="small" title="新建文件夹" @click="showNewFolder = true">
+              <template #icon>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+              </template>
+            </t-button>
+            <t-button shape="square" variant="text" size="small" :disabled="uploading" title="上传文件" @click="triggerUpload">
+              <template #icon>
+                <svg v-if="!uploading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                <span v-else class="mini-spinner"></span>
+              </template>
+            </t-button>
             <input ref="uploadInput" type="file" multiple style="display:none" @change="handleUpload" />
           </div>
         </div>
@@ -133,44 +136,36 @@ async function createFolder() {
           <MonacoEditor :content="fileContent" :language="getLanguage()" />
         </template>
         <div v-else class="empty-view">
-          <span class="empty-view-icon">👈</span>
+          <div class="empty-view-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
           <p>点击左侧文件查看内容</p>
         </div>
       </div>
     </div>
 
-    <!-- Dialogs -->
-    <el-dialog v-model="showNewFile" title="新建文件" width="400px">
-      <input v-model="newFileName" class="field-input" placeholder="例如：src/login.py 或 README.md" @keyup.enter="createFile" />
+    <t-dialog v-model:visible="showNewFile" header="新建文件" width="400px" :footer="false">
+      <t-input v-model="newFileName" placeholder="例如：src/login.py 或 README.md" @enter="createFile" />
       <template #footer>
-        <button class="btn-ghost" @click="showNewFile = false">取消</button>
-        <button class="btn-primary" :disabled="!newFileName || creating" @click="createFile">创建</button>
+        <t-button theme="default" variant="text" @click="showNewFile = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newFileName || creating" @click="createFile">创建</t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
 
-    <el-dialog v-model="showNewFolder" title="新建文件夹" width="400px">
-      <input v-model="newFolderName" class="field-input" placeholder="例如：src 或 components" @keyup.enter="createFolder" />
+    <t-dialog v-model:visible="showNewFolder" header="新建文件夹" width="400px" :footer="false">
+      <t-input v-model="newFolderName" placeholder="例如：src 或 components" @enter="createFolder" />
       <template #footer>
-        <button class="btn-ghost" @click="showNewFolder = false">取消</button>
-        <button class="btn-primary" :disabled="!newFolderName || creating" @click="createFolder">创建</button>
+        <t-button theme="default" variant="text" @click="showNewFolder = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newFolderName || creating" @click="createFolder">创建</t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
   </div>
 </template>
 
 <style scoped>
 .page-root { height: 100%; display: flex; flex-direction: column; max-width: 1400px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; }
-.page-desc { font-size: 13.5px; color: var(--muted-foreground); margin: 4px 0 0; }
 
-.project-select {
-  padding: 7px 12px; border: 1px solid var(--input); border-radius: var(--radius-md);
-  font-size: 13.5px; font-family: var(--font-sans); background: var(--surface);
-  color: var(--foreground); outline: none; cursor: pointer; min-width: 200px;
-}
-
-/* ── Panels ─────────────────────────────────────────────────────── */
 .file-panels {
   flex: 1; display: flex; border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg); overflow: hidden; background: var(--surface);
@@ -184,20 +179,12 @@ async function createFolder() {
 
 .tree-toolbar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 14px; border-bottom: 1px solid var(--surface-border);
+  padding: 8px 12px; border-bottom: 1px solid var(--surface-border);
   flex-shrink: 0;
 }
 
 .tree-title { font-size: 12.5px; font-weight: 700; color: var(--foreground); }
 .tree-actions { display: flex; gap: 2px; }
-
-.btn-icon {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
-  border: none; background: transparent; font-size: 15px; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.12s;
-}
-.btn-icon:hover { background: var(--surface-hover); }
 
 .file-tree-panel :deep(.file-tree) { flex: 1; overflow-y: auto; }
 
@@ -212,35 +199,7 @@ async function createFolder() {
 }
 .file-view-panel :deep(.monaco-container) { flex: 1; }
 
-/* ── Empty ──────────────────────────────────────────────────────── */
-.empty-card { text-align: center; padding: 64px 32px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-lg); }
-.empty-icon { font-size: 40px; margin-bottom: 12px; }
-.empty-card h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.empty-card p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
-
 .empty-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
-.empty-view-icon { font-size: 28px; }
+.empty-view-icon { color: var(--muted-foreground); opacity: 0.5; }
 .empty-view p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
-
-/* ── Shared buttons ─────────────────────────────────────────────── */
-.btn-primary {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px; border-radius: var(--radius-md);
-  background: var(--primary); color: var(--primary-foreground);
-  border: none; font-size: 13.5px; font-weight: 600; cursor: pointer;
-}
-.btn-primary:hover { opacity: 0.85; }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
-.btn-ghost {
-  padding: 8px 16px; border-radius: var(--radius-md);
-  background: transparent; color: var(--muted-foreground);
-  border: none; font-size: 13.5px; font-weight: 500; cursor: pointer;
-}
-.btn-ghost:hover { background: var(--surface-hover); color: var(--foreground); }
-.field-input {
-  width: 100%; padding: 9px 12px; border: 1px solid var(--input); border-radius: var(--radius-md);
-  font-size: 14px; font-family: var(--font-sans); color: var(--foreground);
-  background: var(--surface); outline: none; box-sizing: border-box;
-}
-.field-input:focus { border-color: var(--ring); }
 </style>

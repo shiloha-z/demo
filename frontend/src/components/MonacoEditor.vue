@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, shallowRef } from 'vue'
 import * as monaco from 'monaco-editor'
+import { useThemeStore } from '../stores/theme'
 
 const props = defineProps<{
   content: string
@@ -9,6 +10,7 @@ const props = defineProps<{
   original?: string  // for diff mode
 }>()
 
+const themeStore = useThemeStore()
 const container = ref<HTMLElement>()
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | monaco.editor.IStandaloneDiffEditor | null>(null)
 
@@ -24,17 +26,58 @@ function getLanguage(path: string): string {
   return map[ext] || 'plaintext'
 }
 
+function getMonacoTheme(): string {
+  return themeStore.isDark ? 'vs-dark' : 'vs'
+}
+
 onMounted(() => {
   if (!container.value) return
   const lang = getLanguage(props.language || 'plaintext')
 
+  // Define a custom theme that matches our design tokens
+  monaco.editor.defineTheme('agentcollab-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#fafafa',
+      'editor.foreground': '#2b2b2b',
+      'editorLineNumber.foreground': '#b0b0b0',
+      'editorLineNumber.activeForeground': '#666666',
+      'editor.selectionBackground': '#e8e8f0',
+      'editor.lineHighlightBackground': '#f5f5f5',
+      'editorCursor.foreground': '#5466ff',
+      'editorGutter.background': '#fafafa',
+    },
+  })
+
+  monaco.editor.defineTheme('agentcollab-dark', {
+    base: 'vs-dark',
+    inherit: true,
+    rules: [],
+    colors: {
+      'editor.background': '#1e1e2e',
+      'editor.foreground': '#d4d4d4',
+      'editorLineNumber.foreground': '#555566',
+      'editorLineNumber.activeForeground': '#9999aa',
+      'editor.selectionBackground': '#3a3a55',
+      'editor.lineHighlightBackground': '#262638',
+      'editorCursor.foreground': '#7a8aff',
+      'editorGutter.background': '#1e1e2e',
+    },
+  })
+
+  function getThemeName() {
+    return themeStore.isDark ? 'agentcollab-dark' : 'agentcollab-light'
+  }
+
   if (props.original !== undefined) {
-    // Diff mode
     editor.value = monaco.editor.createDiffEditor(container.value, {
       readOnly: props.readOnly ?? true,
       automaticLayout: true,
       minimap: { enabled: false },
       fontSize: 13,
+      theme: getThemeName(),
     })
     const diffEditor = editor.value as monaco.editor.IStandaloneDiffEditor
     diffEditor.setModel({
@@ -42,7 +85,6 @@ onMounted(() => {
       modified: monaco.editor.createModel(props.content, lang),
     })
   } else {
-    // Normal editor
     editor.value = monaco.editor.create(container.value, {
       value: props.content,
       language: lang,
@@ -56,8 +98,16 @@ onMounted(() => {
       insertSpaces: true,
       detectIndentation: false,
       renderWhitespace: 'selection',
+      theme: getThemeName(),
     })
   }
+})
+
+// Watch for theme changes
+watch(() => themeStore.isDark, () => {
+  if (!editor.value) return
+  const themeName = themeStore.isDark ? 'agentcollab-dark' : 'agentcollab-light'
+  monaco.editor.setTheme(themeName)
 })
 
 watch(() => props.content, (val) => {

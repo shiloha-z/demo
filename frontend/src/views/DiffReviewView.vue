@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
@@ -24,7 +24,6 @@ const statusColors: Record<string, string> = {
 let unsubReview: (() => void) | null = null
 
 onMounted(() => {
-  // Real-time: refresh review list on new review
   unsubReview = wsStore.on('review_update', (data: any) => {
     const pid = store.currentProject?.id
     if (pid && data.project_id === pid) {
@@ -43,19 +42,24 @@ watch(() => store.currentProject?.id, async (pid) => {
 }, { immediate: true })
 
 async function loadReviews() {
-  if (!selectedProjectId.value) return
-  const { data } = await api.get(`/projects/${selectedProjectId.value}/reviews`)
-  reviews.value = data
+  if (!selectedProjectId.value) { reviews.value = []; return }
+  try {
+    const { data } = await api.get(`/projects/${selectedProjectId.value}/reviews`)
+    reviews.value = Array.isArray(data) ? data : []
+  } catch (e: any) {
+    console.error('加载审查记录失败:', e?.response?.status, e?.response?.data || e?.message)
+    reviews.value = []
+  }
 }
 
 async function approve(review: any) {
   loading.value = true
   try {
     await api.post(`/reviews/${review.id}/approve`)
-    ElMessage.success('审查已通过，已提交到 Git')
+    MessagePlugin.success('审查已通过，已提交到 Git')
     await loadReviews()
     if (selectedReview.value?.id === review.id) selectedReview.value = null
-  } catch { ElMessage.error('操作失败') }
+  } catch { MessagePlugin.error('操作失败') }
   finally { loading.value = false }
 }
 
@@ -63,10 +67,10 @@ async function reject(review: any) {
   loading.value = true
   try {
     await api.post(`/reviews/${review.id}/reject`)
-    ElMessage.warning('审查已驳回')
+    MessagePlugin.warning('审查已驳回')
     await loadReviews()
     if (selectedReview.value?.id === review.id) selectedReview.value = null
-  } catch { ElMessage.error('操作失败') }
+  } catch { MessagePlugin.error('操作失败') }
   finally { loading.value = false }
 }
 
@@ -95,21 +99,23 @@ function renderMarkdown(text: string) {
       </div>
     </div>
 
-    <div v-if="!selectedProjectId" class="empty-card">
-      <div class="empty-icon">🔍</div>
+    <div v-if="!selectedProjectId" class="empty-card empty-card--full">
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
       <h3>请先选择一个项目</h3>
     </div>
 
     <template v-else>
-      <!-- Review List -->
-      <div v-if="reviews.length === 0" class="empty-card">
-        <div class="empty-icon">📋</div>
+      <div v-if="reviews.length === 0" class="empty-card empty-card--full">
+        <div class="empty-icon">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
         <h3>暂无审查记录</h3>
         <p>前往 Agent 面板创建任务，执行后将自动生成审查记录</p>
       </div>
 
       <div v-else class="review-layout">
-        <!-- Left: review list -->
         <div class="review-list">
           <div
             v-for="r in reviews"
@@ -128,17 +134,15 @@ function renderMarkdown(text: string) {
           </div>
         </div>
 
-        <!-- Right: review detail -->
         <div class="review-detail" v-if="selectedReview">
           <div class="detail-header">
             <h3>审查 #{{ selectedReview.id }}</h3>
             <div class="detail-actions" v-if="selectedReview.status === 'pending'">
-              <button class="btn-danger" @click="reject(selectedReview)" :disabled="loading">驳回</button>
-              <button class="btn-success" @click="approve(selectedReview)" :disabled="loading">通过</button>
+              <t-button size="small" theme="danger" variant="outline" :disabled="loading" @click="reject(selectedReview)">驳回</t-button>
+              <t-button size="small" theme="success" :disabled="loading" @click="approve(selectedReview)">通过</t-button>
             </div>
           </div>
 
-          <!-- Diff View -->
           <div class="detail-section">
             <h4 class="detail-label">代码变更 (Diff)</h4>
             <div class="diff-container">
@@ -151,7 +155,6 @@ function renderMarkdown(text: string) {
             </div>
           </div>
 
-          <!-- Review Summary -->
           <div class="detail-section">
             <h4 class="detail-label">审查报告</h4>
             <div class="review-summary" v-html="renderMarkdown(selectedReview.agent_review_summary)" />
@@ -159,7 +162,9 @@ function renderMarkdown(text: string) {
         </div>
 
         <div v-else class="empty-detail">
-          <span class="empty-icon">👈</span>
+          <div class="empty-detail-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          </div>
           <p>选择左侧审查记录查看详情</p>
         </div>
       </div>
@@ -170,16 +175,13 @@ function renderMarkdown(text: string) {
 <style scoped>
 .page-root { height: 100%; display: flex; flex-direction: column; max-width: 1400px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; }
-.page-desc { font-size: 13.5px; color: var(--muted-foreground); margin: 4px 0 0; }
 
-.project-select {
-  padding: 7px 12px; border: 1px solid var(--input); border-radius: var(--radius-md);
-  font-size: 13.5px; background: var(--surface); color: var(--foreground); outline: none; min-width: 200px;
+.review-layout {
+  flex: 1; display: flex; gap: 0;
+  border: 1px solid var(--surface-border); border-radius: var(--radius-lg);
+  overflow: hidden; min-height: 0;
+  box-shadow: var(--shadow-surface);
 }
-
-/* ── Review list ────────────────────────────────── */
-.review-layout { flex: 1; display: flex; gap: 0; border: 1px solid var(--surface-border); border-radius: var(--radius-lg); overflow: hidden; min-height: 0; }
 
 .review-list {
   width: 260px; border-right: 1px solid var(--surface-border);
@@ -187,10 +189,10 @@ function renderMarkdown(text: string) {
 }
 .review-item {
   padding: 12px 14px; border-bottom: 1px solid var(--surface-border);
-  cursor: pointer; transition: background 0.12s;
+  cursor: pointer; transition: background var(--transition-fast);
 }
 .review-item:hover { background: var(--surface-hover); }
-.review-item.active { background: var(--surface-selected); }
+.review-item.active { background: var(--primary-lighter); border-left: 3px solid var(--primary); padding-left: 11px; }
 .review-item-header { display: flex; justify-content: space-between; align-items: center; }
 .review-id { font-size: 13px; font-weight: 600; color: var(--foreground); }
 .review-status { font-size: 11px; font-weight: 600; }
@@ -213,26 +215,7 @@ function renderMarkdown(text: string) {
   font-size: 13.5px; line-height: 1.7; white-space: pre-wrap;
 }
 
-/* ── Buttons ────────────────────────────────────── */
-.btn-success {
-  padding: 7px 16px; border-radius: var(--radius-md); border: none;
-  background: var(--success); color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.btn-success:hover { opacity: 0.85; }
-.btn-danger {
-  padding: 7px 16px; border-radius: var(--radius-md); border: none;
-  background: oklch(0.577 0.245 27 / 0.1); color: var(--danger); font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.btn-danger:hover { background: oklch(0.577 0.245 27 / 0.18); }
-.btn-success:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
-
-/* ── Empty ──────────────────────────────────────── */
-.empty-card { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 64px 32px; }
-.empty-icon { font-size: 40px; margin-bottom: 12px; }
-.empty-card h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.empty-card p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
-
 .empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
-.empty-detail .empty-icon { font-size: 28px; }
+.empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }
 .empty-detail p { font-size: 13px; color: var(--muted-foreground); }
 </style>

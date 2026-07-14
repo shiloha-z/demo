@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import api from '../api'
@@ -9,7 +9,6 @@ const store = useProjectStore()
 const wsStore = useWebSocketStore()
 
 const agents = ref<any[]>([])
-const tasks = ref<any[]>([])
 const availableModels = ref<{ id: string; name: string }[]>([])
 
 // Dialogs
@@ -27,7 +26,7 @@ const roleLabels: Record<string, string> = {
 }
 
 const roleColors: Record<string, string> = {
-  code_gen: 'var(--brand)',
+  code_gen: 'var(--primary)',
   reviewer: 'var(--success)',
   security: 'var(--danger)',
 }
@@ -69,7 +68,7 @@ async function createAgent() {
   loading.value = true
   try {
     await api.post('/agents', newAgent.value)
-    ElMessage.success('Agent 已创建')
+    MessagePlugin.success('Agent 已创建')
     showCreateAgent.value = false
     newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '' }
     await loadAgents()
@@ -79,9 +78,9 @@ async function createAgent() {
 async function deleteAgent(id: number) {
   try {
     await api.delete(`/agents/${id}`)
-    ElMessage.success('Agent 已删除')
+    MessagePlugin.success('Agent 已删除')
     await loadAgents()
-  } catch { ElMessage.error('删除失败') }
+  } catch { MessagePlugin.error('删除失败') }
 }
 
 async function createTask() {
@@ -93,7 +92,7 @@ async function createTask() {
       description: newTask.value.description,
       agent_id: selectedAgent.value.id,
     })
-    ElMessage.success('任务已创建，Agent 开始执行...')
+    MessagePlugin.success('任务已创建，Agent 开始执行...')
     showCreateTask.value = false
     newTask.value = { title: '', description: '', project_id: null }
   } finally { loading.value = false }
@@ -101,7 +100,7 @@ async function createTask() {
 
 function openTaskDialog(agent: any) {
   if (!store.currentProject?.id) {
-    ElMessage.warning('请先在侧边栏选择一个项目')
+    MessagePlugin.warning('请先在侧边栏选择一个项目')
     return
   }
   selectedAgent.value = agent
@@ -117,29 +116,33 @@ function openTaskDialog(agent: any) {
         <h1 class="page-title">Agent 池</h1>
         <p class="page-desc">全局 Agent 管理，可在任意项目中复用</p>
       </div>
-      <button class="btn-primary" @click="showCreateAgent = true; loadModels()">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      <t-button theme="primary" @click="showCreateAgent = true; loadModels()">
+        <template #icon>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </template>
         创建 Agent
-      </button>
+      </t-button>
     </div>
 
     <!-- Agents -->
     <div v-if="agents.length === 0" class="empty-card">
-      <div class="empty-icon">🤖</div>
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>
+      </div>
       <h3>暂无 Agent</h3>
       <p>创建你的第一个 AI Agent，可在任意项目中指派任务</p>
-      <button class="btn-secondary" @click="showCreateAgent = true; loadModels()">创建 Agent</button>
+      <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels()">创建 Agent</t-button>
     </div>
 
     <div v-else class="agent-grid">
       <article v-for="a in agents" :key="a.id" class="agent-card">
-        <div class="agent-avatar" :style="{ background: roleColors[a.role] || 'var(--muted)' }">
+        <div class="agent-avatar" :style="{ background: roleColors[a.role] || 'var(--muted-foreground)' }">
           {{ a.name.charAt(0) }}
         </div>
         <div class="agent-body">
           <div class="agent-name">{{ a.name }}</div>
           <div class="agent-meta">
-            <span class="role-badge" :style="{ background: (roleColors[a.role] || 'var(--muted)') + '22', color: roleColors[a.role] }">
+            <span class="role-badge" :style="{ background: (roleColors[a.role] || 'var(--muted-foreground)') + '18', color: roleColors[a.role] }">
               {{ roleLabels[a.role] || a.role }}
             </span>
             <span class="model-tag">{{ a.model }}</span>
@@ -148,76 +151,77 @@ function openTaskDialog(agent: any) {
           </div>
         </div>
         <div class="agent-actions">
-          <button class="btn-ghost-sm" @click="openTaskDialog(a)">指派任务</button>
-          <button class="btn-icon-sm" @click="deleteAgent(a.id)" title="删除">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-          </button>
+          <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
+          <t-button size="small" variant="text" theme="danger" @click="deleteAgent(a.id)" title="删除">
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </template>
+          </t-button>
         </div>
       </article>
     </div>
 
     <!-- Create Agent Dialog -->
-    <el-dialog v-model="showCreateAgent" title="创建 Agent" width="480px">
+    <t-dialog v-model:visible="showCreateAgent" header="创建 Agent" width="480px" :footer="false">
       <div class="dialog-form">
         <label class="field-label">名称</label>
-        <input v-model="newAgent.name" class="field-input" placeholder="例如：小码" />
+        <t-input v-model="newAgent.name" placeholder="例如：小码" />
         <label class="field-label">角色</label>
-        <select v-model="newAgent.role" class="field-input">
-          <option value="code_gen">代码工程师</option>
-          <option value="reviewer">代码审查员</option>
-          <option value="security">安全审查员</option>
-        </select>
+        <t-select v-model="newAgent.role">
+          <t-option value="code_gen" label="代码工程师" />
+          <t-option value="reviewer" label="代码审查员" />
+          <t-option value="security" label="安全审查员" />
+        </t-select>
         <label class="field-label">模型</label>
-        <select v-model="newAgent.model" class="field-input">
-          <option v-if="availableModels.length === 0" value="">加载中...</option>
-          <option v-for="m in availableModels" :key="m.id" :value="m.id">{{ m.name || m.id }}</option>
-        </select>
+        <t-select v-model="newAgent.model">
+          <t-option v-if="availableModels.length === 0" value="" label="加载中..." />
+          <t-option v-for="m in availableModels" :key="m.id" :value="m.id" :label="m.name || m.id" />
+        </t-select>
         <label class="field-label">系统提示词（选填）</label>
         <textarea v-model="newAgent.system_prompt" class="field-textarea" rows="3" placeholder="自定义 Agent 行为..." />
       </div>
       <template #footer>
-        <button class="btn-ghost" @click="showCreateAgent = false">取消</button>
-        <button class="btn-primary" :disabled="!newAgent.name" @click="createAgent">创建</button>
+        <t-button theme="default" variant="text" @click="showCreateAgent = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newAgent.name" @click="createAgent">创建</t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
 
     <!-- Create Task Dialog -->
-    <el-dialog v-model="showCreateTask" title="指派任务" width="500px">
+    <t-dialog v-model:visible="showCreateTask" header="指派任务" width="500px" :footer="false">
       <div class="dialog-form">
         <p class="task-agent-label">Agent：<strong>{{ selectedAgent?.name }}</strong></p>
         <div v-if="!newTask.project_id" class="no-project-warning">
-          ⚠ 请先在侧边栏选择一个项目
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          请先在侧边栏选择一个项目
         </div>
         <div v-else class="task-project-info">
           目标项目：<strong>{{ store.currentProject?.name }}</strong>
         </div>
         <label class="field-label">任务标题</label>
-        <input v-model="newTask.title" class="field-input" placeholder="例如：写一个用户登录接口" />
+        <t-input v-model="newTask.title" placeholder="例如：写一个用户登录接口" />
         <label class="field-label">详细描述</label>
         <textarea v-model="newTask.description" class="field-textarea" rows="4" placeholder="描述清楚你要 Agent 做什么..." />
       </div>
       <template #footer>
-        <button class="btn-ghost" @click="showCreateTask = false">取消</button>
-        <button class="btn-primary" :disabled="!newTask.title || !newTask.project_id" @click="createTask">开始执行</button>
+        <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newTask.title || !newTask.project_id" @click="createTask">开始执行</t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
   </div>
 </template>
 
 <style scoped>
 .page-root { max-width: 1000px; }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; }
-.page-desc { font-size: 13.5px; color: var(--muted-foreground); margin: 4px 0 0; }
 
-/* ── Agent cards ─────────────────────────────────── */
-.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px; }
+/* ── Agent cards ─────────────────────────────────────────────────── */
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
 .agent-card {
   display: flex; align-items: center; gap: 14px;
   padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-surface); transition: border-color 0.15s;
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-surface);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
-.agent-card:hover { border-color: var(--ring); }
+.agent-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
 .agent-avatar {
   width: 40px; height: 40px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
@@ -228,36 +232,13 @@ function openTaskDialog(agent: any) {
 .agent-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); margin-top: 3px; flex-wrap: wrap; }
 .role-badge { padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 .model-tag { padding: 1px 6px; border-radius: 99px; font-size: 10px; color: var(--muted-foreground); background: var(--surface-hover); font-family: var(--font-mono); }
-.status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); }
-.status-dot.working { background: var(--brand); animation: pulse 1.5s infinite; }
-.status-dot.done { background: var(--success); }
-.status-dot.error { background: var(--danger); }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-.agent-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.agent-actions { display: flex; gap: 2px; flex-shrink: 0; }
 
-/* ── Shared ─────────────────────────────────────── */
-.empty-card { text-align: center; padding: 64px 32px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-lg); }
-.empty-icon { font-size: 40px; margin-bottom: 12px; }
-.empty-card h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.empty-card p { font-size: 13px; color: var(--muted-foreground); margin: 0 0 20px; }
-
-.btn-primary { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: var(--radius-md); background: var(--primary); color: var(--primary-foreground); border: none; font-size: 13px; font-weight: 600; cursor: pointer; }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
-.btn-secondary { padding: 8px 16px; border-radius: var(--radius-md); background: var(--surface); color: var(--foreground); border: 1px solid var(--surface-border); font-size: 13.5px; font-weight: 600; cursor: pointer; }
-.btn-secondary:hover { background: var(--surface-hover); }
-.btn-ghost { padding: 7px 14px; border-radius: var(--radius-md); background: transparent; color: var(--muted-foreground); border: none; font-size: 13px; cursor: pointer; }
-.btn-ghost:hover { background: var(--surface-hover); color: var(--foreground); }
-.btn-ghost-sm { padding: 5px 10px; border-radius: var(--radius-sm); background: transparent; color: var(--muted-foreground); border: none; font-size: 12px; cursor: pointer; }
-.btn-ghost-sm:hover { background: var(--surface-hover); color: var(--foreground); }
-.btn-icon-sm { width: 28px; height: 28px; border-radius: var(--radius-sm); border: none; background: transparent; color: var(--muted-foreground); cursor: pointer; display: flex; align-items: center; justify-content: center; }
-.btn-icon-sm:hover { background: var(--surface-hover); color: var(--danger); }
-
-.dialog-form { display: flex; flex-direction: column; gap: 8px; }
-.field-label { font-size: 13px; font-weight: 600; }
-.field-input, .field-textarea { width: 100%; padding: 8px 12px; border: 1px solid var(--input); border-radius: var(--radius-md); font-size: 14px; color: var(--foreground); background: var(--surface); outline: none; box-sizing: border-box; }
-.field-input:focus, .field-textarea:focus { border-color: var(--ring); }
-.field-textarea { resize: vertical; min-height: 60px; }
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }
-.task-project-info { font-size: 13px; color: var(--muted-foreground); padding: 6px 10px; background: var(--surface-hover); border-radius: var(--radius-md); }
-.no-project-warning { font-size: 13px; color: var(--warning); padding: 10px 12px; background: oklch(0.55 0.18 85 / 0.08); border-radius: var(--radius-md); }
+.task-project-info { font-size: 13px; color: var(--muted-foreground); padding: 8px 12px; background: var(--primary-lighter); border-radius: var(--radius-md); }
+.no-project-warning {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--warning); padding: 10px 12px;
+  background: var(--warning-light); border-radius: var(--radius-md);
+}
 </style>

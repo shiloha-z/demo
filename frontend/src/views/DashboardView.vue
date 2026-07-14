@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import api from '../api'
 
@@ -26,10 +26,6 @@ async function handleCreate() {
   }
 }
 
-function onSortChange(e: Event) {
-  store.sortBy = (e.target as HTMLSelectElement).value
-}
-
 function formatTime(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -37,25 +33,25 @@ function formatTime(iso: string | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
-async function deleteProject(p: any, event: Event) {
+function deleteProject(p: any, event: Event) {
   event.stopPropagation()
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除项目「${p.name}」吗？\n\n此操作将删除项目下的所有任务、审查记录和版本历史，且不可撤销。`,
-      '确认删除',
-      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
-    )
-  } catch {
-    return
-  }
-  try {
-    await api.delete(`/projects/${p.id}`)
-    ElMessage.success(`项目「${p.name}」已删除`)
-    await store.fetchProjects()
-    if (store.currentProject?.id === p.id) store.setCurrentProject(null)
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || '删除失败')
-  }
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要删除项目「${p.name}」吗？此操作将删除项目下的所有任务、审查记录和版本历史，且不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${p.id}`)
+        MessagePlugin.success(`项目「${p.name}」已删除`)
+        await store.fetchProjects()
+        if (store.currentProject?.id === p.id) store.setCurrentProject(null)
+      } catch (e: any) {
+        MessagePlugin.error(e?.response?.data?.detail || '删除失败')
+      }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 function goProject(p: any) {
@@ -73,37 +69,64 @@ function goProject(p: any) {
         <p class="page-desc">管理你的项目和 Agent 工作区</p>
       </div>
       <div class="header-actions">
-        <select class="sort-select" :value="store.sortBy" @change="onSortChange">
-          <option value="created_desc">最新创建</option>
-          <option value="created_asc">最早创建</option>
-          <option value="updated_desc">最近修改</option>
-          <option value="name_asc">名称 A-Z</option>
-          <option value="name_desc">名称 Z-A</option>
-        </select>
-        <button class="btn-primary" @click="dialogVisible = true">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        <t-select
+          v-model="store.sortBy"
+          size="medium"
+          style="width: 140px"
+          @change="store.fetchProjects()"
+        >
+          <t-option value="created_desc" label="最新创建" />
+          <t-option value="created_asc" label="最早创建" />
+          <t-option value="updated_desc" label="最近修改" />
+          <t-option value="name_asc" label="名称 A-Z" />
+          <t-option value="name_desc" label="名称 Z-A" />
+        </t-select>
+        <t-button theme="primary" @click="dialogVisible = true">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </template>
           创建项目
-        </button>
+        </t-button>
       </div>
     </div>
 
     <!-- Stats -->
     <div class="stat-grid">
       <div class="stat-card">
-        <div class="stat-value">{{ store.projects.length }}</div>
-        <div class="stat-label">项目数</div>
+        <div class="stat-icon stat-icon--brand">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">{{ store.projects.length }}</div>
+          <div class="stat-label">项目数</div>
+        </div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">0</div>
-        <div class="stat-label">活跃 Agent</div>
+        <div class="stat-icon stat-icon--success">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">0</div>
+          <div class="stat-label">活跃 Agent</div>
+        </div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">0</div>
-        <div class="stat-label">待审查</div>
+        <div class="stat-icon stat-icon--warning">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">0</div>
+          <div class="stat-label">待审查</div>
+        </div>
       </div>
       <div class="stat-card">
-        <div class="stat-value">—</div>
-        <div class="stat-label">通过率</div>
+        <div class="stat-icon stat-icon--info">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        </div>
+        <div class="stat-body">
+          <div class="stat-value">—</div>
+          <div class="stat-label">通过率</div>
+        </div>
       </div>
     </div>
 
@@ -115,14 +138,16 @@ function goProject(p: any) {
         class="project-card"
         @click="goProject(p)"
       >
-        <div class="project-card-icon">📁</div>
+        <div class="project-card-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        </div>
         <div class="project-card-body">
           <h3 class="project-card-title">{{ p.name }}</h3>
           <p class="project-card-desc">{{ p.description || '暂无描述' }}</p>
           <div class="project-card-meta">
-            <span>创建者：{{ p.owner_name || '—' }}</span>
-            <span>创建于 {{ formatTime(p.created_at) }}</span>
-            <span>最后修改于 {{ formatTime(p.updated_at) }}</span>
+            <span>{{ p.owner_name || '—' }}</span>
+            <span>·</span>
+            <span>{{ formatTime(p.created_at) }}</span>
           </div>
         </div>
         <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
@@ -134,80 +159,59 @@ function goProject(p: any) {
 
     <!-- Empty -->
     <div v-else class="empty-card">
-      <div class="empty-icon">📋</div>
+      <div class="empty-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      </div>
       <h3>还没有项目</h3>
       <p>创建你的第一个项目，开始使用 Agent 协作审查</p>
-      <button class="btn-secondary" @click="dialogVisible = true">创建第一个项目</button>
+      <t-button theme="primary" variant="outline" @click="dialogVisible = true">创建第一个项目</t-button>
     </div>
 
     <!-- Dialog -->
-    <el-dialog v-model="dialogVisible" title="创建项目" width="460px">
+    <t-dialog v-model:visible="dialogVisible" header="创建项目" width="460px" :footer="false">
       <div class="dialog-form">
         <label class="field-label">项目名称</label>
-        <input v-model="newProject.name" class="field-input" placeholder="例如：电商后台" />
+        <t-input v-model="newProject.name" placeholder="例如：电商后台" />
         <label class="field-label">描述（选填）</label>
         <textarea v-model="newProject.description" class="field-textarea" rows="3" placeholder="简单描述项目用途" />
       </div>
       <template #footer>
-        <button class="btn-ghost" @click="dialogVisible = false">取消</button>
-        <button class="btn-primary" :disabled="!newProject.name || creating" @click="handleCreate">
+        <t-button theme="default" variant="text" @click="dialogVisible = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newProject.name || creating" @click="handleCreate">
           {{ creating ? '创建中...' : '创建' }}
-        </button>
+        </t-button>
       </template>
-    </el-dialog>
+    </t-dialog>
   </div>
 </template>
 
 <style scoped>
 .page-root { max-width: 1000px; }
-.page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
-.page-title { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.4px; }
-.page-desc { font-size: 13.5px; color: var(--muted-foreground); margin: 4px 0 0; }
-
-.header-actions { display: flex; align-items: center; gap: 10px; }
-.sort-select {
-  padding: 7px 10px; border: 1px solid var(--surface-border); border-radius: var(--radius-md);
-  background: var(--surface); color: var(--foreground); font-size: 13px;
-  font-family: var(--font-sans); outline: none; cursor: pointer;
-}
-.sort-select:focus { border-color: var(--ring); }
-
-/* ── Buttons ────────────────────────────────────────────────────── */
-.btn-primary {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px; border-radius: var(--radius-md);
-  background: var(--primary); color: var(--primary-foreground);
-  border: none; font-size: 13.5px; font-weight: 600; cursor: pointer;
-  transition: opacity 0.15s;
-}
-.btn-primary:hover { opacity: 0.85; }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
-
-.btn-secondary {
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 16px; border-radius: var(--radius-md);
-  background: var(--surface); color: var(--foreground);
-  border: 1px solid var(--surface-border); font-size: 13.5px; font-weight: 600; cursor: pointer;
-  transition: background 0.15s;
-}
-.btn-secondary:hover { background: var(--surface-hover); }
-
-.btn-ghost {
-  padding: 8px 16px; border-radius: var(--radius-md);
-  background: transparent; color: var(--muted-foreground);
-  border: none; font-size: 13.5px; font-weight: 500; cursor: pointer;
-}
-.btn-ghost:hover { background: var(--surface-hover); color: var(--foreground); }
 
 /* ── Stat cards ─────────────────────────────────────────────────── */
 .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
 .stat-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg); padding: 18px 20px;
   box-shadow: var(--shadow-surface);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
-.stat-value { font-size: 26px; font-weight: 700; color: var(--foreground); letter-spacing: -0.5px; }
-.stat-label { font-size: 12.5px; color: var(--muted-foreground); margin-top: 4px; }
+.stat-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); }
+
+.stat-icon {
+  width: 42px; height: 42px; border-radius: var(--radius-md);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.stat-icon--brand { background: var(--primary-light); color: var(--primary); }
+.stat-icon--success { background: var(--success-light); color: var(--success); }
+.stat-icon--warning { background: var(--warning-light); color: var(--warning); }
+.stat-icon--info { background: var(--info-light); color: var(--info); }
+
+.stat-value { font-size: 24px; font-weight: 700; color: var(--foreground); letter-spacing: -0.5px; line-height: 1.2; }
+.stat-label { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
 
 /* ── Project grid ───────────────────────────────────────────────── */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
@@ -216,46 +220,31 @@ function goProject(p: any) {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg); padding: 16px 18px;
   box-shadow: var(--shadow-surface); cursor: pointer;
-  transition: all 0.15s;
+  transition: all var(--transition-base);
 }
-.project-card:hover { border-color: var(--ring); box-shadow: var(--shadow-floating); }
-.project-card-icon { font-size: 24px; flex-shrink: 0; }
+.project-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
+}
+.project-card-icon {
+  width: 40px; height: 40px; border-radius: var(--radius-md);
+  background: var(--primary-light); color: var(--primary);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
 .project-card-body { flex: 1; min-width: 0; }
 .project-card-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--foreground); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.project-card-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); opacity: 0.7; }
-.project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all 0.15s; flex-shrink: 0; }
-.project-card:hover .project-card-arrow { opacity: 1; }
+.project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
+.project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all var(--transition-base); flex-shrink: 0; }
+.project-card:hover .project-card-arrow { opacity: 1; color: var(--primary); }
 
 .btn-delete {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; opacity: 0; transition: all 0.15s;
+  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
 }
 .project-card:hover .btn-delete { opacity: 1; }
-.btn-delete:hover { background: oklch(0.577 0.245 27 / 0.1); color: var(--danger); }
-
-/* ── Empty state ────────────────────────────────────────────────── */
-.empty-card {
-  text-align: center; padding: 64px 32px;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-surface);
-}
-.empty-icon { font-size: 40px; margin-bottom: 12px; }
-.empty-card h3 { font-size: 16px; font-weight: 600; margin: 0 0 6px; }
-.empty-card p { font-size: 13px; color: var(--muted-foreground); margin: 0 0 20px; }
-
-/* ── Dialog form ────────────────────────────────────────────────── */
-.dialog-form { display: flex; flex-direction: column; gap: 8px; }
-.field-label { font-size: 13px; font-weight: 600; color: var(--foreground); }
-.field-input, .field-textarea {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--input);
-  border-radius: var(--radius-md); font-size: 13.5px;
-  font-family: var(--font-sans); color: var(--foreground);
-  background: var(--surface); outline: none; box-sizing: border-box;
-  transition: border-color 0.15s;
-}
-.field-input:focus, .field-textarea:focus { border-color: var(--ring); }
-.field-textarea { resize: vertical; }
+.btn-delete:hover { background: var(--danger-light); color: var(--danger); }
 </style>

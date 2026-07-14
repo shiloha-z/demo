@@ -1,3 +1,4 @@
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -20,7 +21,7 @@ class ReviewResponse(BaseModel):
     agent_review_summary: str
     status: str
     human_feedback: str
-    created_at: str
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True
