@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
+import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
 import api from '../api'
 
 const store = useProjectStore()
+const wsStore = useWebSocketStore()
 
-const selectedProjectId = ref<number | null>(null)
+const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const reviews = ref<any[]>([])
 const selectedReview = ref<any>(null)
 const loading = ref(false)
@@ -19,17 +21,26 @@ const statusColors: Record<string, string> = {
   pending: 'var(--warning)', approved: 'var(--success)', rejected: 'var(--danger)',
 }
 
-onMounted(async () => {
-  if (store.projects.length === 0) await store.fetchProjects()
-  if (store.currentProject) selectedProjectId.value = store.currentProject.id
+let unsubReview: (() => void) | null = null
+
+onMounted(() => {
+  // Real-time: refresh review list on new review
+  unsubReview = wsStore.on('review_update', (data: any) => {
+    const pid = store.currentProject?.id
+    if (pid && data.project_id === pid) {
+      loadReviews()
+    }
+  })
 })
 
-watch(selectedProjectId, async (pid) => {
-  if (!pid) return
-  const p = store.projects.find(p => p.id === pid)
-  store.setCurrentProject(p || null)
-  await loadReviews()
+onUnmounted(() => {
+  if (unsubReview) unsubReview()
 })
+
+watch(() => store.currentProject?.id, async (pid) => {
+  if (!pid) return
+  await loadReviews()
+}, { immediate: true })
 
 async function loadReviews() {
   if (!selectedProjectId.value) return
@@ -82,10 +93,6 @@ function renderMarkdown(text: string) {
         <h1 class="page-title">审查记录</h1>
         <p class="page-desc">查看 Agent 代码审查结果，通过或驳回</p>
       </div>
-      <select v-model="selectedProjectId" class="project-select">
-        <option :value="null" disabled>选择项目</option>
-        <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-      </select>
     </div>
 
     <div v-if="!selectedProjectId" class="empty-card">

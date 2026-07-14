@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useProjectStore } from '../stores/project'
 import FileTree from '../components/FileTree.vue'
 import MonacoEditor from '../components/MonacoEditor.vue'
@@ -9,7 +9,7 @@ import { ElMessage } from 'element-plus'
 const store = useProjectStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree>>()
 
-const selectedProjectId = ref<number | null>(null)
+const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const selectedFile = ref('')
 const fileContent = ref('')
 const loadingFile = ref(false)
@@ -21,19 +21,11 @@ const newFileName = ref('')
 const newFolderName = ref('')
 const creating = ref(false)
 
-onMounted(async () => {
-  if (store.projects.length === 0) await store.fetchProjects()
-  if (store.currentProject) selectedProjectId.value = store.currentProject.id
-})
-
-watch(selectedProjectId, (pid) => {
-  if (pid) {
-    const p = store.projects.find(p => p.id === pid)
-    store.setCurrentProject(p || null)
-    selectedFile.value = ''
-    fileContent.value = ''
-  }
-})
+// Reset file view when project changes
+watch(() => store.currentProject?.id, () => {
+  selectedFile.value = ''
+  fileContent.value = ''
+}, { immediate: true })
 
 async function handleSelect(path: string) {
   if (!selectedProjectId.value) return
@@ -79,12 +71,8 @@ async function createFolder() {
     <div class="page-header">
       <div>
         <h1 class="page-title">文件管理器</h1>
-        <p class="page-desc">浏览和管理项目工作区文件</p>
+        <p class="page-desc">{{ store.currentProject ? `当前项目：${store.currentProject.name}` : '请在侧边栏选择项目' }}</p>
       </div>
-      <select v-model="selectedProjectId" class="project-select">
-        <option :value="null" disabled>选择项目</option>
-        <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-      </select>
     </div>
 
     <div v-if="!selectedProjectId" class="empty-card">

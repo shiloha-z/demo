@@ -29,6 +29,11 @@ const router = createRouter({
       component: () => import('../views/AgentPanelView.vue'),
     },
     {
+      path: '/tasks',
+      name: 'TaskList',
+      component: () => import('../views/TaskListView.vue'),
+    },
+    {
       path: '/reviews',
       name: 'DiffReview',
       component: () => import('../views/DiffReviewView.vue'),

@@ -76,6 +76,10 @@ class Task(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    agent = relationship("Agent")
+    project = relationship("Project")
 
 
 class Review(Base):

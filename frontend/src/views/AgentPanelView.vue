@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
+import { useWebSocketStore } from '../stores/websocket'
 import api from '../api'
 
 const store = useProjectStore()
+const wsStore = useWebSocketStore()
 
 const agents = ref<any[]>([])
 const tasks = ref<any[]>([])
@@ -34,9 +36,17 @@ const statusLabels: Record<string, string> = {
   idle: '空闲', working: '工作中', done: '完成', error: '错误',
 }
 
+let unsubAgent: (() => void) | null = null
+
 onMounted(async () => {
   if (store.projects.length === 0) await store.fetchProjects()
   await loadAgents()
+  // Real-time: refresh agent list on any agent_update
+  unsubAgent = wsStore.on('agent_update', () => loadAgents())
+})
+
+onUnmounted(() => {
+  if (unsubAgent) unsubAgent()
 })
 
 async function loadAgents() {
@@ -90,8 +100,12 @@ async function createTask() {
 }
 
 function openTaskDialog(agent: any) {
+  if (!store.currentProject?.id) {
+    ElMessage.warning('请先在侧边栏选择一个项目')
+    return
+  }
   selectedAgent.value = agent
-  newTask.value = { title: '', description: '', project_id: store.currentProject?.id || store.projects[0]?.id || null }
+  newTask.value = { title: '', description: '', project_id: store.currentProject.id }
   showCreateTask.value = true
 }
 </script>
@@ -171,11 +185,12 @@ function openTaskDialog(agent: any) {
     <el-dialog v-model="showCreateTask" title="指派任务" width="500px">
       <div class="dialog-form">
         <p class="task-agent-label">Agent：<strong>{{ selectedAgent?.name }}</strong></p>
-        <label class="field-label">目标项目</label>
-        <select v-model="newTask.project_id" class="field-input">
-          <option :value="null" disabled>选择项目</option>
-          <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
-        </select>
+        <div v-if="!newTask.project_id" class="no-project-warning">
+          ⚠ 请先在侧边栏选择一个项目
+        </div>
+        <div v-else class="task-project-info">
+          目标项目：<strong>{{ store.currentProject?.name }}</strong>
+        </div>
         <label class="field-label">任务标题</label>
         <input v-model="newTask.title" class="field-input" placeholder="例如：写一个用户登录接口" />
         <label class="field-label">详细描述</label>
@@ -243,4 +258,6 @@ function openTaskDialog(agent: any) {
 .field-input:focus, .field-textarea:focus { border-color: var(--ring); }
 .field-textarea { resize: vertical; min-height: 60px; }
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }
+.task-project-info { font-size: 13px; color: var(--muted-foreground); padding: 6px 10px; background: var(--surface-hover); border-radius: var(--radius-md); }
+.no-project-warning { font-size: 13px; color: var(--warning); padding: 10px 12px; background: oklch(0.55 0.18 85 / 0.08); border-radius: var(--radius-md); }
 </style>

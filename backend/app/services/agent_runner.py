@@ -16,6 +16,8 @@ def run_agent_pipeline(task_id: int):
 
     Called by FastAPI's BackgroundTasks — runs in a thread pool.
     """
+    from app.api.ws import broadcast_sync
+
     db = SessionLocal()
     try:
         task = db.query(Task).get(task_id)
@@ -26,6 +28,7 @@ def run_agent_pipeline(task_id: int):
         # Update status → running
         task.status = TaskStatus.RUNNING
         db.commit()
+        broadcast_sync("task_update", {"id": task.id, "project_id": task.project_id, "status": "running"})
 
         project = db.query(Project).get(task.project_id)
         if not project or not project.workspace_path:
@@ -38,6 +41,12 @@ def run_agent_pipeline(task_id: int):
         # Get the agent's model preference
         agent = db.query(Agent).get(task.agent_id)
         model_name = agent.model if agent and agent.model else "deepseek-chat"
+
+        # Push agent status → working
+        if agent:
+            agent.status = AgentStatus.WORKING
+            db.commit()
+            broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
 
         crew = build_crew(project.workspace_path, model_name)
         result = crew.kickoff(inputs={"task_description": task.description or task.title})
@@ -61,12 +70,23 @@ def run_agent_pipeline(task_id: int):
         db.commit()
         db.refresh(review)
 
+        # Push review created
+        broadcast_sync("review_update", {
+            "id": review.id,
+            "task_id": task.id,
+            "project_id": task.project_id,
+            "status": "pending",
+        })
+
         # Update task & agent status → done
         task.status = TaskStatus.COMPLETED
         agent = db.query(Agent).get(task.agent_id)
         if agent:
             agent.status = AgentStatus.DONE
         db.commit()
+
+        broadcast_sync("task_update", {"id": task.id, "project_id": task.project_id, "status": "completed"})
+        broadcast_sync("agent_update", {"id": task.agent_id, "status": "done"})
 
         logger.info(f"Task {task_id} completed, review #{review.id} stored")
 
@@ -81,6 +101,8 @@ def run_agent_pipeline(task_id: int):
 
 
 def _fail_task(db, task: Task, error: str):
+    from app.api.ws import broadcast_sync
+
     task.status = TaskStatus.FAILED
     agent = db.query(Agent).get(task.agent_id)
     if agent:
@@ -94,3 +116,6 @@ def _fail_task(db, task: Task, error: str):
     )
     db.add(review)
     db.commit()
+
+    broadcast_sync("task_update", {"id": task.id, "project_id": task.project_id, "status": "failed"})
+    broadcast_sync("agent_update", {"id": task.agent_id, "status": "idle"})

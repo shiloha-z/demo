@@ -1,16 +1,27 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
+import { useWebSocketStore } from './stores/websocket'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const ws = useWebSocketStore()
 
 const isLoginPage = computed(() => route.meta.guest === true)
 
+onMounted(() => {
+  if (!isLoginPage.value) ws.connect()
+})
+
+onUnmounted(() => {
+  ws.disconnect()
+})
+
 function handleLogout() {
+  ws.disconnect()
   auth.logout()
   router.push('/login')
 }
