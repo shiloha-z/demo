@@ -1,7 +1,9 @@
 import os, shutil
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, asc
 
 from app.core.database import get_db
 from app.core.config import settings
@@ -24,7 +26,10 @@ class ProjectResponse(BaseModel):
     name: str
     description: str
     owner_id: int
+    owner_name: str = ""
     workspace_path: str
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
@@ -37,9 +42,7 @@ class ProjectListResponse(BaseModel):
 # ── Helper ────────────────────────────────────────────────────────────
 
 def _get_workspace(project_id: int, user: User, db: Session) -> str:
-    project = db.query(Project).filter(
-        Project.id == project_id, Project.owner_id == user.id
-    ).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     if not project.workspace_path:
@@ -50,8 +53,20 @@ def _get_workspace(project_id: int, user: User, db: Session) -> str:
 # ── Project CRUD ──────────────────────────────────────────────────────
 
 @router.get("", response_model=ProjectListResponse)
-def list_projects(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    projects = db.query(Project).filter(Project.owner_id == user.id).all()
+def list_projects(
+    sort: str = Query(default="created_desc", description="created_desc | created_asc | updated_desc | name_asc | name_desc"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    sort_map = {
+        "created_desc": desc(Project.created_at),
+        "created_asc": asc(Project.created_at),
+        "updated_desc": desc(Project.updated_at),
+        "name_asc": asc(Project.name),
+        "name_desc": desc(Project.name),
+    }
+    order = sort_map.get(sort, desc(Project.created_at))
+    projects = db.query(Project).options(joinedload(Project.owner)).order_by(order).all()
     return ProjectListResponse(projects=[ProjectResponse.model_validate(p) for p in projects])
 
 
@@ -110,6 +125,12 @@ def read_file(
     return {"path": path, "content": content}
 
 
+def _touch_project(db: Session, project_id: int):
+    """Update project's updated_at timestamp."""
+    db.query(Project).filter(Project.id == project_id).update({"updated_at": datetime.utcnow()})
+    db.commit()
+
+
 @router.post("/{project_id}/file")
 def create_file(
     project_id: int,
@@ -123,6 +144,7 @@ def create_file(
         target = git.write_file(workspace, path, content)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _touch_project(db, project_id)
     return {"path": path, "message": "File created"}
 
 
@@ -138,6 +160,7 @@ def create_folder(
         target = git.create_folder(workspace, path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    _touch_project(db, project_id)
     return {"path": path, "message": "Folder created"}
 
 
@@ -156,7 +179,7 @@ async def upload_file(
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == user.id).first()
+    project = db.query(Project).options(joinedload(Project.owner)).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return ProjectResponse.model_validate(project)

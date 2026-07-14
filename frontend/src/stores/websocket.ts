@@ -22,9 +22,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
     // Determine ws:// or wss:// from current page protocol
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const host = window.location.hostname
-    const port = '8000' // backend port
-    const url = `${protocol}//${host}:${port}/api/ws?token=${encodeURIComponent(token)}`
+    const url = `${protocol}//${window.location.host}/api/ws?token=${encodeURIComponent(token)}`
 
     try {
       ws = new WebSocket(url)

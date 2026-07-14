@@ -7,15 +7,20 @@ export interface Project {
   name: string
   description: string
   owner_id: number
+  owner_name: string
   workspace_path: string
+  created_at: string | null
+  updated_at: string | null
 }
 
 export const useProjectStore = defineStore('project', () => {
   const currentProject = ref<Project | null>(null)
   const projects = ref<Project[]>([])
+  const sortBy = ref<string>('created_desc')
 
-  async function fetchProjects() {
-    const { data } = await api.get<{ projects: Project[] }>('/projects')
+  async function fetchProjects(sort?: string) {
+    const s = sort || sortBy.value
+    const { data } = await api.get<{ projects: Project[] }>('/projects', { params: { sort: s } })
     projects.value = data.projects
   }
 
@@ -29,5 +34,5 @@ export const useProjectStore = defineStore('project', () => {
     currentProject.value = project
   }
 
-  return { currentProject, projects, fetchProjects, createProject, setCurrentProject }
+  return { currentProject, projects, sortBy, fetchProjects, createProject, setCurrentProject }
 })

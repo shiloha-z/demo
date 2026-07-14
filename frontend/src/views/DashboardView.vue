@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore } from '../stores/project'
@@ -13,6 +13,8 @@ const creating = ref(false)
 
 onMounted(() => store.fetchProjects())
 
+watch(() => store.sortBy, () => store.fetchProjects())
+
 async function handleCreate() {
   creating.value = true
   try {
@@ -22,6 +24,17 @@ async function handleCreate() {
   } finally {
     creating.value = false
   }
+}
+
+function onSortChange(e: Event) {
+  store.sortBy = (e.target as HTMLSelectElement).value
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 async function deleteProject(p: any, event: Event) {
@@ -59,10 +72,19 @@ function goProject(p: any) {
         <h1 class="page-title">项目看板</h1>
         <p class="page-desc">管理你的项目和 Agent 工作区</p>
       </div>
-      <button class="btn-primary" @click="dialogVisible = true">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        创建项目
-      </button>
+      <div class="header-actions">
+        <select class="sort-select" :value="store.sortBy" @change="onSortChange">
+          <option value="created_desc">最新创建</option>
+          <option value="created_asc">最早创建</option>
+          <option value="updated_desc">最近修改</option>
+          <option value="name_asc">名称 A-Z</option>
+          <option value="name_desc">名称 Z-A</option>
+        </select>
+        <button class="btn-primary" @click="dialogVisible = true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          创建项目
+        </button>
+      </div>
     </div>
 
     <!-- Stats -->
@@ -97,6 +119,11 @@ function goProject(p: any) {
         <div class="project-card-body">
           <h3 class="project-card-title">{{ p.name }}</h3>
           <p class="project-card-desc">{{ p.description || '暂无描述' }}</p>
+          <div class="project-card-meta">
+            <span>创建者：{{ p.owner_name || '—' }}</span>
+            <span>创建于 {{ formatTime(p.created_at) }}</span>
+            <span>最后修改于 {{ formatTime(p.updated_at) }}</span>
+          </div>
         </div>
         <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
@@ -136,6 +163,14 @@ function goProject(p: any) {
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px; }
 .page-title { font-size: 22px; font-weight: 700; margin: 0; letter-spacing: -0.4px; }
 .page-desc { font-size: 13.5px; color: var(--muted-foreground); margin: 4px 0 0; }
+
+.header-actions { display: flex; align-items: center; gap: 10px; }
+.sort-select {
+  padding: 7px 10px; border: 1px solid var(--surface-border); border-radius: var(--radius-md);
+  background: var(--surface); color: var(--foreground); font-size: 13px;
+  font-family: var(--font-sans); outline: none; cursor: pointer;
+}
+.sort-select:focus { border-color: var(--ring); }
 
 /* ── Buttons ────────────────────────────────────────────────────── */
 .btn-primary {
@@ -188,6 +223,7 @@ function goProject(p: any) {
 .project-card-body { flex: 1; min-width: 0; }
 .project-card-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--foreground); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-card-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); opacity: 0.7; }
 .project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all 0.15s; flex-shrink: 0; }
 .project-card:hover .project-card-arrow { opacity: 1; }
 

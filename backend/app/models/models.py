@@ -49,8 +49,14 @@ class Project(Base):
     description = Column(Text, default="")
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     workspace_path = Column(String(500), default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     owner = relationship("User")
+
+    @property
+    def owner_name(self) -> str:
+        return self.owner.username if self.owner else ""
 
 
 class Agent(Base):
