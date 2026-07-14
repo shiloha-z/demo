@@ -20,6 +20,34 @@ const showNewFolder = ref(false)
 const newFileName = ref('')
 const newFolderName = ref('')
 const creating = ref(false)
+const uploading = ref(false)
+const uploadInput = ref<HTMLInputElement>()
+
+function triggerUpload() { uploadInput.value?.click() }
+
+async function handleUpload(e: Event) {
+  const input = e.target as HTMLInputElement
+  const fileList = input.files
+  if (!fileList || fileList.length === 0 || !selectedProjectId.value) return
+
+  uploading.value = true
+  try {
+    const form = new FormData()
+    for (const f of fileList) {
+      form.append('files', f)
+    }
+    form.append('path', '')
+    await api.post(`/projects/${selectedProjectId.value}/upload`, form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+    ElMessage.success(`${fileList.length} 个文件已上传`)
+    fileTreeRef.value?.loadFiles()
+  } catch { ElMessage.error('上传失败') }
+  finally {
+    uploading.value = false
+    input.value = ''
+  }
+}
 
 // Reset file view when project changes
 watch(() => store.currentProject?.id, () => {
@@ -88,6 +116,10 @@ async function createFolder() {
           <div class="tree-actions">
             <button class="btn-icon" title="新建文件" @click="showNewFile = true">📄</button>
             <button class="btn-icon" title="新建文件夹" @click="showNewFolder = true">📁</button>
+            <button class="btn-icon" title="上传文件" :disabled="uploading" @click="triggerUpload">
+              {{ uploading ? '⏳' : '⬆️' }}
+            </button>
+            <input ref="uploadInput" type="file" multiple style="display:none" @change="handleUpload" />
           </div>
         </div>
         <FileTree ref="fileTreeRef" :project-id="selectedProjectId" @select="handleSelect" />

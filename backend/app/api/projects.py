@@ -1,6 +1,7 @@
 import os, shutil
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
+from typing import List
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
@@ -165,14 +166,41 @@ def create_folder(
 
 
 @router.post("/{project_id}/upload")
-async def upload_file(
+async def upload_files(
     project_id: int,
-    path: str = Query(default=""),
+    files: List[UploadFile] = File(...),
+    path: str = Form(default=""),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Upload endpoint placeholder — file content via multipart in next iteration."""
-    return {"message": "Use POST /{project_id}/file to create files"}
+    """Upload one or more files into the project workspace."""
+    workspace = _get_workspace(project_id, user, db)
+    uploaded = []
+
+    for file in files:
+        dir_part = path if path else ""
+        filename = file.filename or "untitled"
+        target_path = f"{dir_part}/{filename}".lstrip("/") if dir_part else filename
+
+        # Sanitize
+        full_path = os.path.normpath(os.path.join(workspace, target_path))
+        if not full_path.startswith(os.path.normpath(workspace) + os.sep) and full_path != os.path.normpath(workspace):
+            raise HTTPException(status_code=400, detail=f"Invalid path: {target_path}")
+
+        content = await file.read()
+        try:
+            decoded = content.decode("utf-8")
+        except UnicodeDecodeError:
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, "wb") as f:
+                f.write(content)
+        else:
+            git.write_file(workspace, target_path, decoded)
+
+        uploaded.append({"path": target_path, "filename": filename})
+
+    _touch_project(db, project_id)
+    return {"files": uploaded, "message": f"{len(uploaded)} file(s) uploaded"}
 
 
 # ── Project detail + delete ─────────────────────────────────────────

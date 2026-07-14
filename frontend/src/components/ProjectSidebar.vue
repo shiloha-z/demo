@@ -1,16 +1,44 @@
 <script setup lang="ts">
-import { computed, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProjectStore } from '../stores/project'
+import { useWebSocketStore } from '../stores/websocket'
+import api from '../api'
 
 const route = useRoute()
 const store = useProjectStore()
+const wsStore = useWebSocketStore()
+
+const pendingCount = ref(0)
+
+async function fetchPendingCount() {
+  const pid = store.currentProject?.id
+  if (!pid) { pendingCount.value = 0; return }
+  try {
+    const { data } = await api.get('/reviews/pending-count', { params: { project_id: pid } })
+    pendingCount.value = data.count
+  } catch { /* ignore */ }
+}
 
 onMounted(async () => {
   try {
     if (store.projects.length === 0) await store.fetchProjects()
   } catch { /* backend may not be ready yet */ }
+  fetchPendingCount()
 })
+
+// Refetch when project changes
+watch(() => store.currentProject?.id, () => fetchPendingCount())
+
+// Listen for WebSocket review_update events
+let unsubReview: (() => void) | null = null
+watch(() => wsStore.connected, (ok) => {
+  if (ok) {
+    unsubReview = wsStore.on('review_update', () => fetchPendingCount())
+  }
+}, { immediate: true })
+
+onUnmounted(() => { unsubReview?.() })
 
 const selectedProjectId = computed({
   get: () => store.currentProject?.id ?? null,
@@ -33,7 +61,7 @@ const sections = [
     items: [
       { path: '/agents',  icon: 'bot',   label: 'Agent 池' },
       { path: '/tasks',   icon: 'list',  label: '任务列表' },
-      { path: '/reviews', icon: 'check', label: '审查记录' },
+      { path: '/reviews', icon: 'check', label: '审查记录', badge: true },
     ],
   },
   {
@@ -79,6 +107,7 @@ const icons: Record<string, string> = {
       >
         <span class="nav-icon" v-html="icons[item.icon]"></span>
         <span class="nav-label">{{ item.label }}</span>
+        <span v-if="item.badge && pendingCount > 0" class="nav-badge">{{ pendingCount }}</span>
       </router-link>
     </div>
   </nav>
@@ -131,6 +160,7 @@ const icons: Record<string, string> = {
   font-weight: 500;
   transition: all 0.12s;
   cursor: pointer;
+  position: relative;
 }
 
 .nav-item:hover {
@@ -160,5 +190,16 @@ const icons: Record<string, string> = {
 
 .nav-label {
   line-height: 1;
+}
+
+/* ── Badge ─────────────────────────────────── */
+.nav-badge {
+  margin-left: auto;
+  min-width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: oklch(0.577 0.245 27); /* red */
+  color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 1;
+  border-radius: 9px; padding: 0 5px;
 }
 </style>

@@ -221,13 +221,84 @@ def diff_vs_master(workspace: str) -> str:
         return get_diff(workspace)
 
 
-# ── File operations ───────────────────────────────────────────────────
+# ── File operations (always read from master branch) ───────────────────
 
 _EXCLUDED = {".git", "__pycache__", "node_modules", ".venv", "dist"}
 
+# Cache the base branch name per repo (it doesn't change during a session)
+_BASE_BRANCH: dict[str, str] = {}
+
+
+def _get_base_branch(repo: Repo) -> str:
+    """Resolve the base branch name (master or main). Cache per repo."""
+    path = repo.working_dir
+    if path not in _BASE_BRANCH:
+        for candidate in ["master", "main"]:
+            try:
+                repo.git.rev_parse(candidate)
+                _BASE_BRANCH[path] = candidate
+                break
+            except GitCommandError:
+                continue
+        else:
+            _BASE_BRANCH[path] = "master"
+    return _BASE_BRANCH[path]
+
 
 def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
-    """Recursively list files in workspace. Returns tree nodes."""
+    """List files from the master branch (not working tree)."""
+    repo = get_repo(workspace)
+    base = _get_base_branch(repo) if repo else "master"
+
+    # Use git ls-tree for directory listing from the base branch
+    if repo:
+        try:
+            return _list_from_git(repo, base, subpath)
+        except Exception:
+            pass  # fallback to filesystem
+
+    # Filesystem fallback (when repo is unavailable)
+    return _list_from_fs(workspace, subpath)
+
+
+def _list_from_git(repo: Repo, base: str, subpath: str) -> list[dict[str, Any]]:
+    """List files using git ls-tree from a specific branch."""
+    nodes: list[dict] = []
+    prefix = f"{subpath}/" if subpath else ""
+
+    try:
+        tree_ref = f"{base}:{subpath}" if subpath else base
+        output = repo.git.ls_tree(tree_ref)
+    except GitCommandError:
+        return []
+
+    for line in output.strip().split("\n"):
+        if not line:
+            continue
+        # Format: "<mode> <type> <hash>\t<name>"
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        entry_type = parts[1]  # "tree" or "blob"
+        name = line.split("\t", 1)[1] if "\t" in line else parts[3]
+        if name in _EXCLUDED:
+            continue
+
+        path = f"{prefix}{name}"
+        node: dict = {
+            "name": name,
+            "path": path,
+            "type": "dir" if entry_type == "tree" else "file",
+        }
+        if entry_type == "tree":
+            node["children"] = _list_from_git(repo, base, path)
+        nodes.append(node)
+
+    return nodes
+
+
+def _list_from_fs(workspace: str, subpath: str) -> list[dict[str, Any]]:
+    """Filesystem-based file listing (fallback)."""
     target = _verify_safe_path(workspace, subpath or ".")
     nodes: list[dict] = []
 
@@ -250,7 +321,7 @@ def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
             "type": "dir" if is_dir else "file",
         }
         if is_dir:
-            node["children"] = list_files(workspace, rel)
+            node["children"] = _list_from_fs(workspace, rel)
         else:
             node["size"] = os.path.getsize(full)
         nodes.append(node)
@@ -259,8 +330,23 @@ def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
 
 
 def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024) -> str:
-    """Read a file's content. Limits to max_size bytes."""
+    """Read file content from the master branch (not working tree)."""
+    repo = get_repo(workspace)
+    base = _get_base_branch(repo) if repo else "master"
+
+    if repo:
+        try:
+            content = repo.git.show(f"{base}:{filepath}")
+            if len(content) > max_size * 2:
+                return f"// File too large ({len(content)} chars, max {max_size * 2})"
+            return content[:max_size]
+        except GitCommandError:
+            pass  # fallback to filesystem
+
+    # Filesystem fallback
     target = _verify_safe_path(workspace, filepath)
+    if not os.path.isfile(target):
+        raise FileNotFoundError(f"File not found: {filepath}")
     size = os.path.getsize(target)
     if size > max_size * 2:
         return f"// File too large ({size} bytes, max {max_size * 2})"

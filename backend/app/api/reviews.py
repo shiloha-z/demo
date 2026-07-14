@@ -93,3 +93,16 @@ def reject_review(
         git.delete_branch(proj.workspace_path, branch_name)
 
     return {"message": "Rejected"}
+
+
+@router.get("/reviews/pending-count")
+def pending_review_count(
+    project_id: int | None = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return count of pending reviews, optionally scoped to a project."""
+    q = db.query(Review).filter(Review.status == ReviewStatus.PENDING)
+    if project_id is not None:
+        q = q.filter(Review.project_id == project_id)
+    return {"count": q.count()}
