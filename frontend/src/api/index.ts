@@ -6,6 +6,9 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+// Track whether we're already handling a 401 to prevent loops
+let handling401 = false
+
 // Request interceptor – attach JWT token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
@@ -19,9 +22,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !handling401) {
+      handling401 = true
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      // Use location.href only if not already on login page
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = '/login'
+      }
+      // Reset the flag after a delay (page will reload before this if redirecting)
+      setTimeout(() => { handling401 = false }, 1000)
     }
     return Promise.reject(error)
   }

@@ -48,14 +48,21 @@ def run_agent_pipeline(task_id: int):
             db.commit()
             broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
 
+        # ── Branch isolation: create task branch ──────────────────────
+        branch_name = f"task/{task.id}"
+        git.create_branch(project.workspace_path, branch_name)
+
         crew = build_crew(project.workspace_path, model_name)
         result = crew.kickoff(inputs={"task_description": task.description or task.title})
 
         # Extract the final output (summarizer's report)
         summary = str(result) if result else ""
 
-        # Get diff
-        diff = git.get_diff(project.workspace_path)
+        # Commit changes on task branch (so they survive branch switches)
+        git.commit(project.workspace_path, f"Task #{task.id} — agent changes")
+
+        # Get diff — only this task's changes vs master
+        diff = git.diff_vs_master(project.workspace_path)
         if not diff:
             diff = "# No code changes detected"
 
@@ -69,6 +76,9 @@ def run_agent_pipeline(task_id: int):
         db.add(review)
         db.commit()
         db.refresh(review)
+
+        # Switch back to master — keep working tree clean for file manager
+        git.switch_branch(project.workspace_path, "master")
 
         # Push review created
         broadcast_sync("review_update", {
@@ -107,7 +117,6 @@ def _fail_task(db, task: Task, error: str):
     agent = db.query(Agent).get(task.agent_id)
     if agent:
         agent.status = AgentStatus.IDLE
-    # Store the error as a review with empty diff
     review = Review(
         task_id=task.id,
         project_id=task.project_id,
@@ -116,6 +125,11 @@ def _fail_task(db, task: Task, error: str):
     )
     db.add(review)
     db.commit()
+
+    # Switch back to master
+    project = db.query(Project).get(task.project_id)
+    if project and project.workspace_path:
+        git.switch_branch(project.workspace_path, "master")
 
     broadcast_sync("task_update", {"id": task.id, "project_id": task.project_id, "status": "failed"})
     broadcast_sync("agent_update", {"id": task.agent_id, "status": "idle"})

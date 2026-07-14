@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from git import Repo, GitCommandError
+from git import Repo, GitCommandError, InvalidGitRepositoryError
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -19,12 +19,24 @@ def _verify_safe_path(workspace: str, target: str) -> str:
 # ── Git operations ────────────────────────────────────────────────────
 
 def init_repo(path: str) -> Repo:
-    """Initialize a git repository at path."""
+    """Initialize a git repository at path with an initial commit on master."""
     os.makedirs(path, exist_ok=True)
     try:
         return Repo(path)
-    except GitCommandError:
-        return Repo.init(path)
+    except (GitCommandError, InvalidGitRepositoryError):
+        repo = Repo.init(path)
+        # Create an initial commit so master branch exists
+        readme = os.path.join(path, "README.md")
+        with open(readme, "w", encoding="utf-8") as f:
+            f.write("# Project Workspace\n")
+        repo.git.add(A=True)
+        try:
+            repo.index.commit("Initial commit")
+            # Explicitly create master branch pointing to this commit
+            repo.git.branch("-M", "master")
+        except Exception:
+            pass  # may fail if git config missing; acceptable
+        return repo
 
 
 def get_repo(workspace: str) -> Repo | None:
@@ -91,6 +103,122 @@ def rollback(workspace: str, commit_hash: str) -> bool:
         return True
     except GitCommandError:
         return False
+
+
+# ── Branch operations (for per-task isolation) ────────────────────────
+
+def create_branch(workspace: str, branch_name: str) -> bool:
+    """Create and switch to a new branch from master. Creates master if needed."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        # Delete stale branch with same name if exists
+        try:
+            repo.git.branch("-D", branch_name)
+        except GitCommandError:
+            pass
+        # Find or create the base branch (master/main)
+        base = None
+        for candidate in ["master", "main"]:
+            try:
+                repo.git.rev_parse(candidate)
+                base = candidate
+                break
+            except GitCommandError:
+                continue
+        if base:
+            repo.git.checkout("-f", base)
+        else:
+            # No base branch exists — rename current branch to master
+            try:
+                repo.git.branch("-M", "master")
+                base = "master"
+            except GitCommandError:
+                pass
+        repo.git.checkout("-b", branch_name)
+        return True
+    except GitCommandError:
+        return False
+
+
+def switch_branch(workspace: str, branch_name: str) -> bool:
+    """Switch to an existing branch (force — discards uncommitted changes)."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        repo.git.checkout("-f", branch_name)
+        return True
+    except GitCommandError:
+        return False
+
+
+def merge_branch(workspace: str, source_branch: str, target_branch: str = "master") -> bool:
+    """Merge source_branch into target_branch. Force-switches to target first."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        # Switch to target (force — discard any uncommitted changes on current branch)
+        try:
+            repo.git.checkout("-f", target_branch)
+        except GitCommandError:
+            try:
+                repo.git.checkout("-f", "main")
+                target_branch = "main"
+            except GitCommandError:
+                return False
+        # Merge
+        repo.git.merge(source_branch)
+        return True
+    except GitCommandError:
+        # Abort merge on conflict
+        try:
+            repo.git.merge("--abort")
+        except GitCommandError:
+            pass
+        return False
+
+
+def delete_branch(workspace: str, branch_name: str) -> bool:
+    """Force-delete a branch."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        repo.git.branch("-D", branch_name)
+        return True
+    except GitCommandError:
+        return False
+
+
+def diff_vs_master(workspace: str) -> str:
+    """Get diff of all changes on current branch vs master.
+
+    Stages everything, then diffs against the base branch.
+    This captures all work the agent did on its task branch,
+    including new (untracked) files.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return ""
+    # Find the base branch
+    base = "master"
+    try:
+        repo.git.rev_parse("master")
+    except GitCommandError:
+        try:
+            repo.git.rev_parse("main")
+            base = "main"
+        except GitCommandError:
+            return get_diff(workspace)
+    try:
+        # Stage everything first so new files show up in diff
+        repo.git.add(A=True)
+        return repo.git.diff("--cached", base)
+    except GitCommandError:
+        return get_diff(workspace)
 
 
 # ── File operations ───────────────────────────────────────────────────

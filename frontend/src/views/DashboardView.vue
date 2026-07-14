@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useProjectStore } from '../stores/project'
+import api from '../api'
 
 const store = useProjectStore()
 const router = useRouter()
@@ -19,6 +21,27 @@ async function handleCreate() {
     newProject.value = { name: '', description: '' }
   } finally {
     creating.value = false
+  }
+}
+
+async function deleteProject(p: any, event: Event) {
+  event.stopPropagation()
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除项目「${p.name}」吗？\n\n此操作将删除项目下的所有任务、审查记录和版本历史，且不可撤销。`,
+      '确认删除',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  try {
+    await api.delete(`/projects/${p.id}`)
+    ElMessage.success(`项目「${p.name}」已删除`)
+    await store.fetchProjects()
+    if (store.currentProject?.id === p.id) store.setCurrentProject(null)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '删除失败')
   }
 }
 
@@ -75,6 +98,9 @@ function goProject(p: any) {
           <h3 class="project-card-title">{{ p.name }}</h3>
           <p class="project-card-desc">{{ p.description || '暂无描述' }}</p>
         </div>
+        <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+        </button>
         <svg class="project-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
       </article>
     </div>
@@ -164,6 +190,15 @@ function goProject(p: any) {
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all 0.15s; flex-shrink: 0; }
 .project-card:hover .project-card-arrow { opacity: 1; }
+
+.btn-delete {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; opacity: 0; transition: all 0.15s;
+}
+.project-card:hover .btn-delete { opacity: 1; }
+.btn-delete:hover { background: oklch(0.577 0.245 27 / 0.1); color: var(--danger); }
 
 /* ── Empty state ────────────────────────────────────────────────── */
 .empty-card {

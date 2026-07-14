@@ -1,4 +1,4 @@
-import os
+import os, shutil
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project
+from app.models.models import User, Project, Task, Review, Version
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -152,7 +152,7 @@ async def upload_file(
     return {"message": "Use POST /{project_id}/file to create files"}
 
 
-# ── Project detail (MUST be after /{project_id}/* routes) ──
+# ── Project detail + delete ─────────────────────────────────────────
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
@@ -160,3 +160,27 @@ def get_project(project_id: int, db: Session = Depends(get_db), user: User = Dep
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return ProjectResponse.model_validate(project)
+
+
+@router.delete("/{project_id}")
+def delete_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Delete a project. Only the owner can delete it."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="只有项目创建者才能删除项目")
+
+    # Delete associated records
+    db.query(Review).filter(Review.project_id == project_id).delete()
+    db.query(Version).filter(Version.project_id == project_id).delete()
+    db.query(Task).filter(Task.project_id == project_id).delete()
+
+    # Remove workspace directory
+    if project.workspace_path and os.path.isdir(project.workspace_path):
+        shutil.rmtree(project.workspace_path, ignore_errors=True)
+
+    db.delete(project)
+    db.commit()
+
+    return {"message": f"项目「{project.name}」已删除"}

@@ -82,15 +82,23 @@ manager = ConnectionManager()
 
 
 def broadcast_sync(event_type: str, data: dict) -> None:
-    """Sync wrapper for background threads (e.g. agent_runner).
+    """Thread-safe broadcast. Works from both main thread and background threads.
 
-    Uses the main event loop to send to all WebSocket clients.
-    Safe to call from any thread.
+    - Main thread (request handlers): schedules on the running loop directly
+    - Background thread (agent_runner): uses run_coroutine_threadsafe
     """
     try:
+        loop = asyncio.get_running_loop()
+        # We're on the main event loop — don't block, just schedule
+        loop.create_task(manager._broadcast_async(event_type, data))
+    except RuntimeError:
+        # Background thread — schedule on main loop and wait briefly
         fut = manager.broadcast(event_type, data)
         if fut:
-            fut.result(timeout=5)
+            try:
+                fut.result(timeout=10)
+            except Exception:
+                pass
     except Exception:
         logger.exception(f"WS broadcast failed: {event_type}")
 

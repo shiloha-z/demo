@@ -35,8 +35,8 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router)
-app.include_router(versions_router)  # before projects — /{project_id}/versions must match before /{project_id}
 app.include_router(projects_router)
+app.include_router(versions_router)
 app.include_router(agents_router)
 app.include_router(tasks_router)
 app.include_router(tasks_global_router)

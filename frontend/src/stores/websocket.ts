@@ -60,14 +60,19 @@ export const useWebSocketStore = defineStore('websocket', () => {
       } catch { /* ignore malformed JSON */ }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       connected.value = false
       cleanupTimers()
+      // Don't reconnect on auth failure (1008) or normal closure (1000)
+      if (event.code === 1008 || event.code === 1000) {
+        reconnectAttempts = maxReconnectAttempts // prevent reconnect
+        return
+      }
       scheduleReconnect()
     }
 
     ws.onerror = () => {
-      // onclose will fire after this, triggering reconnect
+      // onclose will fire after this
       ws?.close()
     }
   }

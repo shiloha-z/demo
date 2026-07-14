@@ -7,7 +7,9 @@ const route = useRoute()
 const store = useProjectStore()
 
 onMounted(async () => {
-  if (store.projects.length === 0) await store.fetchProjects()
+  try {
+    if (store.projects.length === 0) await store.fetchProjects()
+  } catch { /* backend may not be ready yet */ }
 })
 
 const selectedProjectId = computed({

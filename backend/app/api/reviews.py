@@ -50,17 +50,22 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
     review.status = ReviewStatus.APPROVED
     db.commit()
 
-    # Commit to git
-    project = review.project_id
+    # Merge task branch → master, then commit
     from app.models.models import Project
-    proj = db.query(Project).get(project)
+    proj = db.query(Project).get(review.project_id)
     if proj and proj.workspace_path:
-        commit_hash = git.commit(proj.workspace_path, f"Review #{review_id} approved")
-        if commit_hash:
-            v = Version(project_id=project, commit_hash=commit_hash,
-                        commit_message=f"Review #{review_id} approved", review_id=review.id)
-            db.add(v)
-            db.commit()
+        branch_name = f"task/{review.task_id}"
+        # 1. Merge task branch into master (agent already committed on the branch)
+        merged = git.merge_branch(proj.workspace_path, branch_name)
+        if merged:
+            commit_hash = git.commit(proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})")
+            if commit_hash:
+                v = Version(project_id=review.project_id, commit_hash=commit_hash,
+                            commit_message=f"Review #{review_id} approved", review_id=review.id)
+                db.add(v)
+                db.commit()
+        # 2. Clean up the task branch
+        git.delete_branch(proj.workspace_path, branch_name)
 
     return {"message": "Approved"}
 
@@ -78,4 +83,13 @@ def reject_review(
     review.status = ReviewStatus.REJECTED
     review.human_feedback = feedback
     db.commit()
+
+    # Switch back to master and delete the task branch
+    from app.models.models import Project
+    proj = db.query(Project).get(review.project_id)
+    if proj and proj.workspace_path:
+        branch_name = f"task/{review.task_id}"
+        git.switch_branch(proj.workspace_path, "master")
+        git.delete_branch(proj.workspace_path, branch_name)
+
     return {"message": "Rejected"}

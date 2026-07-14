@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
@@ -73,6 +74,26 @@ async function selectTask(task: any) {
   } finally {
     loadingDetail.value = false
   }
+}
+
+async function approveReview() {
+  if (!taskDetail.value?.review) return
+  try {
+    await api.post(`/reviews/${taskDetail.value.review.id}/approve`)
+    ElMessage.success('审查已通过，已提交到 Git')
+    if (selectedTask.value) await selectTask(selectedTask.value)
+    await loadTasks()
+  } catch { ElMessage.error('操作失败') }
+}
+
+async function rejectReview() {
+  if (!taskDetail.value?.review) return
+  try {
+    await api.post(`/reviews/${taskDetail.value.review.id}/reject`)
+    ElMessage.warning('审查已驳回')
+    if (selectedTask.value) await selectTask(selectedTask.value)
+    await loadTasks()
+  } catch { ElMessage.error('操作失败') }
 }
 
 function formatDate(d: string) {
@@ -184,6 +205,10 @@ function renderMarkdown(text: string) {
                 <span class="review-status-badge" :style="{ color: reviewStatusColors[taskDetail.review.status] }">
                   {{ reviewStatusLabels[taskDetail.review.status] || taskDetail.review.status }}
                 </span>
+                <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
+                  <button class="btn-reject-sm" @click="rejectReview">驳回</button>
+                  <button class="btn-approve-sm" @click="approveReview">通过</button>
+                </div>
               </div>
 
               <!-- Diff -->
@@ -285,9 +310,21 @@ function renderMarkdown(text: string) {
 
 .detail-section { margin-bottom: 20px; }
 .detail-label { font-size: 12px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-.detail-label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.detail-label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .detail-label-row .detail-label { margin: 0; }
 .review-status-badge { font-size: 12px; font-weight: 700; }
+
+.review-actions { display: flex; gap: 6px; margin-left: auto; }
+.btn-approve-sm {
+  padding: 5px 12px; border-radius: var(--radius-md); border: none;
+  background: var(--success); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.btn-approve-sm:hover { opacity: 0.85; }
+.btn-reject-sm {
+  padding: 5px 12px; border-radius: var(--radius-md); border: none;
+  background: oklch(0.577 0.245 27 / 0.1); color: var(--danger); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.btn-reject-sm:hover { background: oklch(0.577 0.245 27 / 0.18); }
 
 .desc-box {
   background: var(--surface); border: 1px solid var(--surface-border);

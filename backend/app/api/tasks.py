@@ -136,19 +136,10 @@ def create_task(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    # ── Conflict guards ──────────────────────────────────────────────
-    # 1. Agent must be idle
+    # ── Conflict guard ───────────────────────────────────────────────
+    # Agent must be idle (one agent can only run one task at a time)
     if agent.status == AgentStatus.WORKING:
         raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
-
-    # 2. Project must not have a running task
-    running_in_project = (
-        db.query(Task)
-        .filter(Task.project_id == project_id, Task.status.in_([TaskStatus.PENDING, TaskStatus.RUNNING]))
-        .first()
-    )
-    if running_in_project:
-        raise HTTPException(status_code=409, detail=f"项目已有任务 (#{running_in_project.id}) 正在执行，请等待完成")
 
     task = Task(
         agent_id=req.agent_id,
