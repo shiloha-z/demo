@@ -19,6 +19,9 @@ dist/
 # Workspace (runtime data)
 workspaces/
 
+# Reference projects
+references/
+
 # OS
 Thumbs.db
 .DS_Store

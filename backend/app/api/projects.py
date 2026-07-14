@@ -1,0 +1,162 @@
+import os
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.core.config import settings
+from app.core.auth import get_current_user
+from app.models.models import User, Project
+from app.services import git_service as git
+
+router = APIRouter(prefix="/api/projects", tags=["Projects"])
+
+
+# ── Schemas ───────────────────────────────────────────────────────────
+
+class ProjectCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str = Field(default="")
+
+
+class ProjectResponse(BaseModel):
+    id: int
+    name: str
+    description: str
+    owner_id: int
+    workspace_path: str
+
+    class Config:
+        from_attributes = True
+
+
+class ProjectListResponse(BaseModel):
+    projects: list[ProjectResponse]
+
+
+# ── Helper ────────────────────────────────────────────────────────────
+
+def _get_workspace(project_id: int, user: User, db: Session) -> str:
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.owner_id == user.id
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not project.workspace_path:
+        raise HTTPException(status_code=400, detail="Workspace not initialized")
+    return project.workspace_path
+
+
+# ── Project CRUD ──────────────────────────────────────────────────────
+
+@router.get("", response_model=ProjectListResponse)
+def list_projects(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    projects = db.query(Project).filter(Project.owner_id == user.id).all()
+    return ProjectListResponse(projects=[ProjectResponse.model_validate(p) for p in projects])
+
+
+@router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
+def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    project = Project(name=req.name, description=req.description, owner_id=user.id)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+
+    workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, str(project.id)))
+    project.workspace_path = workspace
+    db.commit()
+
+    os.makedirs(workspace, exist_ok=True)
+    try:
+        from git import Repo
+        Repo.init(workspace)
+    except Exception:
+        pass
+
+    return ProjectResponse.model_validate(project)
+
+
+# ── File management (MUST be before /{project_id}) ────────────────────
+
+@router.get("/{project_id}/files")
+def file_tree(
+    project_id: int,
+    path: str = Query(default=""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    workspace = _get_workspace(project_id, user, db)
+    try:
+        nodes = git.list_files(workspace, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"files": nodes}
+
+
+@router.get("/{project_id}/file")
+def read_file(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    workspace = _get_workspace(project_id, user, db)
+    try:
+        content = git.read_file(workspace, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"path": path, "content": content}
+
+
+@router.post("/{project_id}/file")
+def create_file(
+    project_id: int,
+    path: str = Query(...),
+    content: str = Query(default=""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    workspace = _get_workspace(project_id, user, db)
+    try:
+        target = git.write_file(workspace, path, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"path": path, "message": "File created"}
+
+
+@router.post("/{project_id}/folder")
+def create_folder(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    workspace = _get_workspace(project_id, user, db)
+    try:
+        target = git.create_folder(workspace, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"path": path, "message": "Folder created"}
+
+
+@router.post("/{project_id}/upload")
+async def upload_file(
+    project_id: int,
+    path: str = Query(default=""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Upload endpoint placeholder — file content via multipart in next iteration."""
+    return {"message": "Use POST /{project_id}/file to create files"}
+
+
+# ── Project detail (MUST be after /{project_id}/* routes) ──
+
+@router.get("/{project_id}", response_model=ProjectResponse)
+def get_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == user.id).first()
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return ProjectResponse.model_validate(project)

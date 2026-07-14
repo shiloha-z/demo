@@ -60,8 +60,8 @@ class Agent(Base):
     creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     name = Column(String(100), nullable=False)
     role = Column(String(100), nullable=False)       # code_gen / reviewer / security
+    model = Column(String(100), default="deepseek-chat")  # LLM model name
     system_prompt = Column(Text, default="")
-    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
 
     creator = relationship("User", back_populates="agents")

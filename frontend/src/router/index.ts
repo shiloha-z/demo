@@ -4,6 +4,12 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     {
+      path: '/login',
+      name: 'Login',
+      component: () => import('../views/LoginView.vue'),
+      meta: { guest: true },
+    },
+    {
       path: '/',
       redirect: '/dashboard',
     },
@@ -33,6 +39,18 @@ const router = createRouter({
       component: () => import('../views/VersionHistoryView.vue'),
     },
   ],
+})
+
+// Auth guard
+router.beforeEach((to) => {
+  const token = localStorage.getItem('token')
+  if (to.meta.guest) {
+    // Already logged in → go to dashboard
+    if (token) return '/dashboard'
+  } else {
+    // Not logged in → go to login
+    if (!token) return '/login'
+  }
 })
 
 export default router

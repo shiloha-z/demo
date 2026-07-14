@@ -1,77 +1,174 @@
 <script setup lang="ts">
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from './stores/auth'
 import ProjectSidebar from './components/ProjectSidebar.vue'
+
+const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
+
+const isLoginPage = computed(() => route.meta.guest === true)
+
+function handleLogout() {
+  auth.logout()
+  router.push('/login')
+}
 </script>
 
 <template>
-  <el-container class="app-container">
-    <!-- Top Navigation -->
-    <el-header class="app-header">
-      <div class="header-left">
-        <span class="header-logo">🤖 多 Agent 协作审查平台</span>
-      </div>
-      <div class="header-right">
-        <el-tag size="small" type="info">未登录</el-tag>
-      </div>
-    </el-header>
+  <!-- Login page: full-screen, no chrome -->
+  <router-view v-if="isLoginPage" />
 
-    <el-container class="app-body">
-      <!-- Left Sidebar -->
-      <el-aside class="app-sidebar" width="220px">
-        <ProjectSidebar />
-      </el-aside>
+  <!-- Main app: sidebar + inset layout -->
+  <div v-else class="app-root">
+    <aside class="app-sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-logo">🤖</span>
+        <span class="sidebar-title">AgentCollab</span>
+      </div>
+      <ProjectSidebar />
+      <div class="sidebar-footer">
+        <div class="sidebar-user">
+          <span class="user-avatar">{{ auth.displayName?.charAt(0) || '?' }}</span>
+          <div class="user-info">
+            <div class="user-name">{{ auth.displayName }}</div>
+            <div class="user-role">开发者</div>
+          </div>
+        </div>
+        <button class="logout-btn" title="退出登录" @click="handleLogout">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+    </aside>
 
-      <!-- Main Content -->
-      <el-main class="app-main">
-        <router-view />
-      </el-main>
-    </el-container>
-  </el-container>
+    <main class="app-main">
+      <router-view />
+    </main>
+  </div>
 </template>
 
+<style>
+@import './styles/tokens.css';
+</style>
+
 <style scoped>
-.app-container {
-  height: 100vh;
+.app-root {
   display: flex;
-  flex-direction: column;
+  height: 100vh;
+  background: var(--app-shell);
+  font-family: var(--font-sans);
+  color: var(--foreground);
 }
 
-.app-header {
+/* ── Sidebar ────────────────────────────────────────────────────── */
+.app-sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--app-shell);
+  border-right: 1px solid var(--surface-border);
+  user-select: none;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.sidebar-logo {
+  font-size: 22px;
+  line-height: 1;
+}
+
+.sidebar-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--foreground);
+  letter-spacing: -0.3px;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--surface-border);
+  padding: 12px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: #1a1a2e;
-  border-bottom: 1px solid #333;
-  padding: 0 20px;
-  height: 56px;
+  gap: 10px;
 }
 
-.header-logo {
-  color: #e0e0e0;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-
-.header-right {
+.sidebar-user {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.app-body {
+  gap: 10px;
+  min-width: 0;
   flex: 1;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  background: var(--surface-selected);
+  color: var(--secondary-foreground);
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.user-info {
+  min-width: 0;
+}
+
+.user-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--foreground);
+  line-height: 1.2;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.app-sidebar {
-  background: #f5f7fa;
-  border-right: 1px solid #e4e7ed;
-  overflow-y: auto;
+.user-role {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  line-height: 1.3;
 }
 
+.logout-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.logout-btn:hover {
+  background: var(--surface-hover);
+  color: var(--danger);
+}
+
+/* ── Main content ───────────────────────────────────────────────── */
 .app-main {
-  background: #fff;
+  flex: 1;
   overflow-y: auto;
-  padding: 24px;
+  background: var(--page-canvas);
+  padding: 28px 32px;
 }
 </style>
