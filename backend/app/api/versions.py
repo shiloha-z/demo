@@ -84,9 +84,32 @@ def rollback_version(
     if not target:
         raise HTTPException(status_code=404, detail="Version not found")
 
-    ok = git.rollback(project.workspace_path, target.commit_hash)
-    if not ok:
+    new_hash = git.rollback(
+        project.workspace_path,
+        target.commit_hash,
+        message=f"Revert to {target.commit_hash[:7]}",
+    )
+    if not new_hash:
         raise HTTPException(status_code=500, detail="Git rollback failed")
+
+    # Record this rollback as a new auditable version entry — but only when a
+    # real new commit was created (skip no-op rollbacks to the current version).
+    if new_hash != target.commit_hash:
+        rollback_version = Version(
+            project_id=project_id,
+            commit_hash=new_hash,
+            commit_message=f"Revert to {target.commit_hash[:7]}",
+            review_id=target.review_id,
+        )
+        db.add(rollback_version)
+        db.commit()
+
+    # Notify the frontend to refresh the file tree.
+    try:
+        from app.api.ws import broadcast_sync
+        broadcast_sync("file_change", {"project_id": project_id})
+    except Exception:
+        pass
 
     return RollbackResponse(
         success=True,

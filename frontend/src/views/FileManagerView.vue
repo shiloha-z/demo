@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useProjectStore } from '../stores/project'
+import { useWebSocketStore } from '../stores/websocket'
 import FileTree from '../components/FileTree.vue'
 import MonacoEditor from '../components/MonacoEditor.vue'
 import api, { getErrorMessage } from '../api'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 
 const store = useProjectStore()
+const wsStore = useWebSocketStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree>>()
 
 const selectedProjectId = computed(() => store.currentProject?.id ?? null)
@@ -46,6 +48,20 @@ watch(() => store.currentProject?.id, () => {
   selectedFile.value = ''
   fileContent.value = ''
 }, { immediate: true })
+
+// Refresh the file tree when the backend reports a change to this project
+// (e.g. after a version rollback or an approved review merge).
+let unsubFileChange: (() => void) | null = null
+onMounted(() => {
+  unsubFileChange = wsStore.on('file_change', (data: any) => {
+    if (data?.project_id && data.project_id === selectedProjectId.value) {
+      fileTreeRef.value?.loadFiles()
+    }
+  })
+})
+onUnmounted(() => {
+  unsubFileChange?.()
+})
 
 async function handleSelect(path: string) {
   if (!selectedProjectId.value) return

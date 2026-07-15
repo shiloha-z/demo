@@ -66,7 +66,14 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         # 1. Merge task branch into master (agent already committed on the branch)
         merged = git.merge_branch(proj.workspace_path, branch_name)
         if merged:
-            commit_hash = git.commit(proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})")
+            # A fast-forward merge leaves no uncommitted changes, so the
+            # normal `commit()` returns None. Fall back to an empty auditable
+            # commit so a Version record is always created for the approval.
+            commit_hash = git.commit(
+                proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})"
+            ) or git.commit_allow_empty(
+                proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})"
+            )
             if commit_hash:
                 v = Version(project_id=review.project_id, commit_hash=commit_hash,
                             commit_message=f"Review #{review_id} approved", review_id=review.id)

@@ -67,6 +67,23 @@ def commit(workspace: str, message: str) -> str | None:
     return c.hexsha
 
 
+def commit_allow_empty(workspace: str, message: str) -> str | None:
+    """Create an empty commit (used as an auditable marker, e.g. an approval).
+
+    Unlike `commit()`, this always succeeds even when there are no file
+    changes, so callers can guarantee a new commit hash is produced.
+    Returns the new commit hash, or None on failure.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return None
+    try:
+        repo.git.commit("--allow-empty", "-m", message)
+        return repo.head.commit.hexsha
+    except GitCommandError:
+        return None
+
+
 def get_diff(workspace: str) -> str:
     """Return git diff of unstaged + staged changes."""
     repo = get_repo(workspace)
@@ -101,16 +118,74 @@ def commit_history(workspace: str, max_count: int = 50) -> list[dict[str, Any]]:
     return commits
 
 
-def rollback(workspace: str, commit_hash: str) -> bool:
-    """Reset --hard to a commit. Returns True on success."""
+def rollback(workspace: str, commit_hash: str, message: str | None = None) -> str | None:
+    """Revert the workspace to a past commit in an *auditable* way.
+
+    Strategy:
+      1. Make sure we are on the base branch (master/main) — the file tree
+         and version list are read from there.
+      2. Use ``git revert --no-commit <commit>..HEAD`` to undo every commit
+         made AFTER the target, then create ONE new commit capturing the
+         target state. This keeps history linear and fully auditable: you can
+         see exactly when and to which version a rollback happened.
+
+    Falls back to a plain ``reset --hard`` if revert is not applicable
+    (e.g. target is HEAD, or a conflict during revert).
+
+    Returns the new commit hash, or None on failure.
+    """
     repo = get_repo(workspace)
     if not repo:
-        return False
+        return None
+
+    # 1. Ensure we are on the base branch (file tree reads from here).
     try:
-        repo.git.reset("--hard", commit_hash)
-        return True
+        base = _get_base_branch(repo)
+    except Exception:
+        base = "master"
+    try:
+        repo.git.checkout("-f", base)
     except GitCommandError:
-        return False
+        pass
+
+    # 2. Revert every commit after the target.
+    try:
+        repo.git.revert("--no-commit", f"{commit_hash}..HEAD")
+    except GitCommandError:
+        # Nothing to revert (target == HEAD) or conflict → fall back.
+        try:
+            repo.git.revert("--abort")
+        except GitCommandError:
+            pass
+        try:
+            repo.git.reset("--hard", commit_hash)
+            return commit_hash
+        except GitCommandError:
+            return None
+
+    # Revert produced no staged changes (e.g. target was HEAD) → no-op.
+    if not repo.index.diff("HEAD"):
+        try:
+            repo.git.revert("--abort")
+        except GitCommandError:
+            pass
+        return commit_hash
+
+    msg = message or f"Revert to {commit_hash[:7]}"
+    try:
+        c = repo.index.commit(msg)
+        return c.hexsha
+    except Exception:
+        # Commit failed though changes were staged — restore state.
+        try:
+            repo.git.revert("--abort")
+        except GitCommandError:
+            pass
+        try:
+            repo.git.reset("--hard", base)
+        except GitCommandError:
+            pass
+        return None
 
 
 # ── Branch operations (for per-task isolation) ────────────────────────
