@@ -72,27 +72,30 @@ function barColor(status: string): string {
     </div>
     <div class="timeline-list">
       <div v-for="t in tasks" :key="t.id" class="timeline-row">
-        <div class="timeline-left">
+        <!-- Row 1: id + title + status -->
+        <div class="timeline-row-top">
           <span class="timeline-id">#{{ t.id }}</span>
           <span class="timeline-title-text">{{ t.title }}</span>
+          <span class="timeline-status" :style="{ color: statusColors[t.status] || 'var(--muted-foreground)' }">
+            {{ statusLabels[t.status] || t.status }}
+          </span>
         </div>
+        <!-- Row 2: agent + duration + time range -->
+        <div class="timeline-row-mid">
+          <span class="timeline-agent">
+            <span class="role-dot" :style="{ background: roleColors[t.agentRole] || 'var(--muted-foreground)' }" />
+            {{ t.agentName }}
+          </span>
+          <span class="timeline-duration">{{ formatDuration(t.startedAt, t.completedAt) }}</span>
+          <span class="timeline-time">{{ formatTime(t.startedAt) }} → {{ formatTime(t.completedAt) }}</span>
+        </div>
+        <!-- Row 3: bar -->
         <div class="timeline-bar-area">
           <div
             class="timeline-bar"
             :style="{ width: barWidth(t), background: barColor(t.status) }"
             :title="`${t.title} — ${formatDuration(t.startedAt, t.completedAt)}`"
           />
-          <span class="timeline-duration">{{ formatDuration(t.startedAt, t.completedAt) }}</span>
-        </div>
-        <div class="timeline-right">
-          <span class="timeline-agent">
-            <span class="role-dot" :style="{ background: roleColors[t.agentRole] || 'var(--muted-foreground)' }" />
-            {{ t.agentName }}
-          </span>
-          <span class="timeline-status" :style="{ color: statusColors[t.status] || 'var(--muted-foreground)' }">
-            {{ statusLabels[t.status] || t.status }}
-          </span>
-          <span class="timeline-time">{{ formatTime(t.startedAt) }} → {{ formatTime(t.completedAt) }}</span>
         </div>
       </div>
     </div>
@@ -104,7 +107,6 @@ function barColor(status: string): string {
 
 <style scoped>
 .task-timeline {
-  margin-top: 20px;
   background: var(--surface);
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg);
@@ -131,92 +133,56 @@ function barColor(status: string): string {
 }
 
 .timeline-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--surface-border);
   transition: background var(--transition-fast);
+  display: flex; flex-direction: column; gap: 5px;
 }
 .timeline-row:last-child { border-bottom: none; }
 .timeline-row:hover { background: var(--surface-hover); }
 
-.timeline-left {
-  width: 180px;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+/* Row 1: id + title + status */
+.timeline-row-top {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
 }
 .timeline-id {
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 11px; font-weight: 700;
   color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  flex-shrink: 0;
+  font-family: var(--font-mono); flex-shrink: 0;
 }
 .timeline-title-text {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  flex: 1; font-size: 13px; font-weight: 600; color: var(--foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
+.timeline-status { font-size: 11px; font-weight: 600; flex-shrink: 0; }
 
-.timeline-bar-area {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+/* Row 2: agent + duration + time */
+.timeline-row-mid {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; color: var(--muted-foreground);
 }
-.timeline-bar {
-  height: 8px;
-  border-radius: 4px;
-  flex-shrink: 0;
-  opacity: 0.85;
-  transition: width var(--transition-base);
-  min-width: 4px;
+.timeline-agent {
+  display: flex; align-items: center; gap: 4px; font-weight: 500;
+}
+.role-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  display: inline-block; flex-shrink: 0;
 }
 .timeline-duration {
-  font-size: 11px;
+  font-family: var(--font-mono); white-space: nowrap;
   color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  white-space: nowrap;
 }
-
-.timeline-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--muted-foreground);
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-.role-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  display: inline-block;
-}
-
-.timeline-agent {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 500;
-}
-
-.timeline-status {
-  font-weight: 600;
-}
-
 .timeline-time {
-  font-family: var(--font-mono);
+  font-family: var(--font-mono); white-space: nowrap;
+  margin-left: auto;
+}
+
+/* Row 3: bar */
+.timeline-bar-area { display: flex; align-items: center; }
+.timeline-bar {
+  height: 6px; border-radius: 3px; flex-shrink: 0;
+  opacity: 0.85; transition: width var(--transition-base);
+  min-width: 4px; max-width: 100%;
 }
 
 .timeline-empty {

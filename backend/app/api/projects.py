@@ -9,7 +9,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, Review, Version
+from app.models.models import User, Project, Task, Review, Version, Agent, AgentStatus
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -273,10 +273,25 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     if project.owner_id != user.id:
         raise HTTPException(status_code=403, detail="只有项目创建者才能删除项目")
 
+    # Find agents that are currently working on tasks in this project
+    stuck_agent_ids = [
+        row[0] for row in
+        db.query(Agent.id).join(Task, Task.agent_id == Agent.id).filter(
+            Task.project_id == project_id,
+            Agent.status == AgentStatus.WORKING,
+        ).distinct().all()
+    ]
+
     # Delete associated records
     db.query(Review).filter(Review.project_id == project_id).delete()
     db.query(Version).filter(Version.project_id == project_id).delete()
     db.query(Task).filter(Task.project_id == project_id).delete()
+
+    # Reset agents that were working on this project's tasks back to IDLE
+    if stuck_agent_ids:
+        db.query(Agent).filter(Agent.id.in_(stuck_agent_ids)).update(
+            {Agent.status: AgentStatus.IDLE}, synchronize_session=False
+        )
 
     # Remove workspace directory
     if project.workspace_path and os.path.isdir(project.workspace_path):
@@ -284,5 +299,11 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
 
     db.delete(project)
     db.commit()
+
+    # Notify clients: stuck agents have been reset
+    if stuck_agent_ids:
+        from app.api.ws import broadcast_sync
+        for agent_id in stuck_agent_ids:
+            broadcast_sync("agent_update", {"id": agent_id, "status": "idle"})
 
     return {"message": f"项目「{project.name}」已删除"}

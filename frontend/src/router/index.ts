@@ -43,6 +43,11 @@ const router = createRouter({
       name: 'VersionHistory',
       component: () => import('../views/VersionHistoryView.vue'),
     },
+    {
+      path: '/settings',
+      name: 'Settings',
+      component: () => import('../views/SettingsView.vue'),
+    },
   ],
 })
 

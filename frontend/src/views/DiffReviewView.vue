@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import DiffViewer from '../components/DiffViewer.vue'
 import api, { getErrorMessage } from '../api'
+import { renderMarkdown } from '../utils/markdown'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
@@ -79,15 +80,6 @@ function formatDate(d: string) {
   return new Date(d).toLocaleString('zh-CN')
 }
 
-function renderMarkdown(text: string) {
-  if (!text) return ''
-  return text
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n- (.+)/g, '\n<li>$1</li>')
-    .replace(/\n\n/g, '<br/>')
-}
 </script>
 
 <template>
@@ -211,8 +203,40 @@ function renderMarkdown(text: string) {
 .review-summary {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md); padding: 16px 18px;
-  font-size: 13.5px; line-height: 1.7; white-space: pre-wrap;
+  font-size: 13.5px; line-height: 1.7;
 }
+.review-summary :deep(h1) { font-size: 16px; font-weight: 700; margin: 0 0 8px; border-bottom: 1px solid var(--surface-border); padding-bottom: 6px; }
+.review-summary :deep(h2) { font-size: 15px; font-weight: 700; margin: 12px 0 6px; }
+.review-summary :deep(h3) { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
+.review-summary :deep(h4) { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
+.review-summary :deep(p) { margin: 0 0 8px; }
+.review-summary :deep(ul), .review-summary :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+.review-summary :deep(li) { margin-bottom: 2px; }
+.review-summary :deep(code) {
+  background: var(--surface-hover); padding: 1px 5px; border-radius: 3px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.review-summary :deep(pre) {
+  background: var(--page-canvas); border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); padding: 10px 14px; overflow-x: auto;
+  margin: 8px 0; font-size: 12px; line-height: 1.5;
+}
+.review-summary :deep(pre code) { background: none; padding: 0; }
+.review-summary :deep(blockquote) {
+  border-left: 3px solid var(--primary); padding: 4px 12px;
+  margin: 8px 0; color: var(--muted-foreground); background: var(--surface-hover);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.review-summary :deep(table) { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.review-summary :deep(th), .review-summary :deep(td) {
+  border: 1px solid var(--surface-border); padding: 6px 10px;
+  text-align: left; font-size: 12px;
+}
+.review-summary :deep(th) { background: var(--surface-hover); font-weight: 600; }
+.review-summary :deep(hr) { border: none; border-top: 1px solid var(--surface-border); margin: 12px 0; }
+.review-summary :deep(strong) { font-weight: 700; }
+.review-summary :deep(a) { color: var(--primary); }
+.review-summary :deep(del) { text-decoration: line-through; opacity: 0.7; }
 
 .empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
 .empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }

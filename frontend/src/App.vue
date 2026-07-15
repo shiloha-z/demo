@@ -21,6 +21,7 @@ const pageTitles: Record<string, string> = {
   '/tasks': '任务列表',
   '/reviews': '审查记录',
   '/versions': '版本历史',
+  '/settings': '系统设置',
 }
 
 const currentPageTitle = computed(() => pageTitles[route.path] || '')

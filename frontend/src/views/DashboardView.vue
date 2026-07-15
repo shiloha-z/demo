@@ -48,7 +48,8 @@ async function loadStats() {
 async function handleCreate() {
   creating.value = true
   try {
-    await store.createProject(newProject.value.name, newProject.value.description, newProject.value.workspace_name)
+    const created = await store.createProject(newProject.value.name, newProject.value.description, newProject.value.workspace_name)
+    store.setCurrentProject(created)
     dialogVisible.value = false
     newProject.value = { name: '', description: '', workspace_name: '' }
     await loadStats()

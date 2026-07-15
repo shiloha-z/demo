@@ -11,6 +11,7 @@ from app.api.reviews import router as reviews_router
 from app.api.models import router as models_router
 from app.api.ws import router as ws_router
 from app.api.versions import router as versions_router
+from app.api.settings import router as settings_router
 
 
 @asynccontextmanager
@@ -42,6 +43,7 @@ app.include_router(tasks_router)
 app.include_router(tasks_global_router)
 app.include_router(reviews_router)
 app.include_router(models_router)
+app.include_router(settings_router)
 app.include_router(ws_router)
 
 

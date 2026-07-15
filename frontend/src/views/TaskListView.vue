@@ -8,6 +8,7 @@ import PipelineStepper from '../components/PipelineStepper.vue'
 import TaskTimeline from '../components/TaskTimeline.vue'
 import type { StageState } from '../components/PipelineStepper.vue'
 import api, { getErrorMessage } from '../api'
+import { renderMarkdown } from '../utils/markdown'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
@@ -22,6 +23,7 @@ const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
 const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
 const archiving = ref(false)
+const timelineDrawerVisible = ref(false)
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
 // Pipeline stepper state
@@ -309,16 +311,6 @@ function formatDate(d: string) {
   return new Date(d).toLocaleString('zh-CN')
 }
 
-function renderMarkdown(text: string) {
-  if (!text) return ''
-  return text
-    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n- (.+)/g, '\n<li>$1</li>')
-    .replace(/\n\n/g, '<br/>')
-}
-
 function hasActivePipeline(task: any): boolean {
   return task?.status === 'running' || task?.status === 'pending'
 }
@@ -343,6 +335,12 @@ function hasActivePipeline(task: any): boolean {
           <template #icon>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
           </template>
+        </t-button>
+        <t-button size="small" variant="outline" @click="timelineDrawerVisible = true" title="任务时间线">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </template>
+          时间线
         </t-button>
       </div>
     </div>
@@ -492,8 +490,10 @@ function hasActivePipeline(task: any): boolean {
                 <span class="tag tag-neutral">{{ taskDetail.project_name }}</span>
               </div>
             </div>
-            <div class="detail-time" v-if="taskDetail.created_at">
-              {{ formatDate(taskDetail.created_at) }}
+            <div class="detail-header-right">
+              <div class="detail-time" v-if="taskDetail.created_at">
+                {{ formatDate(taskDetail.created_at) }}
+              </div>
             </div>
           </div>
 
@@ -589,9 +589,6 @@ function hasActivePipeline(task: any): boolean {
               <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
             </div>
           </div>
-
-          <!-- ── Task Timeline ──────────────────────────── -->
-          <TaskTimeline :tasks="timelineTasks" />
         </div>
 
         <div v-else class="empty-detail">
@@ -601,8 +598,22 @@ function hasActivePipeline(task: any): boolean {
           <p>选择左侧任务查看详情</p>
         </div>
       </div>
+
+      <!-- Timeline slide panel — overlays the entire layout -->
+      <div class="timeline-slide-panel" :class="{ open: timelineDrawerVisible }">
+        <div class="timeline-slide-header">
+          <span>任务执行时间线</span>
+          <button class="timeline-slide-close" @click="timelineDrawerVisible = false">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="timeline-slide-body">
+          <TaskTimeline :tasks="timelineTasks" />
+        </div>
+      </div>
     </template>
   </div>
+
 </template>
 
 <style scoped>
@@ -611,7 +622,7 @@ function hasActivePipeline(task: any): boolean {
 .header-right { display: flex; align-items: center; gap: 8px; }
 
 .task-layout {
-  flex: 1; display: flex; gap: 0;
+  flex: 1; display: flex; gap: 0; position: relative;
   border: 1px solid var(--surface-border); border-radius: var(--radius-lg);
   overflow: hidden; min-height: 0;
   box-shadow: var(--shadow-surface);
@@ -697,7 +708,54 @@ function hasActivePipeline(task: any): boolean {
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
 .detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.detail-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .detail-time { font-size: 12px; color: var(--muted-foreground); flex-shrink: 0; }
+
+/* ── Timeline slide panel ─────────────────────────── */
+.timeline-slide-panel {
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 480px; max-width: 100%;
+  background: var(--page-canvas);
+  border-left: 1px solid var(--surface-border);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.12);
+  transform: translateX(100%);
+  transition: transform var(--transition-base);
+  display: flex; flex-direction: column;
+  z-index: 10;
+}
+.timeline-slide-panel.open {
+  transform: translateX(0);
+}
+
+.timeline-slide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--surface-border);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--foreground);
+  flex-shrink: 0;
+}
+.timeline-slide-close {
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  border: none; background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.timeline-slide-close:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+.timeline-slide-body {
+  flex: 1; overflow-y: auto; padding: 0;
+}
 
 .detail-section { margin-bottom: 20px; }
 .detail-label { font-size: 12px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
@@ -722,11 +780,40 @@ function hasActivePipeline(task: any): boolean {
 .summary-box {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md); padding: 14px 16px;
-  font-size: 13.5px; line-height: 1.7; white-space: pre-wrap;
+  font-size: 13.5px; line-height: 1.7;
 }
-.summary-box :deep(h3) { font-size: 14px; font-weight: 700; margin: 0 0 6px; }
+.summary-box :deep(h1) { font-size: 16px; font-weight: 700; margin: 0 0 8px; border-bottom: 1px solid var(--surface-border); padding-bottom: 6px; }
+.summary-box :deep(h2) { font-size: 15px; font-weight: 700; margin: 12px 0 6px; }
+.summary-box :deep(h3) { font-size: 14px; font-weight: 700; margin: 10px 0 4px; }
 .summary-box :deep(h4) { font-size: 13px; font-weight: 600; margin: 8px 0 4px; }
-.summary-box :deep(li) { margin-left: 16px; }
+.summary-box :deep(p) { margin: 0 0 8px; }
+.summary-box :deep(ul), .summary-box :deep(ol) { margin: 0 0 8px; padding-left: 20px; }
+.summary-box :deep(li) { margin-bottom: 2px; }
+.summary-box :deep(code) {
+  background: var(--surface-hover); padding: 1px 5px; border-radius: 3px;
+  font-family: var(--font-mono); font-size: 12px;
+}
+.summary-box :deep(pre) {
+  background: var(--page-canvas); border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); padding: 10px 14px; overflow-x: auto;
+  margin: 8px 0; font-size: 12px; line-height: 1.5;
+}
+.summary-box :deep(pre code) { background: none; padding: 0; }
+.summary-box :deep(blockquote) {
+  border-left: 3px solid var(--primary); padding: 4px 12px;
+  margin: 8px 0; color: var(--muted-foreground); background: var(--surface-hover);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.summary-box :deep(table) { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.summary-box :deep(th), .summary-box :deep(td) {
+  border: 1px solid var(--surface-border); padding: 6px 10px;
+  text-align: left; font-size: 12px;
+}
+.summary-box :deep(th) { background: var(--surface-hover); font-weight: 600; }
+.summary-box :deep(hr) { border: none; border-top: 1px solid var(--surface-border); margin: 12px 0; }
+.summary-box :deep(strong) { font-weight: 700; }
+.summary-box :deep(a) { color: var(--primary); }
+.summary-box :deep(del) { text-decoration: line-through; opacity: 0.7; }
 
 .feedback-box {
   margin-top: 12px; background: var(--danger-light);
