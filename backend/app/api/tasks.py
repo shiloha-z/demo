@@ -57,6 +57,7 @@ class TaskDetailResponse(BaseModel):
     agent_name: str | None = None
     agent_role: str | None = None
     agent_model: str | None = None
+    agent_runner_type: str | None = None
     project_name: str | None = None
     review: dict | None = None
 
@@ -166,6 +167,7 @@ def get_task_detail(
         agent_name=task.agent.name if task.agent else None,
         agent_role=task.agent.role if task.agent else None,
         agent_model=task.agent.model if task.agent else None,
+        agent_runner_type=task.agent.runner_type if task.agent else None,
         project_name=task.project.name if task.project else None,
         review={
             "id": review.id,

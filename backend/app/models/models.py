@@ -73,6 +73,7 @@ class Agent(Base):
     name = Column(String(100), nullable=False)
     role = Column(String(100), nullable=False)       # code_gen / reviewer / security
     model = Column(String(100), default="deepseek-chat")  # LLM model name
+    runner_type = Column(String(50), default="crewai")  # crewai / claude_code / opencode
     system_prompt = Column(Text, default="")
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
 

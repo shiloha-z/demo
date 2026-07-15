@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     WORKSPACE_ROOT: str = "../workspaces"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    ANTHROPIC_API_KEY: str = ""
+    OPENCODE_SERVER_URL: str = "http://localhost:36000"
 
 
 settings = Settings()

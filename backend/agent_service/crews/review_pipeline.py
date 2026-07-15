@@ -1,5 +1,10 @@
 """Multi-agent code review pipeline using CrewAI.
 
+NOTE: This module is kept for backward compatibility. New code should use
+`agent_service.runners.crewai_runner.CrewAIRunner` via the runner factory:
+    from agent_service.runners import get_runner
+    runner = get_runner("crewai")
+
 Agents:
   1. CodeGen   — Generates code based on task description
   2. Reviewer  — Reviews code for logic, style, and bugs

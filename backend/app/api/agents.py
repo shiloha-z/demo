@@ -16,6 +16,7 @@ class AgentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     role: str = Field(..., min_length=1, max_length=100)
     model: str = Field(default="deepseek-chat")
+    runner_type: str = Field(default="crewai")
     system_prompt: str = Field(default="")
 
 
@@ -24,6 +25,7 @@ class AgentResponse(BaseModel):
     name: str
     role: str
     model: str
+    runner_type: str = "crewai"
     system_prompt: str
     status: str
     total_tasks: int = 0
@@ -81,6 +83,7 @@ def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_
             name=a.name,
             role=a.role,
             model=a.model,
+            runner_type=a.runner_type or "crewai",
             system_prompt=a.system_prompt,
             status=a.status.value if hasattr(a.status, 'value') else str(a.status),
             total_tasks=total_tasks,
@@ -104,6 +107,7 @@ def create_agent(
         name=req.name,
         role=req.role,
         model=req.model,
+        runner_type=req.runner_type,
         system_prompt=req.system_prompt,
         status=AgentStatus.IDLE,
     )

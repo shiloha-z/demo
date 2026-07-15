@@ -9,3 +9,7 @@ python-multipart==0.0.9
 gitpython==3.1.43
 crewai==0.80.0
 chromadb==0.5.0
+# Optional: Claude Code runner (Anthropic official SDK)
+# claude-agent-sdk
+# Optional: OpenCode runner (provider-agnostic CLI)
+# opencode-cli

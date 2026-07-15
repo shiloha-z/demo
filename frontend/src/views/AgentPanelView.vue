@@ -17,7 +17,7 @@ const availableModels = ref<{ id: string; name: string }[]>([])
 const showCreateAgent = ref(false)
 const showCreateTask = ref(false)
 const selectedAgent = ref<any>(null)
-const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '' })
+const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai' })
 const newTask = ref({ title: '', description: '', project_id: null as number | null })
 const loading = ref(false)
 
@@ -42,6 +42,13 @@ const statusDisplay: Record<string, { icon: string; cls: string }> = {
   working: { icon: '', cls: 'dot-working' },
   done: { icon: '✓', cls: 'dot-done' },
   error: { icon: '✕', cls: 'dot-error' },
+}
+
+const runnerLabels: Record<string, string> = {
+  crewai: 'CrewAI', claude_code: 'Claude Code', opencode: 'OpenCode',
+}
+const runnerColors: Record<string, string> = {
+  crewai: 'var(--primary)', claude_code: '#d97706', opencode: 'var(--success)',
 }
 
 let unsubAgent: (() => void) | null = null
@@ -69,9 +76,10 @@ async function loadAgents() {
   }
 }
 
-async function loadModels() {
+async function loadModels(runnerType?: string) {
   try {
-    const { data } = await api.get('/models')
+    const params = runnerType ? { runner_type: runnerType } : {}
+    const { data } = await api.get('/models', { params })
     availableModels.value = data.models
     if (availableModels.value.length > 0 && !newAgent.value.model) {
       newAgent.value.model = availableModels.value[0].id
@@ -86,7 +94,7 @@ async function createAgent() {
     await api.post('/agents', newAgent.value)
     MessagePlugin.success('Agent 已创建')
     showCreateAgent.value = false
-    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '' }
+    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '', runner_type: 'crewai' }
     await loadAgents()
   } finally { loading.value = false }
 }
@@ -150,7 +158,7 @@ function lastResultLabel(status: string | null): string {
         <h1 class="page-title">Agent 池</h1>
         <p class="page-desc">全局 Agent 管理，可在任意项目中复用</p>
       </div>
-      <t-button theme="primary" @click="showCreateAgent = true; loadModels()">
+      <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type)">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </template>
@@ -165,7 +173,7 @@ function lastResultLabel(status: string | null): string {
       </div>
       <h3>暂无 Agent</h3>
       <p>创建你的第一个 AI Agent，可在任意项目中指派任务</p>
-      <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels()">创建 Agent</t-button>
+      <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels(newAgent.runner_type)">创建 Agent</t-button>
     </div>
 
     <div v-else class="agent-grid">
@@ -186,6 +194,9 @@ function lastResultLabel(status: string | null): string {
               {{ roleLabels[a.role] || a.role }}
             </span>
             <span class="model-tag">{{ a.model }}</span>
+            <span class="runner-badge" :style="{ background: (runnerColors[a.runner_type] || 'var(--muted-foreground)') + '14', color: runnerColors[a.runner_type] || 'var(--muted-foreground)' }">
+              {{ runnerLabels[a.runner_type] || a.runner_type || 'CrewAI' }}
+            </span>
           </div>
 
           <!-- Working state: show current task -->
@@ -230,6 +241,12 @@ function lastResultLabel(status: string | null): string {
           <t-option value="code_gen" label="代码工程师" />
           <t-option value="reviewer" label="代码审查员" />
           <t-option value="security" label="安全审查员" />
+        </t-select>
+        <label class="field-label">执行框架</label>
+        <t-select v-model="newAgent.runner_type" @change="(v: string) => loadModels(v)">
+          <t-option value="crewai" label="CrewAI — 多 Agent 流水线" />
+          <t-option value="claude_code" label="Claude Code — Anthropic 官方 SDK" />
+          <t-option value="opencode" label="OpenCode — 开源通用框架" />
         </t-select>
         <label class="field-label">模型</label>
         <t-select v-model="newAgent.model">

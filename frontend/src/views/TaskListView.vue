@@ -59,6 +59,12 @@ const reviewStatusColors: Record<string, string> = {
 const roleLabels: Record<string, string> = {
   code_gen: '代码生成', reviewer: '审查', security: '安全',
 }
+const runnerLabels: Record<string, string> = {
+  crewai: 'CrewAI', claude_code: 'Claude Code', opencode: 'OpenCode',
+}
+const runnerColors: Record<string, string> = {
+  crewai: 'var(--primary)', claude_code: '#d97706', opencode: 'var(--success)',
+}
 const roleColors: Record<string, string> = {
   code_gen: 'var(--primary)', reviewer: 'var(--warning)', security: 'var(--danger)',
 }
@@ -480,6 +486,9 @@ function hasActivePipeline(task: any): boolean {
                   {{ roleLabels[taskDetail.agent_role] || taskDetail.agent_role }}
                 </span>
                 <span class="tag tag-neutral tag-mono">{{ taskDetail.agent_model }}</span>
+                <span v-if="taskDetail.agent_runner_type" class="tag" :style="{ background: (runnerColors[taskDetail.agent_runner_type] || 'var(--muted-foreground)') + '18', color: runnerColors[taskDetail.agent_runner_type] || 'var(--muted-foreground)' }">
+                  {{ runnerLabels[taskDetail.agent_runner_type] || taskDetail.agent_runner_type }}
+                </span>
                 <span class="tag tag-neutral">{{ taskDetail.project_name }}</span>
               </div>
             </div>
