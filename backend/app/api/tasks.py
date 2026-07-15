@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, asc
@@ -254,6 +256,75 @@ def start_task(
         raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
 
     # Update agent status
+    agent.status = AgentStatus.WORKING
+    db.commit()
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
+
+    # Run agent pipeline in background
+    from app.services.agent_runner import run_agent_pipeline
+    background_tasks.add_task(run_agent_pipeline, task.id)
+
+    return _task_to_response(task)
+
+
+# ── Stop / Resume ────────────────────────────────────────────────────
+
+@router.post("/{task_id}/stop", response_model=TaskResponse)
+def stop_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Stop a running or pending task, set status to paused."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status not in (TaskStatus.PENDING, TaskStatus.RUNNING):
+        raise HTTPException(status_code=400, detail=f"只有等待中或执行中的任务才能暂停，当前状态：{task.status.value}")
+
+    task.status = TaskStatus.PAUSED
+    task.completed_at = datetime.now(timezone.utc)
+
+    # Restore agent to idle
+    agent = db.query(Agent).get(task.agent_id)
+    if agent and agent.status == AgentStatus.WORKING:
+        agent.status = AgentStatus.IDLE
+
+    db.commit()
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "paused"})
+    if agent:
+        broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+
+    return _task_to_response(task)
+
+
+@router.post("/{task_id}/resume", response_model=TaskResponse)
+def resume_task(
+    project_id: int,
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Resume a paused task."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != TaskStatus.PAUSED:
+        raise HTTPException(status_code=400, detail=f"只有已暂停的任务才能继续执行，当前状态：{task.status.value}")
+
+    agent = db.query(Agent).get(task.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.status == AgentStatus.WORKING:
+        raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+
+    # Restore agent status
     agent.status = AgentStatus.WORKING
     db.commit()
 

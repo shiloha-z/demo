@@ -38,12 +38,13 @@ const pipelineStages = ref<StageState[]>([
 const codePreviewDiff = ref<string | null>(null)
 
 const statusLabels: Record<string, string> = {
-  pending: '等待中', running: '执行中', reviewing: '待审核',
+  pending: '等待中', running: '执行中', paused: '已暂停', reviewing: '待审核',
   approved: '已通过', rejected: '已驳回', completed: '已完成', failed: '失败',
 }
 const statusColors: Record<string, string> = {
   pending: 'var(--warning)',
   running: 'var(--primary)',
+  paused: '#8b5cf6',
   reviewing: '#f59e0b',
   approved: 'var(--success)',
   rejected: 'var(--danger)',
@@ -404,6 +405,32 @@ async function startTask(task: any, event: Event) {
     MessagePlugin.error(getErrorMessage(e, '启动任务失败'))
   }
 }
+
+async function stopTask(task: any, event: Event) {
+  event.stopPropagation()
+  try {
+    await api.post(`/projects/${task.project_id}/tasks/${task.id}/stop`)
+    MessagePlugin.success(`任务 #${task.id} 已暂停`)
+    await loadTasks()
+    if (selectedTask.value?.id === task.id) {
+      selectedTask.value = null
+      taskDetail.value = null
+    }
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '暂停任务失败'))
+  }
+}
+
+async function resumeTask(task: any, event: Event) {
+  event.stopPropagation()
+  try {
+    await api.post(`/projects/${task.project_id}/tasks/${task.id}/resume`)
+    MessagePlugin.success(`任务 #${task.id} 已重新开始执行`)
+    await loadTasks()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '恢复任务失败'))
+  }
+}
 </script>
 
 <template>
@@ -472,6 +499,22 @@ async function startTask(task: any, event: Event) {
               <span class="task-id">#{{ t.id }}</span>
               <div class="task-item-actions">
                 <button
+                  v-if="t.status === 'running'"
+                  class="stop-btn"
+                  title="停止"
+                  @click="stopTask(t, $event)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                </button>
+                <button
+                  v-if="t.status === 'paused'"
+                  class="resume-btn"
+                  title="重新执行"
+                  @click="resumeTask(t, $event)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                </button>
+                <button
                   v-if="t.status === 'pending'"
                   class="start-btn"
                   title="开始执行"
@@ -480,7 +523,7 @@ async function startTask(task: any, event: Event) {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 </button>
                 <button
-                  v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing'"
+                  v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing' && t.status !== 'paused'"
                   class="archive-btn"
                   title="归档"
                   @click="archiveTask(t, $event)"
@@ -800,6 +843,22 @@ async function startTask(task: any, event: Event) {
   transition: all var(--transition-fast);
 }
 .start-btn:hover { background: var(--primary); color: #fff; }
+
+.stop-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: var(--danger-light); color: var(--danger);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.stop-btn:hover { background: var(--danger); color: #fff; }
+
+.resume-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: oklch(0.55 0.2 260 / 0.12); color: #8b5cf6;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.resume-btn:hover { background: #8b5cf6; color: #fff; }
 
 /* Archived section */
 .archived-section { border-top: 2px solid var(--surface-border); margin-top: auto; }

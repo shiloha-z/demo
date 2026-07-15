@@ -22,6 +22,7 @@ class AgentStatus(str, Enum):
 class TaskStatus(str, Enum):
     PENDING = "pending"          # 等待执行
     RUNNING = "running"          # 执行中
+    PAUSED = "paused"            # 已暂停
     REVIEWING = "reviewing"      # 待审核（Agent 执行完毕，等待人工审查）
     APPROVED = "approved"        # 已通过（审查通过，已合并）
     REJECTED = "rejected"        # 已驳回（审查驳回）
