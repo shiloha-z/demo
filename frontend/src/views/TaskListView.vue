@@ -14,6 +14,7 @@ const archivedTasks = ref<any[]>([])
 const selectedTask = ref<any>(null)
 const taskDetail = ref<any>(null)
 const loadingDetail = ref(false)
+const sortBy = ref('created_desc')
 const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
 const archiving = ref(false)
@@ -73,7 +74,7 @@ watch(() => store.currentProject?.id, async (pid) => {
 async function loadTasks() {
   if (!filterProjectId.value) return
   const [active, archived] = await Promise.all([
-    api.get(`/projects/${filterProjectId.value}/tasks`),
+    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { sort: sortBy.value } }),
     api.get(`/projects/${filterProjectId.value}/tasks`, { params: { archived: true } }),
   ])
   tasks.value = active.data
@@ -214,6 +215,13 @@ function renderMarkdown(text: string) {
         <p class="page-desc">查看 Agent 任务的执行状态与详细结果</p>
       </div>
       <div class="header-right">
+        <t-select v-model="sortBy" size="small" style="width: 110px" @change="loadTasks()">
+          <t-option value="created_desc" label="最新创建" />
+          <t-option value="created_asc" label="最早创建" />
+          <t-option value="status" label="按状态" />
+          <t-option value="title_asc" label="标题 A-Z" />
+          <t-option value="title_desc" label="标题 Z-A" />
+        </t-select>
         <t-button shape="square" variant="text" @click="loadTasks()" title="刷新">
           <template #icon>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>

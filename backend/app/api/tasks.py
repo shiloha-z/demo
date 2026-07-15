@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from pydantic import BaseModel, Field
+from sqlalchemy import desc, asc
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -88,10 +89,18 @@ def _task_to_response(t: Task) -> TaskResponse:
 def list_tasks(
     project_id: int,
     archived: bool = False,
+    sort: str = Query(default="created_desc", description="created_desc | created_asc | status | title_asc | title_desc"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """List tasks for a project. Set ?archived=true to show only archived tasks."""
+    sort_map = {
+        "created_desc": desc(Task.created_at),
+        "created_asc": asc(Task.created_at),
+        "title_asc": asc(Task.title),
+        "title_desc": desc(Task.title),
+    }
+    order = sort_map.get(sort)
     q = (
         db.query(Task)
         .filter(Task.project_id == project_id)
@@ -99,7 +108,23 @@ def list_tasks(
     )
     # Filter by archived status — default shows active (non-archived) tasks
     q = q.filter(Task.archived == bool(archived))
-    tasks = q.order_by(Task.id.desc()).all()
+    if order is not None:
+        q = q.order_by(order)
+    else:
+        q = q.order_by(Task.id.desc())
+
+    tasks = q.all()
+
+    # Client-side status sort (group pending/running/reviewing first, then approved/rejected/failed)
+    if sort == "status":
+        status_priority = {
+            "running": 0, "pending": 1, "reviewing": 2,
+            "failed": 3, "rejected": 4, "approved": 5, "completed": 6,
+        }
+        tasks.sort(key=lambda t: status_priority.get(
+            t.status.value if hasattr(t.status, 'value') else str(t.status), 99
+        ))
+
     return [_task_to_response(t) for t in tasks]
 
 
