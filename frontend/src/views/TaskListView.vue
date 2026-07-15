@@ -91,8 +91,11 @@ async function loadTasks() {
 }
 
 async function selectTask(task: any) {
+  // Only clear progress when switching to a different task
+  if (selectedTask.value?.id !== task.id) {
+    taskProgress.value = []
+  }
   selectedTask.value = task
-  taskProgress.value = []
   loadingDetail.value = true
   try {
     const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`)
@@ -397,6 +400,13 @@ function renderMarkdown(text: string) {
           </div>
 
           <template v-else-if="taskDetail.review">
+            <!-- Progress log — keep visible even after review exists -->
+            <div v-if="taskProgress.length > 0" class="progress-log">
+              <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
+                <span class="progress-dot" :class="entry.step === 'error' ? 'err' : entry.step === 'done' ? 'ok' : ''"></span>
+                <span class="progress-msg">{{ entry.message }}</span>
+              </div>
+            </div>
             <div class="detail-section">
               <div class="detail-label-row">
                 <h4 class="detail-label">审查结果</h4>
