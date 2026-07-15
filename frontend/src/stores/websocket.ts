@@ -126,5 +126,12 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
   }
 
-  return { connected, lastMessage, connect, disconnect, on }
+  /** Send a raw string over the WebSocket (e.g., typing indicator). */
+  function send(data: string) {
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(data)
+    }
+  }
+
+  return { connected, lastMessage, connect, disconnect, on, send }
 })

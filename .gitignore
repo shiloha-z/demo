@@ -23,6 +23,9 @@ workspaces/
 # ChromaDB (vector DB runtime data)
 chroma_data/
 
+# Chat uploads (runtime data)
+backend/uploads/
+
 # Reference projects
 references/
 

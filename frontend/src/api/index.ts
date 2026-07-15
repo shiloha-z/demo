@@ -9,11 +9,15 @@ const api = axios.create({
 // Track whether we're already handling a 401 to prevent loops
 let handling401 = false
 
-// Request interceptor – attach JWT token
+// Request interceptor – attach JWT token, remove JSON content-type for FormData
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
+  }
+  // Let browser set Content-Type for FormData (multipart/form-data with boundary)
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type']
   }
   return config
 })

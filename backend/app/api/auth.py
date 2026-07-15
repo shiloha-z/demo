@@ -26,6 +26,7 @@ class AuthResponse(BaseModel):
     token: str
     username: str
     display_name: str
+    user_id: int
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────
@@ -44,8 +45,8 @@ def register(req: RegisterRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
 
-    token = create_access_token(user.id)
-    return AuthResponse(token=token, username=user.username, display_name=user.display_name)
+    token = create_access_token(user.id, user.username, user.display_name)
+    return AuthResponse(token=token, username=user.username, display_name=user.display_name, user_id=user.id)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -54,5 +55,5 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad credentials")
 
-    token = create_access_token(user.id)
-    return AuthResponse(token=token, username=user.username, display_name=user.display_name)
+    token = create_access_token(user.id, user.username, user.display_name)
+    return AuthResponse(token=token, username=user.username, display_name=user.display_name, user_id=user.id)

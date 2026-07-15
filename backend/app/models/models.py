@@ -121,3 +121,17 @@ class Version(Base):
     commit_message = Column(String(500), default="")
     review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True)
     created_at = Column(DateTime, default=_now)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    username = Column(String(50), nullable=False)
+    message = Column(Text, nullable=False, default="")
+    file_url = Column(String(500), default="")
+    file_name = Column(String(200), default="")
+    file_type = Column(String(50), default="")   # "image", "file"
+    file_size = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
