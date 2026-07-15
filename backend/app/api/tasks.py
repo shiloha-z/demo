@@ -29,6 +29,7 @@ class TaskResponse(BaseModel):
     project_id: int
     created_at: str | None = None
     agent_name: str | None = None
+    agent_role: str | None = None
     project_name: str | None = None
 
     class Config:
@@ -55,6 +56,13 @@ class TaskDetailResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
+ROLE_LABELS: dict[str, str] = {
+    "code_gen": "代码生成",
+    "reviewer": "审查",
+    "security": "安全",
+}
+
+
 def _task_to_response(t: Task) -> TaskResponse:
     return TaskResponse(
         id=t.id,
@@ -65,6 +73,7 @@ def _task_to_response(t: Task) -> TaskResponse:
         project_id=t.project_id,
         created_at=t.created_at.isoformat() if t.created_at else None,
         agent_name=t.agent.name if t.agent else None,
+        agent_role=t.agent.role if t.agent else None,
         project_name=t.project.name if t.project else None,
     )
 

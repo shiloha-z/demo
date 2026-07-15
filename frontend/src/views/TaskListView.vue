@@ -32,6 +32,12 @@ const reviewStatusColors: Record<string, string> = {
   approved: 'var(--success)',
   rejected: 'var(--danger)',
 }
+const roleLabels: Record<string, string> = {
+  code_gen: '代码生成', reviewer: '审查', security: '安全',
+}
+const roleColors: Record<string, string> = {
+  code_gen: 'var(--primary)', reviewer: 'var(--warning)', security: 'var(--danger)',
+}
 
 let unsubTask: (() => void) | null = null
 
@@ -161,6 +167,9 @@ function renderMarkdown(text: string) {
             </div>
             <div class="task-title-text">{{ t.title }}</div>
             <div class="task-meta">
+              <span class="agent-badge" v-if="t.agent_role" :style="{ color: roleColors[t.agent_role] || 'var(--muted-foreground)', background: (roleColors[t.agent_role] || 'var(--muted-foreground)') + '14' }">
+                {{ roleLabels[t.agent_role] || t.agent_role }}
+              </span>
               <span>{{ t.agent_name || 'Agent #' + t.agent_id }}</span>
               <span v-if="t.created_at">{{ formatDate(t.created_at) }}</span>
             </div>
@@ -178,6 +187,9 @@ function renderMarkdown(text: string) {
                 <span class="tag tag-neutral">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/></svg>
                   {{ taskDetail.agent_name }}
+                </span>
+                <span v-if="taskDetail.agent_role" class="tag" :style="{ background: (roleColors[taskDetail.agent_role] || 'var(--muted-foreground)') + '18', color: roleColors[taskDetail.agent_role] || 'var(--muted-foreground)' }">
+                  {{ roleLabels[taskDetail.agent_role] || taskDetail.agent_role }}
                 </span>
                 <span class="tag tag-neutral tag-mono">{{ taskDetail.agent_model }}</span>
                 <span class="tag tag-neutral">{{ taskDetail.project_name }}</span>
@@ -269,7 +281,11 @@ function renderMarkdown(text: string) {
 .task-id { font-size: 12px; font-weight: 700; color: var(--muted-foreground); font-family: var(--font-mono); }
 .task-status { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
 .task-title-text { font-size: 13.5px; font-weight: 600; color: var(--foreground); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.task-meta { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted-foreground); }
+.task-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-foreground); flex-wrap: wrap; }
+.agent-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-sm);
+  white-space: nowrap; flex-shrink: 0;
+}
 
 .task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--page-canvas); }
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
