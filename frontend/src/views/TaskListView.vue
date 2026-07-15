@@ -4,6 +4,7 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
+import DiffViewer from '../components/DiffViewer.vue'
 import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
@@ -420,7 +421,7 @@ function renderMarkdown(text: string) {
               </div>
 
               <div class="diff-container" v-if="taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'">
-                <MonacoEditor :content="taskDetail.review.diff_content" language="diff" />
+                <DiffViewer :diff="taskDetail.review.diff_content" />
               </div>
               <div v-else class="no-diff">无代码变更</div>
 

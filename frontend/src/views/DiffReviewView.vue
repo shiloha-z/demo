@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import MonacoEditor from '../components/MonacoEditor.vue'
+import DiffViewer from '../components/DiffViewer.vue'
 import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
@@ -146,10 +146,9 @@ function renderMarkdown(text: string) {
           <div class="detail-section">
             <h4 class="detail-label">代码变更 (Diff)</h4>
             <div class="diff-container">
-              <MonacoEditor
+              <DiffViewer
                 v-if="selectedReview.diff_content"
-                :content="selectedReview.diff_content"
-                language="diff"
+                :diff="selectedReview.diff_content"
               />
               <p v-else class="no-diff">无代码变更</p>
             </div>
@@ -206,7 +205,7 @@ function renderMarkdown(text: string) {
 .detail-section { margin-bottom: 20px; }
 .detail-label { font-size: 13px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-.diff-container { border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; min-height: 200px; max-height: 400px; }
+.diff-container { border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; max-height: 500px; overflow-y: auto; }
 .no-diff { font-size: 13px; color: var(--muted-foreground); padding: 20px; text-align: center; }
 
 .review-summary {
