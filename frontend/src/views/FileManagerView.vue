@@ -4,7 +4,7 @@ import { useProjectStore } from '../stores/project'
 import FileTree from '../components/FileTree.vue'
 import MonacoEditor from '../components/MonacoEditor.vue'
 import api, { getErrorMessage } from '../api'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 
 const store = useProjectStore()
 const fileTreeRef = ref<InstanceType<typeof FileTree>>()
@@ -82,6 +82,28 @@ async function createFolder() {
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '创建失败')) }
   finally { creating.value = false }
 }
+
+async function deleteSelected() {
+  if (!selectedProjectId.value || !selectedFile.value) return
+  const path = selectedFile.value
+  const name = path.split('/').pop() || path
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要删除「${name}」吗？此操作不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${selectedProjectId.value}/file`, { params: { path } })
+        MessagePlugin.success(`已删除 ${name}`)
+        selectedFile.value = ''
+        fileContent.value = ''
+        fileTreeRef.value?.loadFiles()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+      confirmDialog.destroy()
+    },
+  })
+}
 </script>
 
 <template>
@@ -132,6 +154,9 @@ async function createFolder() {
           <div class="file-path-bar">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             {{ selectedFile }}
+            <button class="file-delete-btn" title="删除" @click="deleteSelected">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
           </div>
           <MonacoEditor :content="fileContent" :language="getLanguage()" />
         </template>
@@ -197,6 +222,13 @@ async function createFolder() {
   font-size: 12px; font-family: var(--font-mono); color: var(--muted-foreground);
   flex-shrink: 0;
 }
+.file-delete-btn {
+  margin-left: auto; width: 26px; height: 26px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.file-delete-btn:hover { background: var(--danger-light); color: var(--danger); }
 .file-view-panel :deep(.monaco-container) { flex: 1; }
 
 .empty-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }

@@ -381,6 +381,25 @@ def create_folder(workspace: str, folder_path: str) -> str:
     return target
 
 
+def delete_path(workspace: str, target_path: str) -> str:
+    """Delete a file or folder inside workspace. Returns the deleted path."""
+    import shutil
+
+    target = _verify_safe_path(workspace, target_path)
+
+    if not os.path.exists(target):
+        raise FileNotFoundError(f"Path not found: {target_path}")
+
+    if os.path.isfile(target):
+        os.remove(target)
+    elif os.path.isdir(target):
+        shutil.rmtree(target)
+    else:
+        raise ValueError(f"Unsupported path type: {target_path}")
+
+    return target
+
+
 def upload_file(workspace: str, filepath: str, content: bytes) -> str:
     """Write binary content to a file."""
     target = _verify_safe_path(workspace, filepath)

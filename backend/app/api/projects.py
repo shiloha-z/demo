@@ -178,6 +178,26 @@ def create_folder(
     return {"path": path, "message": "Folder created"}
 
 
+@router.delete("/{project_id}/file")
+def delete_file(
+    project_id: int,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Delete a file or folder from the project workspace."""
+    workspace = _get_workspace(project_id, user, db)
+    try:
+        target = git.delete_path(workspace, path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File or folder not found")
+    git.commit(workspace, f"Delete {path}")
+    _touch_project(db, project_id)
+    return {"path": path, "message": "Deleted"}
+
+
 @router.post("/{project_id}/upload")
 async def upload_files(
     project_id: int,
