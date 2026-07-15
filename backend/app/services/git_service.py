@@ -246,18 +246,22 @@ def _get_base_branch(repo: Repo) -> str:
 
 
 def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
-    """List files from the master branch (not working tree)."""
-    repo = get_repo(workspace)
-    base = _get_base_branch(repo) if repo else "master"
+    """List files from the project workspace.
 
-    # Use git ls-tree for directory listing from the base branch
+    Prefer the git base-branch snapshot so Agent task-branch work stays
+    isolated, but fall back to the real filesystem whenever the git
+    repository has no usable branch/commit (e.g. a freshly `git init`-ed
+    project with no initial commit) — otherwise the file tree shows empty
+    even though files exist on disk.
+    """
+    repo = get_repo(workspace)
     if repo:
         try:
+            base = _get_base_branch(repo)
             return _list_from_git(repo, base, subpath)
         except Exception:
-            pass  # fallback to filesystem
+            pass  # no usable branch yet → fall back to filesystem
 
-    # Filesystem fallback (when repo is unavailable)
     return _list_from_fs(workspace, subpath)
 
 
@@ -270,7 +274,9 @@ def _list_from_git(repo: Repo, base: str, subpath: str) -> list[dict[str, Any]]:
         tree_ref = f"{base}:{subpath}" if subpath else base
         output = repo.git.ls_tree(tree_ref)
     except GitCommandError:
-        return []
+        # Branch does not exist / no commits yet. Signal the caller to
+        # fall back to the real filesystem instead of returning empty.
+        raise
 
     for line in output.strip().split("\n"):
         if not line:
