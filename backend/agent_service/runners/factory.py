@@ -46,6 +46,6 @@ def get_runner(runner_type: str) -> BaseRunner:
 
 _install_hints: dict[str, str] = {
     "crewai": "Ensure `crewai` is installed: pip install crewai",
-    "claude_code": "Install the Claude Agent SDK: pip install claude-agent-sdk",
+    "claude_code": "Claude Code CLI not found. Install from https://claude.ai/code and run `claude` to authenticate.",
     "opencode": "OpenCode requires the `opencode` CLI. Install from https://opencode.ai or use `pip install opencode-cli`",
 }
