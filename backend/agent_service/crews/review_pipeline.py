@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 
 
 def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
-               task_id: int = 0, project_id: int = 0) -> Crew:
+               task_id: int = 0, project_id: int = 0,
+               task_callback=None) -> Crew:
     """Build the review pipeline crew for a given workspace.
 
     Args:
@@ -30,6 +31,7 @@ def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
         model_name: LLM model to use (default: deepseek-chat).
         task_id: Current task ID (for memory scoping).
         project_id: Current project ID (for memory scoping).
+        task_callback: Optional callback(task_output) fired after each task.
     """
 
     # Tools scoped to this workspace
@@ -182,4 +184,5 @@ def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
         tasks=[code_task, review_task, security_task, summary_task],
         process=Process.sequential,
         verbose=True,
+        task_callback=task_callback,
     )

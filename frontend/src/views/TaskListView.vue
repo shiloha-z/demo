@@ -3,8 +3,10 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import MonacoEditor from '../components/MonacoEditor.vue'
 import DiffViewer from '../components/DiffViewer.vue'
+import PipelineStepper from '../components/PipelineStepper.vue'
+import TaskTimeline from '../components/TaskTimeline.vue'
+import type { StageState } from '../components/PipelineStepper.vue'
 import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
@@ -18,9 +20,20 @@ const loadingDetail = ref(false)
 const sortBy = ref('created_desc')
 const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
-const taskProgress = ref<{ message: string; step: string }[]>([])
+const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
 const archiving = ref(false)
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
+
+// Pipeline stepper state
+const pipelineStages = ref<StageState[]>([
+  { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: 'waiting', startedAt: null, doneAt: null },
+  { key: 'reviewer',   label: '代码审查员', icon: 'eye',    status: 'waiting', startedAt: null, doneAt: null },
+  { key: 'security',   label: '安全审查员', icon: 'shield', status: 'waiting', startedAt: null, doneAt: null },
+  { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
+])
+
+// Real-time code preview
+const codePreviewDiff = ref<string | null>(null)
 
 const statusLabels: Record<string, string> = {
   pending: '等待中', running: '执行中', reviewing: '待审核',
@@ -50,8 +63,50 @@ const roleColors: Record<string, string> = {
   code_gen: 'var(--primary)', reviewer: 'var(--warning)', security: 'var(--danger)',
 }
 
+// ── Step icon mapping ──────────────────────────────────────────
+const stepIcons: Record<string, string> = {
+  start: '🚀', goal: '📋', desc: '📝', prepare: '📂', branch: '🌿',
+  agent_start: '🤖', model: '🧠',
+  step_1_codegen: '⚙️', step_1_detail: '🔍', step_1_done: '✅',
+  step_2_done: '✅', step_3_done: '✅', step_4_done: '✅',
+  report_done: '📄', commit: '💾', committed: '📌',
+  diff: '📊', diff_done: '📊', diff_empty: '⚠️',
+  code_preview: '👁️', cleanup: '🔙', done: '🎉',
+  error: '❌',
+}
+
+function stepIcon(step: string): string {
+  return stepIcons[step] || '🔄'
+}
+
+function formatTimestamp(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+// ── Timeline tasks computed from loaded tasks ──────────────────
+const timelineTasks = computed(() => {
+  return tasks.value
+    .filter(t => t.started_at)
+    .map(t => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      startedAt: t.started_at,
+      completedAt: t.completed_at,
+      createdAt: t.created_at,
+      agentName: t.agent_name || `Agent #${t.agent_id}`,
+      agentRole: t.agent_role || '',
+    }))
+})
+
+// ── WebSocket subscriptions ────────────────────────────────────
 let unsubTask: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
+let unsubStage: (() => void) | null = null
+let unsubPreview: (() => void) | null = null
 
 onMounted(() => {
   unsubTask = wsStore.on('task_update', (data: any) => {
@@ -65,7 +120,32 @@ onMounted(() => {
   })
   unsubProgress = wsStore.on('task_progress', (data: any) => {
     if (selectedTask.value?.id === data.task_id) {
-      taskProgress.value.push({ message: data.message, step: data.step })
+      taskProgress.value.push({
+        message: data.message,
+        step: data.step,
+        timestamp: data.timestamp || new Date().toISOString(),
+      })
+    }
+  })
+  unsubStage = wsStore.on('pipeline_stage', (data: any) => {
+    if (selectedTask.value?.id === data.task_id) {
+      const stage = pipelineStages.value.find(s => s.key === data.stage)
+      if (stage) {
+        stage.status = data.status
+        if (data.status === 'running' && !stage.startedAt) {
+          stage.startedAt = data.timestamp
+        }
+        if (data.status === 'done') {
+          stage.doneAt = data.timestamp
+        }
+        // Trigger reactivity
+        pipelineStages.value = [...pipelineStages.value]
+      }
+    }
+  })
+  unsubPreview = wsStore.on('code_preview', (data: any) => {
+    if (selectedTask.value?.id === data.task_id) {
+      codePreviewDiff.value = data.diff
     }
   })
 })
@@ -73,6 +153,8 @@ onMounted(() => {
 onUnmounted(() => {
   if (unsubTask) unsubTask()
   if (unsubProgress) unsubProgress()
+  if (unsubStage) unsubStage()
+  if (unsubPreview) unsubPreview()
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
@@ -92,9 +174,21 @@ async function loadTasks() {
 }
 
 async function selectTask(task: any) {
-  // Only clear progress when switching to a different task
   if (selectedTask.value?.id !== task.id) {
     taskProgress.value = []
+    codePreviewDiff.value = null
+    // Reset pipeline stages
+    pipelineStages.value = [
+      { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: task.status === 'running' ? 'running' : 'waiting', startedAt: null, doneAt: null },
+      { key: 'reviewer',   label: '代码审查员', icon: 'eye',    status: 'waiting', startedAt: null, doneAt: null },
+      { key: 'security',   label: '安全审查员', icon: 'shield', status: 'waiting', startedAt: null, doneAt: null },
+      { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
+    ]
+    // If task is already done/reviewing, mark all as done
+    if (task.status === 'reviewing' || task.status === 'approved' || task.status === 'rejected') {
+      pipelineStages.value.forEach(s => { s.status = 'done' })
+      pipelineStages.value = [...pipelineStages.value]
+    }
   }
   selectedTask.value = task
   loadingDetail.value = true
@@ -218,6 +312,10 @@ function renderMarkdown(text: string) {
     .replace(/\n- (.+)/g, '\n<li>$1</li>')
     .replace(/\n\n/g, '<br/>')
 }
+
+function hasActivePipeline(task: any): boolean {
+  return task?.status === 'running' || task?.status === 'pending'
+}
 </script>
 
 <template>
@@ -311,7 +409,6 @@ function renderMarkdown(text: string) {
             </button>
 
             <div v-if="showArchived" class="archived-list">
-              <!-- Batch toolbar -->
               <div class="archived-toolbar">
                 <label class="check-all-label" @click.stop>
                   <input type="checkbox" :checked="archiveChecked.size === archivedTasks.length && archivedTasks.length > 0" @change="toggleAll" />
@@ -401,13 +498,29 @@ function renderMarkdown(text: string) {
           </div>
 
           <template v-else-if="taskDetail.review">
-            <!-- Progress log — keep visible even after review exists -->
+            <!-- Pipeline Stepper — show if task completed with stages -->
+            <div v-if="taskDetail.status === 'reviewing' || taskDetail.status === 'approved' || taskDetail.status === 'rejected'" class="detail-section">
+              <h4 class="detail-label">流水线阶段</h4>
+              <PipelineStepper :stages="pipelineStages" />
+            </div>
+
+            <!-- Progress log — with timestamps -->
             <div v-if="taskProgress.length > 0" class="progress-log">
               <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
-                <span class="progress-dot" :class="entry.step === 'error' ? 'err' : entry.step === 'done' ? 'ok' : ''"></span>
+                <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
+                <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
                 <span class="progress-msg">{{ entry.message }}</span>
               </div>
             </div>
+
+            <!-- Real-time code preview -->
+            <div v-if="codePreviewDiff" class="detail-section">
+              <h4 class="detail-label">代码预览（实时）</h4>
+              <div class="diff-container">
+                <DiffViewer :diff="codePreviewDiff" />
+              </div>
+            </div>
+
             <div class="detail-section">
               <div class="detail-label-row">
                 <h4 class="detail-label">审查结果</h4>
@@ -435,13 +548,29 @@ function renderMarkdown(text: string) {
           </template>
 
           <div v-else class="no-review">
-            <!-- Progress log for running/pending tasks -->
+            <!-- Pipeline Stepper — show real-time during execution -->
+            <div v-if="hasActivePipeline(taskDetail)" class="detail-section">
+              <h4 class="detail-label">流水线阶段</h4>
+              <PipelineStepper :stages="pipelineStages" />
+            </div>
+
+            <!-- Progress log with timestamps -->
             <div v-if="taskProgress.length > 0" class="progress-log">
               <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
-                <span class="progress-dot" :class="entry.step === 'error' ? 'err' : entry.step === 'done' ? 'ok' : ''"></span>
+                <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
+                <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
                 <span class="progress-msg">{{ entry.message }}</span>
               </div>
             </div>
+
+            <!-- Real-time code preview (during execution) -->
+            <div v-if="codePreviewDiff" class="detail-section">
+              <h4 class="detail-label">代码预览（实时）</h4>
+              <div class="diff-container">
+                <DiffViewer :diff="codePreviewDiff" />
+              </div>
+            </div>
+
             <div class="no-review-status">
               <span class="spinner" v-if="taskDetail.status === 'running' || taskDetail.status === 'pending'"></span>
               <p v-if="taskDetail.status === 'running'">Agent 正在执行中...</p>
@@ -451,6 +580,9 @@ function renderMarkdown(text: string) {
               <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
             </div>
           </div>
+
+          <!-- ── Task Timeline ──────────────────────────── -->
+          <TaskTimeline :tasks="timelineTasks" />
         </div>
 
         <div v-else class="empty-detail">
@@ -498,7 +630,6 @@ function renderMarkdown(text: string) {
   white-space: nowrap; flex-shrink: 0;
 }
 
-/* Archive button on active tasks */
 .archive-btn {
   width: 24px; height: 24px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
@@ -552,7 +683,7 @@ function renderMarkdown(text: string) {
 .del-btn { color: var(--muted-foreground); }
 .del-btn:hover { background: var(--danger-light); color: var(--danger); }
 
-/* ── Detail panel (unchanged) ────────────────────────── */
+/* ── Detail panel ──────────────────────────────────── */
 .task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--page-canvas); }
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
 .detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
@@ -599,14 +730,15 @@ function renderMarkdown(text: string) {
 .no-review { padding: 20px 0; color: var(--muted-foreground); font-size: 14px; }
 .no-review-status { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
 
+/* ── Enhanced progress log ─────────────────────────── */
 .progress-log {
   background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 14px 16px;
-  margin-bottom: 12px; max-height: 320px; overflow-y: auto;
+  border-radius: var(--radius-md); padding: 10px 14px;
+  margin-bottom: 12px; max-height: 360px; overflow-y: auto;
 }
 .progress-entry {
   display: flex; align-items: flex-start; gap: 8px;
-  padding: 3px 0; font-size: 13px; font-family: var(--font-mono);
+  padding: 3px 0; font-size: 12.5px;
   color: var(--foreground);
 }
 .progress-entry.step_1_codegen,
@@ -615,14 +747,22 @@ function renderMarkdown(text: string) {
 .progress-entry.step_4_summary {
   font-weight: 600; color: var(--primary);
 }
-.progress-entry.error { color: var(--danger); font-weight: 600; }
-.progress-entry.done { color: var(--success); font-weight: 600; }
-.progress-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: var(--surface-border); flex-shrink: 0; margin-top: 5px;
+.progress-entry.step_1_done,
+.progress-entry.step_2_done,
+.progress-entry.step_3_done,
+.progress-entry.step_4_done,
+.progress-entry.done {
+  font-weight: 600; color: var(--success);
 }
-.progress-dot.ok { background: var(--success); }
-.progress-dot.err { background: var(--danger); }
+.progress-entry.error { color: var(--danger); font-weight: 600; }
+.progress-time {
+  font-size: 10.5px; color: var(--muted-foreground);
+  font-family: var(--font-mono); flex-shrink: 0;
+  min-width: 56px; text-align: right; padding-top: 1px;
+}
+.progress-icon {
+  font-size: 13px; flex-shrink: 0; width: 20px; text-align: center;
+}
 .progress-msg { word-break: break-word; }
 
 .loading-box { display: flex; align-items: center; gap: 10px; padding: 32px; color: var(--muted-foreground); font-size: 14px; }

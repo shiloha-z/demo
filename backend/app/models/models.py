@@ -89,6 +89,8 @@ class Task(Base):
     description = Column(Text, default="")
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
     archived = Column(Boolean, default=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 
     agent = relationship("Agent")

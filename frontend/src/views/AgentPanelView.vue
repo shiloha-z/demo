@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -37,16 +37,21 @@ const statusLabels: Record<string, string> = {
   idle: '空闲', working: '工作中', done: '完成', error: '错误',
 }
 
+const statusDisplay: Record<string, { icon: string; cls: string }> = {
+  idle: { icon: '', cls: 'dot-idle' },
+  working: { icon: '', cls: 'dot-working' },
+  done: { icon: '✓', cls: 'dot-done' },
+  error: { icon: '✕', cls: 'dot-error' },
+}
+
 let unsubAgent: (() => void) | null = null
 
 onMounted(async () => {
   if (store.projects.length === 0) await store.fetchProjects()
   await loadAgents()
-  // Real-time: refresh agent list on any agent_update
   unsubAgent = wsStore.on('agent_update', () => loadAgents())
 })
 
-// Re-fetch agents when navigating back to this page
 watch(() => route.path, (path) => {
   if (path === '/agents') loadAgents()
 })
@@ -127,6 +132,15 @@ function openTaskDialog(agent: any) {
   newTask.value = { title: '', description: '', project_id: store.currentProject.id }
   showCreateTask.value = true
 }
+
+function lastResultLabel(status: string | null): string {
+  if (!status) return ''
+  const map: Record<string, string> = {
+    approved: '最近通过', rejected: '最近驳回', reviewing: '最近完成',
+    failed: '最近失败', completed: '最近完成',
+  }
+  return map[status] || status
+}
 </script>
 
 <template>
@@ -155,21 +169,46 @@ function openTaskDialog(agent: any) {
     </div>
 
     <div v-else class="agent-grid">
-      <article v-for="a in agents" :key="a.id" class="agent-card">
+      <article v-for="a in agents" :key="a.id" class="agent-card" :class="{ 'agent-working': a.status === 'working' }">
+        <!-- Avatar -->
         <div class="agent-avatar" :style="{ background: roleColors[a.role] || 'var(--muted-foreground)' }">
           {{ a.name.charAt(0) }}
         </div>
+
+        <!-- Body -->
         <div class="agent-body">
-          <div class="agent-name">{{ a.name }}</div>
+          <div class="agent-name-row">
+            <span class="agent-name">{{ a.name }}</span>
+            <span class="status-dot" :class="statusDisplay[a.status]?.cls || 'dot-idle'" />
+          </div>
           <div class="agent-meta">
             <span class="role-badge" :style="{ background: (roleColors[a.role] || 'var(--muted-foreground)') + '18', color: roleColors[a.role] }">
               {{ roleLabels[a.role] || a.role }}
             </span>
             <span class="model-tag">{{ a.model }}</span>
-            <span class="status-dot" :class="a.status" />
-            {{ statusLabels[a.status] || a.status }}
+          </div>
+
+          <!-- Working state: show current task -->
+          <div v-if="a.status === 'working' && a.current_task_title" class="agent-current-task">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span class="current-task-title">{{ a.current_task_title }}</span>
+          </div>
+
+          <!-- Idle/done state: show stats -->
+          <div v-else class="agent-stats">
+            <span v-if="a.total_tasks > 0" class="stat-item">
+              执行 <strong>{{ a.total_tasks }}</strong> 次
+            </span>
+            <span v-if="a.approval_rate" class="stat-item stat-approval" :class="{ 'rate-high': (a.approved_tasks / a.total_tasks) >= 0.5 }">
+              通过率 <strong>{{ a.approval_rate }}</strong>
+            </span>
+            <span v-if="a.last_task_status" class="stat-item stat-last">
+              {{ lastResultLabel(a.last_task_status) }}
+            </span>
           </div>
         </div>
+
+        <!-- Actions -->
         <div class="agent-actions">
           <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
           <t-button size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
@@ -234,25 +273,55 @@ function openTaskDialog(agent: any) {
 .page-root { max-width: 1000px; }
 
 /* ── Agent cards ─────────────────────────────────────────────────── */
-.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 10px; }
+.agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
 .agent-card {
-  display: flex; align-items: center; gap: 14px;
-  padding: 14px 16px; background: var(--surface); border: 1px solid var(--surface-border);
+  display: flex; align-items: flex-start; gap: 14px;
+  padding: 16px 18px; background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-surface);
   transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
 .agent-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
+.agent-card.agent-working {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px oklch(0.55 0.2 260 / 0.1);
+}
 .agent-avatar {
-  width: 40px; height: 40px; border-radius: var(--radius-md); flex-shrink: 0;
+  width: 42px; height: 42px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  color: #fff; font-weight: 700; font-size: 16px;
+  color: #fff; font-weight: 700; font-size: 17px;
 }
 .agent-body { flex: 1; min-width: 0; }
+.agent-name-row { display: flex; align-items: center; gap: 6px; }
 .agent-name { font-size: 14px; font-weight: 600; color: var(--foreground); }
 .agent-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); margin-top: 3px; flex-wrap: wrap; }
 .role-badge { padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 .model-tag { padding: 1px 6px; border-radius: 99px; font-size: 10px; color: var(--muted-foreground); background: var(--surface-hover); font-family: var(--font-mono); }
-.agent-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.agent-actions { display: flex; gap: 2px; flex-shrink: 0; margin-top: 2px; }
+
+/* Current task indicator */
+.agent-current-task {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 8px; padding: 6px 10px;
+  background: var(--primary-light); border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--primary);
+  overflow: hidden;
+}
+.current-task-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.current-task-elapsed { font-family: var(--font-mono); font-size: 11px; opacity: 0.8; flex-shrink: 0; }
+
+/* Stats */
+.agent-stats {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px; font-size: 11.5px; color: var(--muted-foreground);
+  flex-wrap: wrap;
+}
+.stat-item strong { color: var(--foreground); font-weight: 700; }
+.stat-approval.rate-high { color: var(--success); }
+.stat-last {
+  padding: 1px 6px; border-radius: 99px;
+  font-size: 10px; font-weight: 600;
+  background: var(--surface-hover);
+}
 
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }
 .task-project-info { font-size: 13px; color: var(--muted-foreground); padding: 8px 12px; background: var(--primary-lighter); border-radius: var(--radius-md); }

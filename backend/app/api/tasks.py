@@ -30,6 +30,8 @@ class TaskResponse(BaseModel):
     agent_id: int
     project_id: int
     created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
     agent_name: str | None = None
     agent_role: str | None = None
     project_name: str | None = None
@@ -50,6 +52,8 @@ class TaskDetailResponse(BaseModel):
     agent_id: int
     project_id: int
     created_at: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
     agent_name: str | None = None
     agent_role: str | None = None
     agent_model: str | None = None
@@ -79,6 +83,8 @@ def _task_to_response(t: Task) -> TaskResponse:
         agent_id=t.agent_id,
         project_id=t.project_id,
         created_at=t.created_at.isoformat() if t.created_at else None,
+        started_at=t.started_at.isoformat() if t.started_at else None,
+        completed_at=t.completed_at.isoformat() if t.completed_at else None,
         agent_name=t.agent.name if t.agent else None,
         agent_role=t.agent.role if t.agent else None,
         project_name=t.project.name if t.project else None,
@@ -155,6 +161,8 @@ def get_task_detail(
         agent_id=task.agent_id,
         project_id=task.project_id,
         created_at=task.created_at.isoformat() if task.created_at else None,
+        started_at=task.started_at.isoformat() if task.started_at else None,
+        completed_at=task.completed_at.isoformat() if task.completed_at else None,
         agent_name=task.agent.name if task.agent else None,
         agent_role=task.agent.role if task.agent else None,
         agent_model=task.agent.model if task.agent else None,
