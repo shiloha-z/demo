@@ -370,9 +370,14 @@ def write_file(workspace: str, filepath: str, content: str) -> str:
 
 
 def create_folder(workspace: str, folder_path: str) -> str:
-    """Create a folder inside workspace."""
+    """Create a folder inside workspace. Adds .gitkeep so git tracks it."""
     target = _verify_safe_path(workspace, folder_path)
     os.makedirs(target, exist_ok=True)
+    # Git doesn't track empty directories — add .gitkeep placeholder
+    gitkeep = os.path.join(target, ".gitkeep")
+    if not os.path.exists(gitkeep):
+        with open(gitkeep, "w", encoding="utf-8") as f:
+            f.write("")
     return target
 
 

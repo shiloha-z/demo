@@ -156,6 +156,7 @@ def create_file(
         target = git.write_file(workspace, path, content)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    git.commit(workspace, f"Create/update {path}")
     _touch_project(db, project_id)
     return {"path": path, "message": "File created"}
 
@@ -172,6 +173,7 @@ def create_folder(
         target = git.create_folder(workspace, path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    git.commit(workspace, f"Create folder {path}")
     _touch_project(db, project_id)
     return {"path": path, "message": "Folder created"}
 
@@ -211,6 +213,7 @@ async def upload_files(
         uploaded.append({"path": target_path, "filename": filename})
 
     _touch_project(db, project_id)
+    git.commit(workspace, f"Upload {len(uploaded)} file(s)")
     return {"files": uploaded, "message": f"{len(uploaded)} file(s) uploaded"}
 
 
