@@ -1,7 +1,11 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from enum import Enum
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 from app.core.database import Base
 
@@ -49,8 +53,8 @@ class Project(Base):
     description = Column(Text, default="")
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     workspace_path = Column(String(500), default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
 
     owner = relationship("User")
 
@@ -82,7 +86,7 @@ class Task(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_now)
 
     agent = relationship("Agent")
     project = relationship("Project")
@@ -98,7 +102,7 @@ class Review(Base):
     agent_review_summary = Column(Text, default="")
     status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING)
     human_feedback = Column(Text, default="")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_now)
 
 
 class Version(Base):
@@ -109,4 +113,4 @@ class Version(Base):
     commit_hash = Column(String(40), nullable=False)
     commit_message = Column(String(500), default="")
     review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=_now)

@@ -1,7 +1,10 @@
+from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
+    model_config = ConfigDict(env_file=".env")
+
     DATABASE_URL: str = "sqlite:///./data.db"
     JWT_SECRET: str = "dev-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
@@ -9,9 +12,6 @@ class Settings(BaseSettings):
     WORKSPACE_ROOT: str = "../workspaces"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
-
-    class Config:
-        env_file = ".env"
 
 
 settings = Settings()

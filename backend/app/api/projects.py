@@ -1,5 +1,5 @@
 import os, shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from typing import List
 from pydantic import BaseModel, Field
@@ -139,7 +139,7 @@ def read_file(
 
 def _touch_project(db: Session, project_id: int):
     """Update project's updated_at timestamp."""
-    db.query(Project).filter(Project.id == project_id).update({"updated_at": datetime.utcnow()})
+    db.query(Project).filter(Project.id == project_id).update({"updated_at": datetime.now(timezone.utc)})
     db.commit()
 
 
