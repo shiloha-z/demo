@@ -203,6 +203,10 @@ async function selectTask(task: any) {
   try {
     const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`)
     taskDetail.value = data
+    // Backfill code preview from stored review diff (WebSocket event may have been missed)
+    if (!codePreviewDiff.value && data?.review?.diff_content && data.review.diff_content !== '# No code changes detected') {
+      codePreviewDiff.value = data.review.diff_content
+    }
   } catch {
     taskDetail.value = null
   } finally {
@@ -296,14 +300,47 @@ async function approveReview() {
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
 }
 
-async function rejectReview() {
-  if (!taskDetail.value?.review) return
+const feedbackDialogVisible = ref(false)
+const feedbackText = ref('')
+const feedbackSubmitting = ref(false)
+
+function openRejectDialog() {
+  feedbackText.value = ''
+  feedbackDialogVisible.value = true
+}
+
+async function submitRejectWithFeedback() {
+  if (!taskDetail.value?.review || !feedbackText.value.trim()) return
+  feedbackSubmitting.value = true
   try {
-    await api.post(`/reviews/${taskDetail.value.review.id}/reject`)
-    MessagePlugin.warning('审查已驳回')
+    await api.post(`/reviews/${taskDetail.value.review.id}/reject`, {
+      feedback: feedbackText.value.trim(),
+    })
+    MessagePlugin.warning('已驳回，Agent 将根据反馈重新执行')
+    feedbackDialogVisible.value = false
     if (selectedTask.value) await selectTask(selectedTask.value)
     await loadTasks()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+  finally { feedbackSubmitting.value = false }
+}
+
+async function closeReview() {
+  if (!taskDetail.value?.review) return
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认结束',
+    body: '确定要结束此审查吗？任务将被标记为驳回且不会重新执行。',
+    confirmBtn: { content: '确认结束', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.post(`/reviews/${taskDetail.value.review.id}/close`)
+        MessagePlugin.warning('审查已结束')
+        if (selectedTask.value) await selectTask(selectedTask.value)
+        await loadTasks()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 function formatDate(d: string) {
@@ -585,8 +622,9 @@ async function submitCreateTask() {
                   {{ reviewStatusLabels[taskDetail.review.status] || taskDetail.review.status }}
                 </span>
                 <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
-                  <t-button size="small" theme="danger" variant="outline" @click="rejectReview">驳回</t-button>
+                  <t-button size="small" theme="warning" variant="outline" @click="openRejectDialog">驳回并修改</t-button>
                   <t-button size="small" theme="success" @click="approveReview">通过</t-button>
+                  <t-button size="small" theme="default" variant="text" @click="closeReview">结束</t-button>
                 </div>
               </div>
 
@@ -680,6 +718,14 @@ async function submitCreateTask() {
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
         <t-button theme="primary" :disabled="!newTaskForm.title || !newTaskForm.agent_id" :loading="creatingTask" @click="submitCreateTask">开始执行</t-button>
       </template>
+    </t-dialog>
+
+    <!-- Feedback dialog for reject-with-feedback -->
+    <t-dialog v-model:visible="feedbackDialogVisible" header="驳回并反馈" width="480px" :confirm-btn="{ content: '提交反馈', theme: 'warning', loading: feedbackSubmitting }" :cancel-btn="{ content: '取消' }" @confirm="submitRejectWithFeedback">
+      <div class="feedback-dialog-body">
+        <p class="feedback-hint">请说明驳回原因和改进方向，Agent 将根据反馈重新执行此任务。</p>
+        <t-textarea v-model="feedbackText" placeholder="例如：登录页面缺少密码强度校验、需要添加手机号验证码登录方式..." :autosize="{ minRows: 3, maxRows: 6 }" />
+      </div>
     </t-dialog>
   </div>
 
@@ -833,6 +879,9 @@ async function submitCreateTask() {
 .review-status-badge { font-size: 12px; font-weight: 700; }
 
 .review-actions { display: flex; gap: 6px; margin-left: auto; }
+
+.feedback-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.feedback-hint { font-size: 13px; color: var(--muted-foreground); margin: 0; line-height: 1.5; }
 
 .desc-box {
   background: var(--surface); border: 1px solid var(--surface-border);

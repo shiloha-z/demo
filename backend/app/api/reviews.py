@@ -28,6 +28,10 @@ class ReviewResponse(BaseModel):
         from_attributes = True
 
 
+class RejectRequest(BaseModel):
+    feedback: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/projects/{project_id}/reviews", response_model=list[ReviewResponse])
@@ -97,17 +101,74 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
 @router.post("/reviews/{review_id}/reject")
 def reject_review(
     review_id: int,
-    feedback: str = "",
+    body: RejectRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Reject with feedback — agent will re-run to address the feedback."""
+    feedback = body.feedback
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
+
+    if not feedback.strip():
+        raise HTTPException(status_code=400, detail="Feedback is required for rejection")
+
     review.status = ReviewStatus.REJECTED
     review.human_feedback = feedback
 
-    # Update linked task status → rejected
+    # Update task → running so agent can re-run
+    task = db.query(Task).get(review.task_id)
+    if task:
+        task.status = TaskStatus.RUNNING
+
+    # Create a new pending review for the next round
+    new_review = Review(
+        task_id=review.task_id,
+        project_id=review.project_id,
+        diff_content="",
+        agent_review_summary="",
+        status=ReviewStatus.PENDING,
+    )
+    db.add(new_review)
+    db.commit()
+    db.refresh(new_review)
+
+    # Record to project memory
+    try:
+        mem.add_project_memory(review.project_id,
+            f"Review #{review_id} (task #{review.task_id}) REJECTED. Feedback: {feedback}",
+            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected",
+             "new_review_id": str(new_review.id)})
+    except Exception:
+        pass
+
+    # Trigger agent re-run with feedback
+    from app.services.agent_runner import run_agent_pipeline
+    from fastapi import BackgroundTasks
+    # Fire-and-forget: the reject endpoint doesn't have BackgroundTasks injected,
+    # so we launch in a thread via the agent_runner's existing mechanism
+    import threading
+    t = threading.Thread(target=run_agent_pipeline, args=(task.id, feedback), daemon=True)
+    t.start()
+
+    return {"message": "Rejected — agent will re-run with feedback", "new_review_id": new_review.id}
+
+
+@router.post("/reviews/{review_id}/close")
+def close_review(
+    review_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Close the review without merging — terminal rejection, no re-run."""
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    review.status = ReviewStatus.REJECTED
+
+    # Update linked task status → rejected (terminal)
     task = db.query(Task).get(review.task_id)
     if task:
         task.status = TaskStatus.REJECTED
@@ -124,15 +185,13 @@ def reject_review(
 
     # Record to project memory
     try:
-        rejection_note = f"Review #{review_id} (task #{review.task_id}) REJECTED."
-        if feedback:
-            rejection_note += f" Feedback: {feedback}"
-        mem.add_project_memory(review.project_id, rejection_note,
-            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected"})
+        mem.add_project_memory(review.project_id,
+            f"Review #{review_id} (task #{review.task_id}) CLOSED (terminal rejection).",
+            {"type": "review_decision", "review_id": str(review_id), "decision": "closed"})
     except Exception:
         pass
 
-    return {"message": "Rejected"}
+    return {"message": "Closed"}
 
 
 @router.get("/reviews/pending-count")

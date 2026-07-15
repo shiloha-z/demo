@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import DiffViewer from '../components/DiffViewer.vue'
@@ -64,15 +64,48 @@ async function approve(review: any) {
   finally { loading.value = false }
 }
 
-async function reject(review: any) {
-  loading.value = true
+const feedbackDialogVisible = ref(false)
+const feedbackText = ref('')
+const feedbackSubmitting = ref(false)
+
+function openRejectDialog() {
+  feedbackText.value = ''
+  feedbackDialogVisible.value = true
+}
+
+async function submitRejectWithFeedback() {
+  if (!selectedReview.value || !feedbackText.value.trim()) return
+  feedbackSubmitting.value = true
   try {
-    await api.post(`/reviews/${review.id}/reject`)
-    MessagePlugin.warning('审查已驳回')
+    await api.post(`/reviews/${selectedReview.value.id}/reject`, {
+      feedback: feedbackText.value.trim(),
+    })
+    MessagePlugin.warning('已驳回，Agent 将根据反馈重新执行')
+    feedbackDialogVisible.value = false
     await loadReviews()
-    if (selectedReview.value?.id === review.id) selectedReview.value = null
+    selectedReview.value = null
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
-  finally { loading.value = false }
+  finally { feedbackSubmitting.value = false }
+}
+
+async function closeReview(review: any) {
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认结束',
+    body: '确定要结束此审查吗？任务将被标记为驳回且不会重新执行。',
+    confirmBtn: { content: '确认结束', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      loading.value = true
+      try {
+        await api.post(`/reviews/${review.id}/close`)
+        MessagePlugin.warning('审查已结束')
+        await loadReviews()
+        if (selectedReview.value?.id === review.id) selectedReview.value = null
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+      finally { loading.value = false }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 function formatDate(d: string) {
@@ -87,7 +120,7 @@ function formatDate(d: string) {
     <div class="page-header">
       <div>
         <h1 class="page-title">审查记录</h1>
-        <p class="page-desc">查看 Agent 代码审查结果，通过或驳回</p>
+        <p class="page-desc">查看 Agent 代码审查结果，通过、驳回反馈或结束</p>
       </div>
     </div>
 
@@ -130,8 +163,9 @@ function formatDate(d: string) {
           <div class="detail-header">
             <h3>审查 #{{ selectedReview.id }}</h3>
             <div class="detail-actions" v-if="selectedReview.status === 'pending'">
-              <t-button size="small" theme="danger" variant="outline" :disabled="loading" @click="reject(selectedReview)">驳回</t-button>
+              <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="openRejectDialog">驳回并修改</t-button>
               <t-button size="small" theme="success" :disabled="loading" @click="approve(selectedReview)">通过</t-button>
+              <t-button size="small" theme="default" variant="text" :disabled="loading" @click="closeReview(selectedReview)">结束</t-button>
             </div>
           </div>
 
@@ -160,6 +194,14 @@ function formatDate(d: string) {
         </div>
       </div>
     </template>
+
+    <!-- Feedback dialog for reject-with-feedback -->
+    <t-dialog v-model:visible="feedbackDialogVisible" header="驳回并反馈" width="480px" :confirm-btn="{ content: '提交反馈', theme: 'warning', loading: feedbackSubmitting }" :cancel-btn="{ content: '取消' }" @confirm="submitRejectWithFeedback">
+      <div class="feedback-dialog-body">
+        <p class="feedback-hint">请说明驳回原因和改进方向，Agent 将根据反馈重新执行此任务。</p>
+        <t-textarea v-model="feedbackText" placeholder="例如：登录页面缺少密码强度校验、需要添加手机号验证码登录方式..." :autosize="{ minRows: 3, maxRows: 6 }" />
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -241,4 +283,7 @@ function formatDate(d: string) {
 .empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
 .empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }
 .empty-detail p { font-size: 13px; color: var(--muted-foreground); }
+
+.feedback-dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.feedback-hint { font-size: 13px; color: var(--muted-foreground); margin: 0; line-height: 1.5; }
 </style>

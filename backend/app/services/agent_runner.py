@@ -82,11 +82,15 @@ def _make_stage_cb(task_id: int, project_id: int):
 
 # ── Main entry point ────────────────────────────────────────────────────
 
-def run_agent_pipeline(task_id: int):
+def run_agent_pipeline(task_id: int, feedback: str = ""):
     """Execute the full agent pipeline for a given task.
 
     Dispatches to the correct runner based on agent.runner_type.
     Called by FastAPI's BackgroundTasks — runs in a thread pool.
+
+    If `feedback` is provided, the pipeline runs in "revision" mode:
+    - Reuses the existing task branch (does not create a new one from master)
+    - Prepends the human feedback to the task description so the agent can address it
     """
     from app.api.ws import broadcast_sync
     from agent_service.runners.factory import get_runner
@@ -111,7 +115,11 @@ def run_agent_pipeline(task_id: int):
         })
 
         _progress(task_id, project_id, "🚀 任务开始执行", "start")
+        is_revision = bool(feedback)
+
         _progress(task_id, project_id, f"📋 任务目标：{task.title}", "goal")
+        if feedback:
+            _progress(task_id, project_id, f"💬 人工反馈：{feedback[:200]}", "feedback")
         if task.description:
             _progress(task_id, project_id, f"📝 任务描述：{task.description}", "desc")
 
@@ -138,10 +146,14 @@ def run_agent_pipeline(task_id: int):
         _progress(task_id, project_id, "📂 正在准备项目工作空间...", "prepare")
         workspace = project.workspace_path
 
-        # ── Step 2: Create task branch ─────────────────────────────
+        # ── Step 2: Create or reuse task branch ────────────────────
         branch_name = f"task/{task.id}"
-        _progress(task_id, project_id, f"🌿 创建 Git 工作分支：{branch_name}", "branch")
-        git.create_branch(workspace, branch_name)
+        if is_revision:
+            _progress(task_id, project_id, f"🌿 切换到已有工作分支：{branch_name}", "branch")
+            git.switch_branch(workspace, branch_name)
+        else:
+            _progress(task_id, project_id, f"🌿 创建 Git 工作分支：{branch_name}", "branch")
+            git.create_branch(workspace, branch_name)
 
         # ── Step 3: Get runner and execute ─────────────────────────
         _progress(task_id, project_id, f"🤖 启动 Agent「{agent_name}」", "agent_start")
@@ -157,11 +169,20 @@ def run_agent_pipeline(task_id: int):
         on_progress = _make_progress_cb(task_id, project_id)
         on_stage = _make_stage_cb(task_id, project_id)
 
+        # Build task description with optional feedback for revision rounds
+        task_desc = task.description or task.title
+        if feedback:
+            task_desc = (
+                f"【人工审查反馈 — 请根据以下意见修改代码】\n"
+                f"{feedback}\n\n"
+                f"【原始任务】\n{task_desc}"
+            )
+
         # Dispatch to runner
         runner = get_runner(runner_type)
         start_ts = time.time()
         result = runner.run(
-            task_description=task.description or task.title,
+            task_description=task_desc,
             workspace=workspace,
             model_name=model_name,
             task_id=task_id,
