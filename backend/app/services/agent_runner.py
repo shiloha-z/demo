@@ -16,7 +16,12 @@ from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, Project
 from app.services import git_service as git
-from app.services import memory_service as mem
+
+# Lazy import — memory_service may fail if chromadb not installed
+try:
+    from app.services import memory_service as mem
+except ImportError:
+    mem = None
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +51,11 @@ def _progress(task_id: int, project_id: int, message: str, step: str = ""):
         "timestamp": _now_iso(),
     }
     broadcast_sync("task_progress", payload)
-    try:
-        mem.add_task_memory(task_id, message, {"type": "progress", "step": step, "timestamp": payload["timestamp"]})
-    except Exception:
-        pass
+    if mem:
+        try:
+            mem.add_task_memory(task_id, message, {"type": "progress", "step": step, "timestamp": payload["timestamp"]})
+        except Exception:
+            pass
 
 
 def _pipeline_stage(task_id: int, project_id: int, stage_key: str, status: str):
@@ -242,14 +248,15 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
         db.refresh(review)
 
         # ── Save to project memory ──────────────────────────────────
-        try:
-            mem.add_project_memory(
-                project_id,
-                f"Task #{task_id} ({task.title}) [{runner_type}]: {summary[:500]}",
-                {"type": "review_result", "task_id": str(task_id), "runner_type": runner_type},
-            )
-        except Exception:
-            pass
+        if mem:
+            try:
+                mem.add_project_memory(
+                    project_id,
+                    f"Task #{task_id} ({task.title}) [{runner_type}]: {summary[:500]}",
+                    {"type": "review_result", "task_id": str(task_id), "runner_type": runner_type},
+                )
+            except Exception:
+                pass
 
         # Switch back to master
         _progress(task_id, project_id, "🔙 切换回主分支，清理工作区...", "cleanup")
@@ -321,10 +328,11 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
     db.commit()
 
     # Record failure in memory
-    try:
-        mem.add_task_memory(task.id, f"Task failed [{runner_type}]: {error}", {"type": "error"})
-    except Exception:
-        pass
+    if mem:
+        try:
+            mem.add_task_memory(task.id, f"Task failed [{runner_type}]: {error}", {"type": "error"})
+        except Exception:
+            pass
 
     # Switch back to master
     project = db.query(Project).get(project_id)

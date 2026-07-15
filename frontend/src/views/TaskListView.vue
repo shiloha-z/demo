@@ -384,13 +384,24 @@ async function submitCreateTask() {
       description: newTaskForm.value.description,
       agent_id: newTaskForm.value.agent_id,
     })
-    MessagePlugin.success('任务已创建，Agent 开始执行...')
+    MessagePlugin.success('任务已创建，待开始执行')
     showCreateTask.value = false
     await loadTasks()
   } catch (e: any) {
     MessagePlugin.error(getErrorMessage(e, '创建任务失败'))
   } finally {
     creatingTask.value = false
+  }
+}
+
+async function startTask(task: any, event: Event) {
+  event.stopPropagation()
+  try {
+    await api.post(`/projects/${task.project_id}/tasks/${task.id}/start`)
+    MessagePlugin.success(`任务 #${task.id} 已开始执行`)
+    await loadTasks()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '启动任务失败'))
   }
 }
 </script>
@@ -460,6 +471,14 @@ async function submitCreateTask() {
             <div class="task-item-top">
               <span class="task-id">#{{ t.id }}</span>
               <div class="task-item-actions">
+                <button
+                  v-if="t.status === 'pending'"
+                  class="start-btn"
+                  title="开始执行"
+                  @click="startTask(t, $event)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                </button>
                 <button
                   v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing'"
                   class="archive-btn"
@@ -716,7 +735,7 @@ async function submitCreateTask() {
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
-        <t-button theme="primary" :disabled="!newTaskForm.title || !newTaskForm.agent_id" :loading="creatingTask" @click="submitCreateTask">开始执行</t-button>
+        <t-button theme="primary" :disabled="!newTaskForm.title || !newTaskForm.agent_id" :loading="creatingTask" @click="submitCreateTask">创建</t-button>
       </template>
     </t-dialog>
 
@@ -773,6 +792,14 @@ async function submitCreateTask() {
 }
 .task-item:hover .archive-btn { opacity: 1; }
 .archive-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+
+.start-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: var(--primary-light); color: var(--primary);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.start-btn:hover { background: var(--primary); color: #fff; }
 
 /* Archived section */
 .archived-section { border-top: 2px solid var(--surface-border); margin-top: auto; }

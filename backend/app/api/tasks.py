@@ -223,13 +223,41 @@ def create_task(
     db.commit()
     db.refresh(task)
 
+    # Notify all clients: new task created
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "pending"})
+
+    return _task_to_response(task)
+
+
+# ── Start task (manual trigger) ─────────────────────────────────────
+
+@router.post("/{task_id}/start", response_model=TaskResponse)
+def start_task(
+    project_id: int,
+    task_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Manually start a pending task. Agent must be idle."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status != TaskStatus.PENDING:
+        raise HTTPException(status_code=400, detail=f"只有待开始的任务才能启动，当前状态：{task.status.value}")
+
+    agent = db.query(Agent).get(task.agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.status == AgentStatus.WORKING:
+        raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+
     # Update agent status
     agent.status = AgentStatus.WORKING
     db.commit()
 
-    # Notify all clients: new task created + agent started working
     from app.api.ws import broadcast_sync
-    broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "pending"})
     broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
 
     # Run agent pipeline in background

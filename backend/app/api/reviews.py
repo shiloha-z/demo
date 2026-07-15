@@ -7,7 +7,12 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.models import User, Review, ReviewStatus, Task, TaskStatus, Version
 from app.services import git_service as git
-from app.services import memory_service as mem
+
+# Lazy import — memory_service may fail if chromadb not installed
+try:
+    from app.services import memory_service as mem
+except ImportError:
+    mem = None
 
 router = APIRouter(prefix="/api", tags=["Reviews"])
 
@@ -87,13 +92,14 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         git.delete_branch(proj.workspace_path, branch_name)
 
     # Record to project memory
-    try:
-        mem.add_project_memory(review.project_id,
-            f"Review #{review_id} (task #{review.task_id}) APPROVED. "
-            f"Changes merged to master.",
-            {"type": "review_decision", "review_id": str(review_id), "decision": "approved"})
-    except Exception:
-        pass
+    if mem:
+        try:
+            mem.add_project_memory(review.project_id,
+                f"Review #{review_id} (task #{review.task_id}) APPROVED. "
+                f"Changes merged to master.",
+                {"type": "review_decision", "review_id": str(review_id), "decision": "approved"})
+        except Exception:
+            pass
 
     return {"message": "Approved"}
 
@@ -184,12 +190,13 @@ def close_review(
         git.delete_branch(proj.workspace_path, branch_name)
 
     # Record to project memory
-    try:
-        mem.add_project_memory(review.project_id,
-            f"Review #{review_id} (task #{review.task_id}) CLOSED (terminal rejection).",
-            {"type": "review_decision", "review_id": str(review_id), "decision": "closed"})
-    except Exception:
-        pass
+    if mem:
+        try:
+            mem.add_project_memory(review.project_id,
+                f"Review #{review_id} (task #{review.task_id}) CLOSED (terminal rejection).",
+                {"type": "review_decision", "review_id": str(review_id), "decision": "closed"})
+        except Exception:
+            pass
 
     return {"message": "Closed"}
 

@@ -21,14 +21,25 @@ from chromadb.config import Settings as ChromaSettings
 
 logger = logging.getLogger(__name__)
 
+# ── ChromaDB optional import ─────────────────────────────────────────────
+_chromadb_available = False
+try:
+    import chromadb
+    from chromadb.config import Settings as ChromaSettings
+    _chromadb_available = True
+except ImportError:
+    logger.warning("chromadb not installed — memory service will be a no-op")
+
 # ── Client (lazy init) ───────────────────────────────────────────────────
 
-_client: Optional[chromadb.Client] = None
+_client = None  # Optional[chromadb.Client]
 
 
-def _get_client() -> chromadb.Client:
+def _get_client():
     """Lazy-init ChromaDB persistent client."""
     global _client
+    if not _chromadb_available:
+        return None
     if _client is None:
         persist_dir = os.path.join(os.path.dirname(__file__), "..", "..", "chroma_data")
         persist_dir = os.path.abspath(persist_dir)
@@ -56,6 +67,8 @@ GLOBAL_COLLECTION = "global_memory"
 
 def _get_or_create(name: str):
     client = _get_client()
+    if client is None:
+        return None
     try:
         return client.get_collection(name)
     except Exception:
@@ -67,9 +80,10 @@ def _get_or_create(name: str):
 def add_task_memory(task_id: int, doc: str, metadata: dict | None = None) -> str:
     """Record a step/observation during task execution."""
     col = _get_or_create(_task_collection(task_id))
+    if col is None:
+        return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-    ts = datetime.now(timezone.utc).isoformat()
     count = col.count()
     uid = f"t{task_id}_{count + 1}"
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
@@ -80,9 +94,10 @@ def add_task_memory(task_id: int, doc: str, metadata: dict | None = None) -> str
 def add_project_memory(project_id: int, doc: str, metadata: dict | None = None) -> str:
     """Record project-level knowledge (e.g. review feedback patterns)."""
     col = _get_or_create(_project_collection(project_id))
+    if col is None:
+        return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-    ts = datetime.now(timezone.utc).isoformat()
     count = col.count()
     uid = f"p{project_id}_{count + 1}"
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
@@ -93,6 +108,8 @@ def add_project_memory(project_id: int, doc: str, metadata: dict | None = None) 
 def add_global_memory(doc: str, metadata: dict | None = None) -> str:
     """Record a global pattern or lesson learned."""
     col = _get_or_create(GLOBAL_COLLECTION)
+    if col is None:
+        return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     count = col.count()
@@ -137,9 +154,11 @@ def get_recent_task_memories(task_id: int, n: int = 10) -> list[str]:
 # ── Internal helpers ─────────────────────────────────────────────────────
 
 def _search(collection_name: str, query: str, n_results: int) -> list[str]:
+    if not _chromadb_available:
+        return []
     try:
         col = _get_or_create(collection_name)
-        if col.count() == 0:
+        if col is None or col.count() == 0:
             return []
         results = col.query(query_texts=[query], n_results=min(n_results, col.count()))
         docs = results.get("documents", [[]])[0]
@@ -150,9 +169,11 @@ def _search(collection_name: str, query: str, n_results: int) -> list[str]:
 
 
 def _get_recent(collection_name: str, n: int) -> list[str]:
+    if not _chromadb_available:
+        return []
     try:
         col = _get_or_create(collection_name)
-        if col.count() == 0:
+        if col is None or col.count() == 0:
             return []
         # Fetch all and sort by id (ids are sequential), return last n
         all_data = col.get()
@@ -170,9 +191,13 @@ def _get_recent(collection_name: str, n: int) -> list[str]:
 
 def delete_task_memory(task_id: int) -> None:
     """Clean up task-scoped collection after task is complete/merged."""
+    if not _chromadb_available:
+        return
     name = _task_collection(task_id)
     try:
         client = _get_client()
+        if client is None:
+            return
         client.delete_collection(name)
         logger.info(f"Deleted task memory collection: {name}")
     except Exception:

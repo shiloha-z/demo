@@ -141,7 +141,7 @@ async function createTask() {
       description: newTask.value.description,
       agent_id: selectedAgent.value.id,
     })
-    MessagePlugin.success('任务已创建，Agent 开始执行...')
+    MessagePlugin.success('任务已创建，待开始执行')
     showCreateTask.value = false
     newTask.value = { title: '', description: '', project_id: null }
   } finally { loading.value = false }
@@ -331,7 +331,7 @@ function lastResultLabel(status: string | null): string {
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
-        <t-button theme="primary" :disabled="!newTask.title || !newTask.project_id" @click="createTask">开始执行</t-button>
+        <t-button theme="primary" :disabled="!newTask.title || !newTask.project_id" @click="createTask">创建</t-button>
       </template>
     </t-dialog>
   </div>
