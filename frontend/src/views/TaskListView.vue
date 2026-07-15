@@ -24,6 +24,7 @@ const archiveChecked = ref<Set<number>>(new Set())
 const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
 const archiving = ref(false)
 const timelineDrawerVisible = ref(false)
+const statusFilter = ref('all')
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
 // Pipeline stepper state
@@ -181,6 +182,11 @@ async function loadTasks() {
   archivedTasks.value = archived.data
   archiveChecked.value = new Set()
 }
+
+const filteredTasks = computed(() => {
+  if (statusFilter.value === 'all') return tasks.value
+  return tasks.value.filter((t: any) => t.status === statusFilter.value)
+})
 
 async function selectTask(task: any) {
   if (selectedTask.value?.id !== task.id) {
@@ -447,6 +453,16 @@ async function resumeTask(task: any, event: Event) {
           </template>
           创建任务
         </t-button>
+        <t-select v-model="statusFilter" size="small" style="width: 100px" placeholder="全部状态">
+          <t-option value="all" label="全部状态" />
+          <t-option value="pending" label="等待中" />
+          <t-option value="running" label="执行中" />
+          <t-option value="paused" label="已暂停" />
+          <t-option value="reviewing" label="待审核" />
+          <t-option value="approved" label="已通过" />
+          <t-option value="rejected" label="已驳回" />
+          <t-option value="failed" label="失败" />
+        </t-select>
         <t-select v-model="sortBy" size="small" style="width: 110px" @change="loadTasks()">
           <t-option value="created_desc" label="最新创建" />
           <t-option value="created_asc" label="最早创建" />
@@ -489,7 +505,7 @@ async function resumeTask(task: any, event: Event) {
         <div class="task-list">
           <!-- Active tasks -->
           <div
-            v-for="t in tasks"
+            v-for="t in filteredTasks"
             :key="t.id"
             class="task-item"
             :class="{ active: selectedTask?.id === t.id }"
