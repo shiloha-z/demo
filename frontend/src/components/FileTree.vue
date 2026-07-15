@@ -63,6 +63,8 @@ function handleClick(node: TreeNode) {
     selectedPath.value = node.path
     emit('select', node.path)
   } else {
+    selectedPath.value = node.path
+    emit('select', node.path)
     expandDir(node)
   }
 }
