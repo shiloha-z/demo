@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import api, { getErrorMessage } from '../api'
@@ -86,12 +86,21 @@ async function createAgent() {
   } finally { loading.value = false }
 }
 
-async function deleteAgent(id: number) {
-  try {
-    await api.delete(`/agents/${id}`)
-    MessagePlugin.success('Agent 已删除')
-    await loadAgents()
-  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+async function deleteAgent(id: number, name: string) {
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要删除 Agent「${name}」吗？此操作不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/agents/${id}`)
+        MessagePlugin.success('Agent 已删除')
+        await loadAgents()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 async function createTask() {
@@ -163,7 +172,7 @@ function openTaskDialog(agent: any) {
         </div>
         <div class="agent-actions">
           <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
-          <t-button size="small" variant="text" theme="danger" @click="deleteAgent(a.id)" title="删除">
+          <t-button size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
             <template #icon>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
             </template>
