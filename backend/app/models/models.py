@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SAEnum
 from sqlalchemy.orm import relationship
 from enum import Enum
 
@@ -86,6 +86,7 @@ class Task(Base):
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
+    archived = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_now)
 
     agent = relationship("Agent")

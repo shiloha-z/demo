@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
@@ -10,9 +10,13 @@ const store = useProjectStore()
 const wsStore = useWebSocketStore()
 
 const tasks = ref<any[]>([])
+const archivedTasks = ref<any[]>([])
 const selectedTask = ref<any>(null)
 const taskDetail = ref<any>(null)
 const loadingDetail = ref(false)
+const showArchived = ref(false)
+const archiveChecked = ref<Set<number>>(new Set())
+const archiving = ref(false)
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
 const statusLabels: Record<string, string> = {
@@ -58,14 +62,19 @@ onUnmounted(() => {
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
-  if (!pid) { tasks.value = []; return }
+  if (!pid) { tasks.value = []; archivedTasks.value = []; return }
   await loadTasks()
 }, { immediate: true })
 
 async function loadTasks() {
   if (!filterProjectId.value) return
-  const { data } = await api.get(`/projects/${filterProjectId.value}/tasks`)
-  tasks.value = data
+  const [active, archived] = await Promise.all([
+    api.get(`/projects/${filterProjectId.value}/tasks`),
+    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { archived: true } }),
+  ])
+  tasks.value = active.data
+  archivedTasks.value = archived.data
+  archiveChecked.value = new Set()
 }
 
 async function selectTask(task: any) {
@@ -79,6 +88,82 @@ async function selectTask(task: any) {
   } finally {
     loadingDetail.value = false
   }
+}
+
+async function archiveTask(task: any, event: Event) {
+  event.stopPropagation()
+  try {
+    await api.post(`/projects/${task.project_id}/tasks/${task.id}/archive`)
+    MessagePlugin.success(`任务 #${task.id} 已归档`)
+    if (selectedTask.value?.id === task.id) { selectedTask.value = null; taskDetail.value = null }
+    await loadTasks()
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '归档失败')) }
+}
+
+async function unarchiveTask(task: any, event?: Event) {
+  if (event) event.stopPropagation()
+  try {
+    await api.post(`/projects/${task.project_id}/tasks/${task.id}/unarchive`)
+    MessagePlugin.success(`任务 #${task.id} 已恢复`)
+    await loadTasks()
+    if (!showArchived.value) archiveChecked.value = new Set()
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '恢复失败')) }
+}
+
+function toggleCheck(taskId: number) {
+  const next = new Set(archiveChecked.value)
+  if (next.has(taskId)) next.delete(taskId)
+  else next.add(taskId)
+  archiveChecked.value = next
+}
+
+function toggleAll() {
+  if (archiveChecked.value.size === archivedTasks.value.length) {
+    archiveChecked.value = new Set()
+  } else {
+    archiveChecked.value = new Set(archivedTasks.value.map(t => t.id))
+  }
+}
+
+async function batchDelete() {
+  if (archiveChecked.value.size === 0) return
+  const count = archiveChecked.value.size
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认批量删除',
+    body: `确定要永久删除 ${count} 个已归档任务吗？此操作不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      archiving.value = true
+      try {
+        await api.post(`/projects/${filterProjectId.value}/tasks/batch-delete`, {
+          task_ids: [...archiveChecked.value],
+        })
+        MessagePlugin.success(`已删除 ${count} 个任务`)
+        await loadTasks()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '批量删除失败')) }
+      finally { archiving.value = false }
+      confirmDialog.destroy()
+    },
+  })
+}
+
+async function deleteOne(task: any, event?: Event) {
+  if (event) event.stopPropagation()
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要永久删除任务 #${task.id}「${task.title}」吗？`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${task.project_id}/tasks/${task.id}`)
+        MessagePlugin.success('已删除')
+        await loadTasks()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+      confirmDialog.destroy()
+    },
+  })
 }
 
 async function approveReview() {
@@ -141,7 +226,7 @@ function renderMarkdown(text: string) {
     </div>
 
     <template v-else>
-      <div v-if="tasks.length === 0" class="empty-card empty-card--full">
+      <div v-if="tasks.length === 0 && archivedTasks.length === 0" class="empty-card empty-card--full">
         <div class="empty-icon">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         </div>
@@ -150,7 +235,9 @@ function renderMarkdown(text: string) {
       </div>
 
       <div v-else class="task-layout">
+        <!-- ── Left: task list ─────────────────────────────── -->
         <div class="task-list">
+          <!-- Active tasks -->
           <div
             v-for="t in tasks"
             :key="t.id"
@@ -160,10 +247,20 @@ function renderMarkdown(text: string) {
           >
             <div class="task-item-top">
               <span class="task-id">#{{ t.id }}</span>
-              <span class="task-status" :style="{ color: statusColors[t.status] }">
-                <span class="status-dot" :class="t.status"></span>
-                {{ statusLabels[t.status] || t.status }}
-              </span>
+              <div class="task-item-actions">
+                <button
+                  v-if="t.status === 'completed' || t.status === 'failed'"
+                  class="archive-btn"
+                  title="归档"
+                  @click="archiveTask(t, $event)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                </button>
+                <span class="task-status" :style="{ color: statusColors[t.status] }">
+                  <span class="status-dot" :class="t.status"></span>
+                  {{ statusLabels[t.status] || t.status }}
+                </span>
+              </div>
             </div>
             <div class="task-title-text">{{ t.title }}</div>
             <div class="task-meta">
@@ -174,8 +271,77 @@ function renderMarkdown(text: string) {
               <span v-if="t.created_at">{{ formatDate(t.created_at) }}</span>
             </div>
           </div>
+
+          <!-- Archived tasks section -->
+          <div class="archived-section" v-if="archivedTasks.length > 0">
+            <button class="archived-header" @click="showArchived = !showArchived">
+              <svg
+                width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                :class="{ rotated: showArchived }"
+                style="transition: transform var(--transition-fast);"
+              >
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+              <span>归档任务 ({{ archivedTasks.length }})</span>
+            </button>
+
+            <div v-if="showArchived" class="archived-list">
+              <!-- Batch toolbar -->
+              <div class="archived-toolbar">
+                <label class="check-all-label" @click.stop>
+                  <input type="checkbox" :checked="archiveChecked.size === archivedTasks.length && archivedTasks.length > 0" @change="toggleAll" />
+                  <span>全选</span>
+                </label>
+                <t-button
+                  size="small"
+                  theme="danger"
+                  variant="outline"
+                  :disabled="archiveChecked.size === 0 || archiving"
+                  @click="batchDelete"
+                >
+                  批量删除 ({{ archiveChecked.size }})
+                </t-button>
+              </div>
+
+              <div
+                v-for="t in archivedTasks"
+                :key="t.id"
+                class="archived-item"
+              >
+                <input
+                  type="checkbox"
+                  :checked="archiveChecked.has(t.id)"
+                  @click.stop
+                  @change="toggleCheck(t.id)"
+                  class="archive-checkbox"
+                />
+                <div class="archived-item-body" @click="selectTask(t)">
+                  <div class="task-item-top">
+                    <span class="task-id">#{{ t.id }}</span>
+                    <span class="task-status" :style="{ color: statusColors[t.status] }">
+                      <span class="status-dot" :class="t.status"></span>
+                      {{ statusLabels[t.status] || t.status }}
+                    </span>
+                  </div>
+                  <div class="task-title-text">{{ t.title }}</div>
+                  <div class="task-meta">
+                    <span>{{ t.agent_name || 'Agent #' + t.agent_id }}</span>
+                  </div>
+                </div>
+                <div class="archived-item-acts">
+                  <button class="restore-btn" title="恢复" @click="unarchiveTask(t, $event)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                  </button>
+                  <button class="del-btn" title="删除" @click="deleteOne(t, $event)">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
+        <!-- ── Right: task detail ─────────────────────────── -->
         <div class="task-detail" v-if="selectedTask && taskDetail">
           <div class="detail-header">
             <div>
@@ -270,6 +436,7 @@ function renderMarkdown(text: string) {
 .task-list {
   width: 300px; border-right: 1px solid var(--surface-border);
   background: var(--app-shell); overflow-y: auto; flex-shrink: 0;
+  display: flex; flex-direction: column;
 }
 .task-item {
   padding: 12px 14px; border-bottom: 1px solid var(--surface-border);
@@ -278,6 +445,7 @@ function renderMarkdown(text: string) {
 .task-item:hover { background: var(--surface-hover); }
 .task-item.active { background: var(--primary-lighter); border-left: 3px solid var(--primary); padding-left: 11px; }
 .task-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.task-item-actions { display: flex; align-items: center; gap: 4px; }
 .task-id { font-size: 12px; font-weight: 700; color: var(--muted-foreground); font-family: var(--font-mono); }
 .task-status { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
 .task-title-text { font-size: 13.5px; font-weight: 600; color: var(--foreground); margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -287,6 +455,61 @@ function renderMarkdown(text: string) {
   white-space: nowrap; flex-shrink: 0;
 }
 
+/* Archive button on active tasks */
+.archive-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast); opacity: 0;
+}
+.task-item:hover .archive-btn { opacity: 1; }
+.archive-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+
+/* Archived section */
+.archived-section { border-top: 2px solid var(--surface-border); margin-top: auto; }
+.archived-header {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 10px 14px;
+  border: none; background: transparent; color: var(--muted-foreground);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  transition: color var(--transition-fast);
+}
+.archived-header:hover { color: var(--foreground); }
+.archived-header .rotated { transform: rotate(90deg); }
+
+.archived-list { border-top: 1px solid var(--surface-border); }
+
+.archived-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; background: var(--surface-hover);
+  border-bottom: 1px solid var(--surface-border);
+}
+.check-all-label { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-foreground); cursor: pointer; user-select: none; }
+
+.archived-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px 8px 8px; border-bottom: 1px solid var(--surface-border);
+  transition: background var(--transition-fast);
+  opacity: 0.7;
+}
+.archived-item:hover { background: var(--surface-hover); opacity: 1; }
+.archive-checkbox { flex-shrink: 0; cursor: pointer; }
+.archived-item-body { flex: 1; min-width: 0; cursor: pointer; }
+.archived-item-acts { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
+.archived-item:hover .archived-item-acts { opacity: 1; }
+
+.restore-btn, .del-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: transparent; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.restore-btn { color: var(--muted-foreground); }
+.restore-btn:hover { background: var(--primary-light); color: var(--primary); }
+.del-btn { color: var(--muted-foreground); }
+.del-btn:hover { background: var(--danger-light); color: var(--danger); }
+
+/* ── Detail panel (unchanged) ────────────────────────── */
 .task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--page-canvas); }
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
 .detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }

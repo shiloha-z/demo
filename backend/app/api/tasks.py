@@ -25,6 +25,7 @@ class TaskResponse(BaseModel):
     title: str
     description: str
     status: str
+    archived: bool = False
     agent_id: int
     project_id: int
     created_at: str | None = None
@@ -34,6 +35,10 @@ class TaskResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class BatchDeleteRequest(BaseModel):
+    task_ids: list[int] = Field(..., min_length=1)
 
 
 class TaskDetailResponse(BaseModel):
@@ -69,6 +74,7 @@ def _task_to_response(t: Task) -> TaskResponse:
         title=t.title,
         description=t.description,
         status=t.status.value if hasattr(t.status, 'value') else t.status,
+        archived=bool(t.archived),
         agent_id=t.agent_id,
         project_id=t.project_id,
         created_at=t.created_at.isoformat() if t.created_at else None,
@@ -79,14 +85,21 @@ def _task_to_response(t: Task) -> TaskResponse:
 
 
 @router.get("", response_model=list[TaskResponse])
-def list_tasks(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    tasks = (
+def list_tasks(
+    project_id: int,
+    archived: bool = False,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List tasks for a project. Set ?archived=true to show only archived tasks."""
+    q = (
         db.query(Task)
         .filter(Task.project_id == project_id)
         .options(joinedload(Task.agent), joinedload(Task.project))
-        .order_by(Task.id.desc())
-        .all()
     )
+    # Filter by archived status — default shows active (non-archived) tasks
+    q = q.filter(Task.archived == bool(archived))
+    tasks = q.order_by(Task.id.desc()).all()
     return [_task_to_response(t) for t in tasks]
 
 
@@ -177,12 +190,94 @@ def create_task(
     return _task_to_response(task)
 
 
+# ── Archive / Unarchive / Delete ──────────────────────────────────────
+
+@router.post("/{task_id}/archive")
+def archive_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Archive a completed or failed task. Pending/running tasks cannot be archived."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
+        raise HTTPException(status_code=400, detail="只有已完成或失败的任务才能归档")
+    if task.archived:
+        raise HTTPException(status_code=400, detail="任务已归档")
+    task.archived = True
+    db.commit()
+    return {"message": "已归档"}
+
+
+@router.post("/{task_id}/unarchive")
+def unarchive_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Restore an archived task back to the active list."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not task.archived:
+        raise HTTPException(status_code=400, detail="任务未归档")
+    task.archived = False
+    db.commit()
+    return {"message": "已取消归档"}
+
+
+@router.delete("/{task_id}")
+def delete_task(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Permanently delete a task. Only archived tasks can be deleted."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if not task.archived:
+        raise HTTPException(status_code=400, detail="请先归档任务再删除")
+    db.delete(task)
+    db.commit()
+    return {"message": "已删除"}
+
+
+@router.post("/batch-delete")
+def batch_delete_tasks(
+    project_id: int,
+    req: BatchDeleteRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Batch delete archived tasks."""
+    tasks = db.query(Task).filter(
+        Task.id.in_(req.task_ids),
+        Task.project_id == project_id,
+        Task.archived == True,
+    ).all()
+    if not tasks:
+        raise HTTPException(status_code=404, detail="No matching archived tasks found")
+    deleted_count = 0
+    for t in tasks:
+        db.delete(t)
+        deleted_count += 1
+    db.commit()
+    return {"message": f"已删除 {deleted_count} 个任务", "count": deleted_count}
+
+
 # ── Global task listing (across all projects) ─────────────────────────
 
 @global_router.get("", response_model=list[TaskResponse])
 def list_all_tasks(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     tasks = (
         db.query(Task)
+        .filter(Task.archived == False)
         .options(joinedload(Task.agent), joinedload(Task.project))
         .order_by(Task.id.desc())
         .limit(100)
