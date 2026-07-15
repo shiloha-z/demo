@@ -314,6 +314,48 @@ function formatDate(d: string) {
 function hasActivePipeline(task: any): boolean {
   return task?.status === 'running' || task?.status === 'pending'
 }
+
+// ── Create task dialog ──────────────────────────────────────────
+const showCreateTask = ref(false)
+const agents = ref<any[]>([])
+const newTaskForm = ref({ agent_id: null as number | null, title: '', description: '' })
+const creatingTask = ref(false)
+
+async function loadAgents() {
+  try {
+    const { data } = await api.get('/agents')
+    agents.value = data
+  } catch { /* ignore */ }
+}
+
+function openCreateTaskDialog() {
+  if (!filterProjectId.value) {
+    MessagePlugin.warning('请先在侧边栏选择一个项目')
+    return
+  }
+  newTaskForm.value = { agent_id: null, title: '', description: '' }
+  loadAgents()
+  showCreateTask.value = true
+}
+
+async function submitCreateTask() {
+  if (!newTaskForm.value.title || !newTaskForm.value.agent_id || !filterProjectId.value) return
+  creatingTask.value = true
+  try {
+    await api.post(`/projects/${filterProjectId.value}/tasks`, {
+      title: newTaskForm.value.title,
+      description: newTaskForm.value.description,
+      agent_id: newTaskForm.value.agent_id,
+    })
+    MessagePlugin.success('任务已创建，Agent 开始执行...')
+    showCreateTask.value = false
+    await loadTasks()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '创建任务失败'))
+  } finally {
+    creatingTask.value = false
+  }
+}
 </script>
 
 <template>
@@ -324,6 +366,12 @@ function hasActivePipeline(task: any): boolean {
         <p class="page-desc">查看 Agent 任务的执行状态与详细结果</p>
       </div>
       <div class="header-right">
+        <t-button theme="primary" size="small" @click="openCreateTaskDialog">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </template>
+          创建任务
+        </t-button>
         <t-select v-model="sortBy" size="small" style="width: 110px" @change="loadTasks()">
           <t-option value="created_desc" label="最新创建" />
           <t-option value="created_asc" label="最早创建" />
@@ -612,6 +660,27 @@ function hasActivePipeline(task: any): boolean {
         </div>
       </div>
     </template>
+
+    <!-- Create Task Dialog -->
+    <t-dialog v-model:visible="showCreateTask" header="创建任务" width="500px">
+      <div class="dialog-form">
+        <div class="task-project-info">
+          目标项目：<strong>{{ store.currentProject?.name }}</strong>
+        </div>
+        <label class="field-label">选择 Agent</label>
+        <t-select v-model="newTaskForm.agent_id" placeholder="请选择一个 Agent">
+          <t-option v-for="a in agents" :key="a.id" :value="a.id" :label="`${a.name} (${roleLabels[a.role] || a.role})`" />
+        </t-select>
+        <label class="field-label">任务标题</label>
+        <t-input v-model="newTaskForm.title" placeholder="例如：写一个用户登录接口" />
+        <label class="field-label">详细描述</label>
+        <textarea v-model="newTaskForm.description" class="field-textarea" rows="4" placeholder="描述清楚你要 Agent 做什么..." />
+      </div>
+      <template #footer>
+        <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
+        <t-button theme="primary" :disabled="!newTaskForm.title || !newTaskForm.agent_id" :loading="creatingTask" @click="submitCreateTask">开始执行</t-button>
+      </template>
+    </t-dialog>
   </div>
 
 </template>
@@ -866,4 +935,16 @@ function hasActivePipeline(task: any): boolean {
 .empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
 .empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }
 .empty-detail p { font-size: 13px; color: var(--muted-foreground); }
+
+/* ── Create task dialog ─────────────────────────────── */
+.dialog-form { display: flex; flex-direction: column; gap: 12px; }
+.task-project-info { font-size: 13px; color: var(--muted-foreground); }
+.field-label { font-size: 12px; font-weight: 600; color: var(--foreground); }
+.field-textarea {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); font-size: 13px; font-family: inherit;
+  background: var(--surface); color: var(--foreground);
+  resize: vertical; box-sizing: border-box;
+}
+.field-textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px oklch(0.55 0.2 260 / 0.12); }
 </style>
