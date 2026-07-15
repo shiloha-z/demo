@@ -12,6 +12,8 @@ const route = useRoute()
 
 const agents = ref<any[]>([])
 const availableModels = ref<{ id: string; name: string }[]>([])
+const runnerCheckResult = ref<{ available: boolean; checked: boolean; hint: string } | null>(null)
+const modelsLoading = ref(false)
 
 // Dialogs
 const showCreateAgent = ref(false)
@@ -77,6 +79,7 @@ async function loadAgents() {
 }
 
 async function loadModels(runnerType?: string) {
+  modelsLoading.value = true
   try {
     const params = runnerType ? { runner_type: runnerType } : {}
     const { data } = await api.get('/models', { params })
@@ -84,7 +87,20 @@ async function loadModels(runnerType?: string) {
     if (availableModels.value.length > 0 && !newAgent.value.model) {
       newAgent.value.model = availableModels.value[0].id
     }
-  } catch { /* ignore */ }
+    // Show detection result feedback
+    const sourceLabel: Record<string, string> = { api: '实时检测', static: '内置列表', fallback: '默认列表' }
+    const source = sourceLabel[data.source] || data.source || '未知'
+    if (data.source === 'api') {
+      MessagePlugin.success(`模型检测完成：${source} → ${data.count} 个可用模型`)
+    } else if (data.hint) {
+      MessagePlugin.warning(`模型检测：${source} → ${data.count} 个模型（${data.hint}）`)
+    } else {
+      MessagePlugin.info(`模型检测：${source} → ${data.count} 个模型`)
+    }
+  } catch {
+    MessagePlugin.error('模型检测失败，请检查后端服务是否运行')
+  }
+  finally { modelsLoading.value = false }
 }
 
 async function createAgent() {
@@ -141,6 +157,19 @@ function openTaskDialog(agent: any) {
   showCreateTask.value = true
 }
 
+async function checkRunnerAvailability(runnerType: string) {
+  if (!['claude_code', 'opencode'].includes(runnerType)) {
+    runnerCheckResult.value = null
+    return
+  }
+  try {
+    const { data } = await api.get('/agents/check-runner', { params: { runner_type: runnerType } })
+    runnerCheckResult.value = data
+  } catch {
+    runnerCheckResult.value = null
+  }
+}
+
 function lastResultLabel(status: string | null): string {
   if (!status) return ''
   const map: Record<string, string> = {
@@ -158,7 +187,7 @@ function lastResultLabel(status: string | null): string {
         <h1 class="page-title">Agent 池</h1>
         <p class="page-desc">全局 Agent 管理，可在任意项目中复用</p>
       </div>
-      <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type)">
+      <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type)">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </template>
@@ -243,14 +272,36 @@ function lastResultLabel(status: string | null): string {
           <t-option value="security" label="安全审查员" />
         </t-select>
         <label class="field-label">执行框架</label>
-        <t-select v-model="newAgent.runner_type" @change="(v: string) => loadModels(v)">
+        <t-select v-model="newAgent.runner_type" @change="(v: string) => { loadModels(v); checkRunnerAvailability(v) }">
           <t-option value="crewai" label="CrewAI — 多 Agent 流水线" />
           <t-option value="claude_code" label="Claude Code — Anthropic 官方 SDK" />
           <t-option value="opencode" label="OpenCode — 开源通用框架" />
         </t-select>
-        <label class="field-label">模型</label>
+        <!-- Runner CLI not found warning -->
+        <div v-if="runnerCheckResult && runnerCheckResult.checked && !runnerCheckResult.available" class="runner-warning">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <div class="runner-warning-body">
+            <strong>未检测到 {{ runnerCheckResult.cli_name }} CLI</strong>
+            <p>{{ runnerCheckResult.hint }}</p>
+          </div>
+        </div>
+        <div class="model-label-row">
+          <label class="field-label">模型</label>
+          <t-button
+            size="small"
+            variant="text"
+            :loading="modelsLoading"
+            @click="loadModels(newAgent.runner_type)"
+          >
+            <template #icon>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+            </template>
+            检测模型
+          </t-button>
+        </div>
         <t-select v-model="newAgent.model">
-          <t-option v-if="availableModels.length === 0" value="" label="加载中..." />
+          <t-option v-if="modelsLoading" value="" label="检测中..." />
+          <t-option v-else-if="availableModels.length === 0" value="" label="暂无可用模型，点击上方按钮检测" />
           <t-option v-for="m in availableModels" :key="m.id" :value="m.id" :label="m.name || m.id" />
         </t-select>
         <label class="field-label">系统提示词（选填）</label>
@@ -347,4 +398,22 @@ function lastResultLabel(status: string | null): string {
   font-size: 13px; color: var(--warning); padding: 10px 12px;
   background: var(--warning-light); border-radius: var(--radius-md);
 }
+
+/* Model label row */
+.model-label-row {
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* Runner CLI detection warning */
+.runner-warning {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 10px 12px;
+  background: #fff3cd; border: 1px solid #ffc107;
+  border-radius: var(--radius-md);
+  color: #856404; font-size: 13px;
+}
+.runner-warning svg { flex-shrink: 0; margin-top: 1px; color: #e6a100; }
+.runner-warning-body strong { font-weight: 600; }
+.runner-warning-body p { margin: 3px 0 0; font-size: 12px; opacity: 0.85; }
+
 </style>

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Check if claude CLI is available
 import shutil
-_HAS_CLI = shutil.which("claude") is not None
+_CLAUDE_PATH = shutil.which("claude")
 
 # Stage definitions
 STAGES = [
@@ -72,7 +72,7 @@ class ClaudeCodeRunner(BaseRunner):
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
     ) -> RunResult:
-        if not _HAS_CLI:
+        if not _CLAUDE_PATH:
             return RunResult(error=(
                 "Claude Code CLI not found on PATH.\n"
                 "Install: https://claude.ai/code\n"
@@ -141,7 +141,7 @@ class ClaudeCodeRunner(BaseRunner):
         """Run a single `claude -p` command and collect output."""
 
         cmd = [
-            "claude", "-p", prompt,
+            _CLAUDE_PATH, "-p", prompt,
             "--permission-mode", "acceptEdits",
             "--max-turns", "30",
         ]

@@ -34,7 +34,7 @@ STAGES = [
                "## 审查总结\n## 严重问题\n## 一般问题\n## 建议改进\n## 审查结论"},
 ]
 
-_HAS_OPENCODE = shutil.which("opencode") is not None
+_OPENCODE_PATH = shutil.which("opencode")
 
 
 class OpenCodeRunner(BaseRunner):
@@ -55,7 +55,7 @@ class OpenCodeRunner(BaseRunner):
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
     ) -> RunResult:
-        if not _HAS_OPENCODE:
+        if not _OPENCODE_PATH:
             return RunResult(error=(
                 "OpenCode CLI is not installed or not on PATH.\n"
                 "Install it: curl -fsSL https://opencode.ai/install | bash\n"
@@ -137,7 +137,7 @@ class OpenCodeRunner(BaseRunner):
             model_flag = model or "deepseek/deepseek-chat"
 
         cmd = [
-            "opencode", "run",
+            _OPENCODE_PATH, "run",
             "--format", "json",
             "--model", model_flag,
             "--cwd", workspace,

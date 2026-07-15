@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+import shutil
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -115,6 +117,40 @@ def create_agent(
     db.commit()
     db.refresh(agent)
     return AgentResponse.model_validate(agent)
+
+
+# Runner CLI detection table
+_RUNNER_CLI: dict[str, str] = {
+    "claude_code": "claude",
+    "opencode": "opencode",
+}
+
+_RUNNER_INSTALL_HINTS: dict[str, str] = {
+    "claude_code": "请安装 Claude Code CLI：https://claude.ai/code，然后运行 `claude` 完成认证",
+    "opencode": "请安装 OpenCode CLI：https://opencode.ai 或 `pip install opencode-cli`",
+}
+
+
+@router.get("/check-runner")
+def check_runner(runner_type: str = Query(..., description="Runner type to check")):
+    """Check whether the required CLI for a runner type is available on PATH.
+
+    Returns `available: true` if the CLI is found, otherwise `available: false`
+    with an install hint.
+    """
+    if runner_type not in _RUNNER_CLI:
+        # crewai or unknown — no CLI to check
+        return {"available": True, "runner_type": runner_type, "checked": False}
+
+    cli_name = _RUNNER_CLI[runner_type]
+    found = shutil.which(cli_name) is not None
+    return {
+        "available": found,
+        "runner_type": runner_type,
+        "cli_name": cli_name,
+        "checked": True,
+        "hint": "" if found else _RUNNER_INSTALL_HINTS.get(runner_type, ""),
+    }
 
 
 @router.delete("/{agent_id}")
