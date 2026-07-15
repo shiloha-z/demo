@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import api from '../api'
+import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
@@ -91,7 +91,7 @@ async function deleteAgent(id: number) {
     await api.delete(`/agents/${id}`)
     MessagePlugin.success('Agent 已删除')
     await loadAgents()
-  } catch { MessagePlugin.error('删除失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
 }
 
 async function createTask() {

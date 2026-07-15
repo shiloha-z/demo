@@ -7,6 +7,7 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.models import User, Review, ReviewStatus, Version
 from app.services import git_service as git
+from app.services import memory_service as mem
 
 router = APIRouter(prefix="/api", tags=["Reviews"])
 
@@ -68,6 +69,15 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         # 2. Clean up the task branch
         git.delete_branch(proj.workspace_path, branch_name)
 
+    # Record to project memory
+    try:
+        mem.add_project_memory(review.project_id,
+            f"Review #{review_id} (task #{review.task_id}) APPROVED. "
+            f"Changes merged to master.",
+            {"type": "review_decision", "review_id": str(review_id), "decision": "approved"})
+    except Exception:
+        pass
+
     return {"message": "Approved"}
 
 
@@ -92,6 +102,16 @@ def reject_review(
         branch_name = f"task/{review.task_id}"
         git.switch_branch(proj.workspace_path, "master")
         git.delete_branch(proj.workspace_path, branch_name)
+
+    # Record to project memory
+    try:
+        rejection_note = f"Review #{review_id} (task #{review.task_id}) REJECTED."
+        if feedback:
+            rejection_note += f" Feedback: {feedback}"
+        mem.add_project_memory(review.project_id, rejection_note,
+            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected"})
+    except Exception:
+        pass
 
     return {"message": "Rejected"}
 

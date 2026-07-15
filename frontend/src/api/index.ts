@@ -36,4 +36,12 @@ api.interceptors.response.use(
   }
 )
 
+/**
+ * Extract a user-facing message from an Axios error.
+ * Use in catch blocks: MessagePlugin.error(getErrorMessage(e, '默认错误信息'))
+ */
+export function getErrorMessage(e: any, fallback = '操作失败'): string {
+  return e?.response?.data?.detail || e?.message || fallback
+}
+
 export default api

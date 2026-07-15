@@ -3,7 +3,7 @@ import { ref, watch, onMounted, computed } from 'vue'
 import { useProjectStore } from '../stores/project'
 import FileTree from '../components/FileTree.vue'
 import MonacoEditor from '../components/MonacoEditor.vue'
-import api from '../api'
+import api, { getErrorMessage } from '../api'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 const store = useProjectStore()
@@ -38,7 +38,7 @@ async function handleUpload(e: Event) {
     })
     MessagePlugin.success(`${fileList.length} 个文件已上传`)
     fileTreeRef.value?.loadFiles()
-  } catch { MessagePlugin.error('上传失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '上传失败')) }
   finally { uploading.value = false; input.value = '' }
 }
 
@@ -67,7 +67,7 @@ async function createFile() {
     MessagePlugin.success(`文件 ${newFileName.value} 已创建`)
     showNewFile.value = false; newFileName.value = ''
     fileTreeRef.value?.loadFiles()
-  } catch { MessagePlugin.error('创建失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '创建失败')) }
   finally { creating.value = false }
 }
 
@@ -79,7 +79,7 @@ async function createFolder() {
     MessagePlugin.success(`文件夹 ${newFolderName.value} 已创建`)
     showNewFolder.value = false; newFolderName.value = ''
     fileTreeRef.value?.loadFiles()
-  } catch { MessagePlugin.error('创建失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '创建失败')) }
   finally { creating.value = false }
 }
 </script>

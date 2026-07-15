@@ -4,7 +4,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MonacoEditor from '../components/MonacoEditor.vue'
-import api from '../api'
+import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
@@ -59,7 +59,7 @@ async function approve(review: any) {
     MessagePlugin.success('审查已通过，已提交到 Git')
     await loadReviews()
     if (selectedReview.value?.id === review.id) selectedReview.value = null
-  } catch { MessagePlugin.error('操作失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
   finally { loading.value = false }
 }
 
@@ -70,7 +70,7 @@ async function reject(review: any) {
     MessagePlugin.warning('审查已驳回')
     await loadReviews()
     if (selectedReview.value?.id === review.id) selectedReview.value = null
-  } catch { MessagePlugin.error('操作失败') }
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
   finally { loading.value = false }
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -11,9 +11,39 @@ const dialogVisible = ref(false)
 const newProject = ref({ name: '', description: '' })
 const creating = ref(false)
 
-onMounted(() => store.fetchProjects())
+const activeAgentCount = ref(0)
+const pendingReviewCount = ref(0)
+const approvalRate = ref<string | null>(null)
 
-watch(() => store.sortBy, () => store.fetchProjects())
+onMounted(async () => {
+  await store.fetchProjects()
+  await loadStats()
+})
+
+watch(() => store.sortBy, () => { store.fetchProjects(); loadStats() })
+
+async function loadStats() {
+  try {
+    const [agentRes, reviewRes] = await Promise.all([
+      api.get('/agents'),
+      api.get('/reviews/pending-count'),
+    ])
+    activeAgentCount.value = (agentRes.data || []).filter((a: any) => a.status === 'working').length
+    pendingReviewCount.value = reviewRes.data?.count ?? 0
+    // Approval rate: count approved vs total reviews across all projects
+    let approved = 0; let total = 0
+    for (const p of store.projects) {
+      try {
+        const { data } = await api.get(`/projects/${p.id}/reviews`)
+        if (Array.isArray(data)) {
+          total += data.length
+          approved += data.filter((r: any) => r.status === 'approved').length
+        }
+      } catch { /* skip projects with errors */ }
+    }
+    approvalRate.value = total > 0 ? `${Math.round((approved / total) * 100)}%` : null
+  } catch { /* stats are non-critical */ }
+}
 
 async function handleCreate() {
   creating.value = true
@@ -21,6 +51,7 @@ async function handleCreate() {
     await store.createProject(newProject.value.name, newProject.value.description)
     dialogVisible.value = false
     newProject.value = { name: '', description: '' }
+    await loadStats()
   } catch (e: any) {
     MessagePlugin.error(e?.response?.data?.detail || '创建项目失败，请稍后重试')
   } finally {
@@ -47,6 +78,7 @@ function deleteProject(p: any, event: Event) {
         await api.delete(`/projects/${p.id}`)
         MessagePlugin.success(`项目「${p.name}」已删除`)
         await store.fetchProjects()
+        await loadStats()
         if (store.currentProject?.id === p.id) store.setCurrentProject(null)
       } catch (e: any) {
         MessagePlugin.error(e?.response?.data?.detail || '删除失败')
@@ -108,7 +140,7 @@ function goProject(p: any) {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>
         </div>
         <div class="stat-body">
-          <div class="stat-value">0</div>
+          <div class="stat-value">{{ activeAgentCount }}</div>
           <div class="stat-label">活跃 Agent</div>
         </div>
       </div>
@@ -117,7 +149,7 @@ function goProject(p: any) {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
         </div>
         <div class="stat-body">
-          <div class="stat-value">0</div>
+          <div class="stat-value">{{ pendingReviewCount }}</div>
           <div class="stat-label">待审查</div>
         </div>
       </div>
@@ -126,7 +158,7 @@ function goProject(p: any) {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         </div>
         <div class="stat-body">
-          <div class="stat-value">—</div>
+          <div class="stat-value">{{ approvalRate ?? '—' }}</div>
           <div class="stat-label">通过率</div>
         </div>
       </div>
