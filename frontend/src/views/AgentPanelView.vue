@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -7,6 +8,7 @@ import api from '../api'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
+const route = useRoute()
 
 const agents = ref<any[]>([])
 const availableModels = ref<{ id: string; name: string }[]>([])
@@ -44,13 +46,22 @@ onMounted(async () => {
   unsubAgent = wsStore.on('agent_update', () => loadAgents())
 })
 
+// Re-fetch agents when navigating back to this page
+watch(() => route.path, (path) => {
+  if (path === '/agents') loadAgents()
+})
+
 onUnmounted(() => {
   if (unsubAgent) unsubAgent()
 })
 
 async function loadAgents() {
-  const { data } = await api.get('/agents')
-  agents.value = data
+  try {
+    const { data } = await api.get('/agents')
+    agents.value = data
+  } catch (e: any) {
+    MessagePlugin.error(e?.response?.data?.detail || '加载 Agent 列表失败')
+  }
 }
 
 async function loadModels() {
@@ -162,7 +173,7 @@ function openTaskDialog(agent: any) {
     </div>
 
     <!-- Create Agent Dialog -->
-    <t-dialog v-model:visible="showCreateAgent" header="创建 Agent" width="480px" :footer="false">
+    <t-dialog v-model:visible="showCreateAgent" header="创建 Agent" width="480px">
       <div class="dialog-form">
         <label class="field-label">名称</label>
         <t-input v-model="newAgent.name" placeholder="例如：小码" />
@@ -187,7 +198,7 @@ function openTaskDialog(agent: any) {
     </t-dialog>
 
     <!-- Create Task Dialog -->
-    <t-dialog v-model:visible="showCreateTask" header="指派任务" width="500px" :footer="false">
+    <t-dialog v-model:visible="showCreateTask" header="指派任务" width="500px">
       <div class="dialog-form">
         <p class="task-agent-label">Agent：<strong>{{ selectedAgent?.name }}</strong></p>
         <div v-if="!newTask.project_id" class="no-project-warning">

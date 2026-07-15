@@ -93,9 +93,9 @@ function handleLogout() {
 
       <!-- Content -->
       <main class="app-main">
-        <router-view v-slot="{ Component }">
+        <router-view v-slot="{ Component, route: routerRoute }">
           <transition name="fade-slide" mode="out-in">
-            <component :is="Component" />
+            <component :is="Component" :key="routerRoute.fullPath" />
           </transition>
         </router-view>
       </main>
