@@ -19,24 +19,32 @@ def _verify_safe_path(workspace: str, target: str) -> str:
 # ── Git operations ────────────────────────────────────────────────────
 
 def init_repo(path: str) -> Repo:
-    """Initialize a git repository at path with an initial commit on master."""
+    """Initialize a git repository at path with an initial commit on master.
+
+    Idempotent: if the repo already exists (e.g. a prior empty `Repo.init`
+    with no commit), this still ensures a `master` branch exists with an
+    initial commit, instead of silently returning an empty repo.
+    """
     os.makedirs(path, exist_ok=True)
+    repo = Repo.init(path)
+    # Ensure master branch exists with at least one commit.
     try:
-        return Repo(path)
-    except (GitCommandError, InvalidGitRepositoryError):
-        repo = Repo.init(path)
-        # Create an initial commit so master branch exists
+        repo.git.rev_parse("master")
+    except GitCommandError:
         readme = os.path.join(path, "README.md")
-        with open(readme, "w", encoding="utf-8") as f:
-            f.write("# Project Workspace\n")
+        if not os.path.exists(readme):
+            with open(readme, "w", encoding="utf-8") as f:
+                f.write("# Project Workspace\n")
         repo.git.add(A=True)
         try:
             repo.index.commit("Initial commit")
-            # Explicitly create master branch pointing to this commit
-            repo.git.branch("-M", "master")
         except Exception:
-            pass  # may fail if git config missing; acceptable
-        return repo
+            pass  # nothing to commit; acceptable
+        try:
+            repo.git.branch("-M", "master")
+        except GitCommandError:
+            pass
+    return repo
 
 
 def get_repo(workspace: str) -> Repo | None:

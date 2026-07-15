@@ -101,8 +101,8 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
 
     os.makedirs(workspace, exist_ok=True)
     try:
-        from git import Repo
-        Repo.init(workspace)
+        from ..services import git_service
+        git_service.init_repo(workspace)
     except Exception:
         pass
 
