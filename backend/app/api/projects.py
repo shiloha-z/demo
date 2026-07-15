@@ -1,4 +1,4 @@
-import os, shutil
+import os, re, shutil
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from typing import List
@@ -20,6 +20,7 @@ router = APIRouter(prefix="/api/projects", tags=["Projects"])
 class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str = Field(default="")
+    workspace_name: str = Field(default="", max_length=100, description="工作空间文件夹名，留空则使用项目名")
 
 
 class ProjectResponse(BaseModel):
@@ -40,7 +41,18 @@ class ProjectListResponse(BaseModel):
     projects: list[ProjectResponse]
 
 
-# ── Helper ────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────
+
+def _sanitize_dirname(name: str) -> str:
+    """Convert a display name into a safe directory name."""
+    # Replace spaces & special chars with underscore, collapse runs
+    safe = re.sub(r'[\\/:*?"<>| ]+', '_', name.strip())
+    # Deduplicate underscores
+    safe = re.sub(r'_+', '_', safe)
+    # Strip leading/trailing underscores
+    safe = safe.strip('_')
+    return safe or 'project'
+
 
 def _get_workspace(project_id: int, user: User, db: Session) -> str:
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -78,7 +90,12 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
     db.commit()
     db.refresh(project)
 
-    workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, str(project.id)))
+    # Workspace folder: use custom name if provided, otherwise sanitize project name
+    dirname = _sanitize_dirname(req.workspace_name or req.name)
+    workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, dirname))
+    # If the preferred name already exists, append project id as suffix
+    if os.path.exists(workspace):
+        workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, f"{dirname}_{project.id}"))
     project.workspace_path = workspace
     db.commit()
 

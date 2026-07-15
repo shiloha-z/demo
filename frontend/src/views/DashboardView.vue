@@ -8,7 +8,7 @@ import api from '../api'
 const store = useProjectStore()
 const router = useRouter()
 const dialogVisible = ref(false)
-const newProject = ref({ name: '', description: '' })
+const newProject = ref({ name: '', description: '', workspace_name: '' })
 const creating = ref(false)
 
 const activeAgentCount = ref(0)
@@ -48,9 +48,9 @@ async function loadStats() {
 async function handleCreate() {
   creating.value = true
   try {
-    await store.createProject(newProject.value.name, newProject.value.description)
+    await store.createProject(newProject.value.name, newProject.value.description, newProject.value.workspace_name)
     dialogVisible.value = false
-    newProject.value = { name: '', description: '' }
+    newProject.value = { name: '', description: '', workspace_name: '' }
     await loadStats()
   } catch (e: any) {
     MessagePlugin.error(e?.response?.data?.detail || '创建项目失败，请稍后重试')
@@ -207,7 +207,10 @@ function goProject(p: any) {
         <label class="field-label">项目名称</label>
         <t-input v-model="newProject.name" placeholder="例如：电商后台" />
         <label class="field-label">描述（选填）</label>
-        <textarea v-model="newProject.description" class="field-textarea" rows="3" placeholder="简单描述项目用途" />
+        <textarea v-model="newProject.description" class="field-textarea" rows="2" placeholder="简单描述项目用途" />
+        <label class="field-label">工作空间文件夹（选填）</label>
+        <t-input v-model="newProject.workspace_name" placeholder="留空则使用项目名，例如：ecommerce" />
+        <p class="field-hint">用于本地工作空间目录名，不可包含 \ / : * ? " &lt; &gt; | 和空格</p>
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="dialogVisible = false">取消</t-button>
@@ -281,4 +284,9 @@ function goProject(p: any) {
 }
 .project-card:hover .btn-delete { opacity: 1; }
 .btn-delete:hover { background: var(--danger-light); color: var(--danger); }
+
+.field-hint {
+  font-size: 11px; color: var(--muted-foreground);
+  margin: 2px 0 0; line-height: 1.4;
+}
 </style>
