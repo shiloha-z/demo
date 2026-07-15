@@ -220,27 +220,17 @@ async def upload_files(
     project_id: int,
     files: List[UploadFile] = File(...),
     path: str = Form(default=""),
-    file_paths: List[str] = Form(default=[]),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Upload one or more files into the project workspace.
-
-    When ``file_paths`` is provided and its length matches ``files``,
-    each file is placed at the corresponding relative path (used for folder upload).
-    Otherwise, all files share the single ``path`` prefix (legacy file upload).
-    """
+    """Upload one or more files into the project workspace."""
     workspace = _get_workspace(project_id, user, db)
     uploaded = []
-    use_per_file_paths = file_paths and len(file_paths) == len(files)
 
-    for i, file in enumerate(files):
-        if use_per_file_paths:
-            target_path = file_paths[i]
-        else:
-            dir_part = path if path else ""
-            filename = file.filename or "untitled"
-            target_path = f"{dir_part}/{filename}".lstrip("/") if dir_part else filename
+    for file in files:
+        dir_part = path if path else ""
+        filename = file.filename or "untitled"
+        target_path = f"{dir_part}/{filename}".lstrip("/") if dir_part else filename
 
         # Sanitize
         full_path = os.path.normpath(os.path.join(workspace, target_path))
@@ -257,7 +247,7 @@ async def upload_files(
         else:
             git.write_file(workspace, target_path, decoded)
 
-        uploaded.append({"path": target_path, "filename": target_path.split("/")[-1]})
+        uploaded.append({"path": target_path, "filename": filename})
 
     _touch_project(db, project_id)
     git.commit(workspace, f"Upload {len(uploaded)} file(s)")

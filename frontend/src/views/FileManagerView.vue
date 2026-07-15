@@ -22,12 +22,9 @@ const newFileName = ref('')
 const newFolderName = ref('')
 const creating = ref(false)
 const uploading = ref(false)
-const folderUploading = ref(false)
 const uploadInput = ref<HTMLInputElement>()
-const folderInput = ref<HTMLInputElement>()
 
 function triggerUpload() { uploadInput.value?.click() }
-function triggerFolderUpload() { folderInput.value?.click() }
 
 async function handleUpload(e: Event) {
   const input = e.target as HTMLInputElement
@@ -45,34 +42,6 @@ async function handleUpload(e: Event) {
     fileTreeRef.value?.loadFiles()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '上传失败')) }
   finally { uploading.value = false; input.value = '' }
-}
-
-async function handleFolderUpload(e: Event) {
-  const input = e.target as HTMLInputElement
-  const fileList = input.files
-  if (!fileList || fileList.length === 0 || !selectedProjectId.value) return
-  folderUploading.value = true
-  try {
-    const form = new FormData()
-    const paths: string[] = []
-    let rootFolder = ''
-    for (const f of fileList) {
-      form.append('files', f)
-      const relativePath = (f as any).webkitRelativePath || f.name
-      paths.push(relativePath)
-      if (!rootFolder) {
-        rootFolder = relativePath.split('/')[0] || ''
-      }
-      form.append('file_paths', relativePath)
-    }
-    form.append('path', rootFolder)
-    await api.post(`/projects/${selectedProjectId.value}/upload`, form, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    })
-    MessagePlugin.success(`${fileList.length} 个文件已上传`)
-    fileTreeRef.value?.loadFiles()
-  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '上传失败')) }
-  finally { folderUploading.value = false; input.value = '' }
 }
 
 watch(() => store.currentProject?.id, () => {
@@ -191,14 +160,7 @@ async function deleteSelected() {
                 <span v-else class="mini-spinner"></span>
               </template>
             </t-button>
-            <t-button shape="square" variant="text" size="small" :disabled="folderUploading" title="上传文件夹" @click="triggerFolderUpload">
-              <template #icon>
-                <svg v-if="!folderUploading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 8 12 16"/><polyline points="9 11 12 8 15 11"/></svg>
-                <span v-else class="mini-spinner"></span>
-              </template>
-            </t-button>
             <input ref="uploadInput" type="file" multiple style="display:none" @change="handleUpload" />
-            <input ref="folderInput" type="file" webkitdirectory style="display:none" @change="handleFolderUpload" />
           </div>
         </div>
         <FileTree ref="fileTreeRef" :project-id="selectedProjectId" @select="handleSelect" />
