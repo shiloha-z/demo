@@ -89,7 +89,18 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
     except Exception:
         pass
 
-    return ProjectResponse.model_validate(project)
+    # Reload with owner relationship to get owner_name
+    db.refresh(project)
+    return ProjectResponse(
+        id=project.id,
+        name=project.name,
+        description=project.description or "",
+        owner_id=project.owner_id,
+        owner_name=project.owner.username if project.owner else "",
+        workspace_path=project.workspace_path or "",
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+    )
 
 
 # ── File management (MUST be before /{project_id}) ────────────────────

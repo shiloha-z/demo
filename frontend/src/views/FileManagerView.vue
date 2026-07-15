@@ -144,7 +144,7 @@ async function createFolder() {
       </div>
     </div>
 
-    <t-dialog v-model:visible="showNewFile" header="新建文件" width="400px" :footer="false">
+    <t-dialog v-model:visible="showNewFile" header="新建文件" width="400px">
       <t-input v-model="newFileName" placeholder="例如：src/login.py 或 README.md" @enter="createFile" />
       <template #footer>
         <t-button theme="default" variant="text" @click="showNewFile = false">取消</t-button>
@@ -152,7 +152,7 @@ async function createFolder() {
       </template>
     </t-dialog>
 
-    <t-dialog v-model:visible="showNewFolder" header="新建文件夹" width="400px" :footer="false">
+    <t-dialog v-model:visible="showNewFolder" header="新建文件夹" width="400px">
       <t-input v-model="newFolderName" placeholder="例如：src 或 components" @enter="createFolder" />
       <template #footer>
         <t-button theme="default" variant="text" @click="showNewFolder = false">取消</t-button>

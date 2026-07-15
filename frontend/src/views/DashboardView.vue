@@ -21,6 +21,8 @@ async function handleCreate() {
     await store.createProject(newProject.value.name, newProject.value.description)
     dialogVisible.value = false
     newProject.value = { name: '', description: '' }
+  } catch (e: any) {
+    MessagePlugin.error(e?.response?.data?.detail || '创建项目失败，请稍后重试')
   } finally {
     creating.value = false
   }
@@ -168,7 +170,7 @@ function goProject(p: any) {
     </div>
 
     <!-- Dialog -->
-    <t-dialog v-model:visible="dialogVisible" header="创建项目" width="460px" :footer="false">
+    <t-dialog v-model:visible="dialogVisible" header="创建项目" width="460px">
       <div class="dialog-form">
         <label class="field-label">项目名称</label>
         <t-input v-model="newProject.name" placeholder="例如：电商后台" />
