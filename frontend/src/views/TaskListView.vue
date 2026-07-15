@@ -17,6 +17,7 @@ const loadingDetail = ref(false)
 const sortBy = ref('created_desc')
 const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
+const taskProgress = ref<{ message: string; step: string }[]>([])
 const archiving = ref(false)
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
@@ -49,6 +50,7 @@ const roleColors: Record<string, string> = {
 }
 
 let unsubTask: (() => void) | null = null
+let unsubProgress: (() => void) | null = null
 
 onMounted(() => {
   unsubTask = wsStore.on('task_update', (data: any) => {
@@ -60,10 +62,16 @@ onMounted(() => {
       }
     }
   })
+  unsubProgress = wsStore.on('task_progress', (data: any) => {
+    if (selectedTask.value?.id === data.task_id) {
+      taskProgress.value.push({ message: data.message, step: data.step })
+    }
+  })
 })
 
 onUnmounted(() => {
   if (unsubTask) unsubTask()
+  if (unsubProgress) unsubProgress()
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
@@ -84,6 +92,7 @@ async function loadTasks() {
 
 async function selectTask(task: any) {
   selectedTask.value = task
+  taskProgress.value = []
   loadingDetail.value = true
   try {
     const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`)
@@ -415,12 +424,21 @@ function renderMarkdown(text: string) {
           </template>
 
           <div v-else class="no-review">
-            <span class="spinner" v-if="taskDetail.status === 'running' || taskDetail.status === 'pending'"></span>
-            <p v-if="taskDetail.status === 'running'">Agent 正在执行中...</p>
-            <p v-else-if="taskDetail.status === 'pending'">等待执行...</p>
-            <p v-else-if="taskDetail.status === 'reviewing'">Agent 执行完成，等待审查中...</p>
-            <p v-else-if="taskDetail.status === 'failed'">任务执行失败，无审查结果</p>
-            <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
+            <!-- Progress log for running/pending tasks -->
+            <div v-if="taskProgress.length > 0" class="progress-log">
+              <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
+                <span class="progress-dot" :class="entry.step === 'error' ? 'err' : entry.step === 'done' ? 'ok' : ''"></span>
+                <span class="progress-msg">{{ entry.message }}</span>
+              </div>
+            </div>
+            <div class="no-review-status">
+              <span class="spinner" v-if="taskDetail.status === 'running' || taskDetail.status === 'pending'"></span>
+              <p v-if="taskDetail.status === 'running'">Agent 正在执行中...</p>
+              <p v-else-if="taskDetail.status === 'pending'">等待执行...</p>
+              <p v-else-if="taskDetail.status === 'reviewing'">Agent 执行完成，等待审查中...</p>
+              <p v-else-if="taskDetail.status === 'failed'">任务执行失败，无审查结果</p>
+              <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
+            </div>
           </div>
         </div>
 
@@ -567,7 +585,35 @@ function renderMarkdown(text: string) {
 .feedback-box h4 { font-size: 12px; font-weight: 700; color: var(--danger); margin: 0 0 4px; }
 .feedback-box p { font-size: 13px; margin: 0; white-space: pre-wrap; }
 
-.no-review { display: flex; align-items: center; gap: 10px; padding: 32px; color: var(--muted-foreground); font-size: 14px; }
+.no-review { padding: 20px 0; color: var(--muted-foreground); font-size: 14px; }
+.no-review-status { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+
+.progress-log {
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); padding: 14px 16px;
+  margin-bottom: 12px; max-height: 320px; overflow-y: auto;
+}
+.progress-entry {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 3px 0; font-size: 13px; font-family: var(--font-mono);
+  color: var(--foreground);
+}
+.progress-entry.step_1_codegen,
+.progress-entry.step_2_review,
+.progress-entry.step_3_security,
+.progress-entry.step_4_summary {
+  font-weight: 600; color: var(--primary);
+}
+.progress-entry.error { color: var(--danger); font-weight: 600; }
+.progress-entry.done { color: var(--success); font-weight: 600; }
+.progress-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--surface-border); flex-shrink: 0; margin-top: 5px;
+}
+.progress-dot.ok { background: var(--success); }
+.progress-dot.err { background: var(--danger); }
+.progress-msg { word-break: break-word; }
+
 .loading-box { display: flex; align-items: center; gap: 10px; padding: 32px; color: var(--muted-foreground); font-size: 14px; }
 
 .empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }

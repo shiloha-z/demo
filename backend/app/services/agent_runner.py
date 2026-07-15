@@ -2,6 +2,7 @@
 
 Runs in a background thread via FastAPI BackgroundTasks to avoid blocking the event loop.
 Integrates with the ChromaDB 3-layer memory system.
+Pushes real-time progress via WebSocket `task_progress` events.
 """
 
 import logging
@@ -11,6 +12,22 @@ from app.services import git_service as git
 from app.services import memory_service as mem
 
 logger = logging.getLogger(__name__)
+
+
+def _progress(task_id: int, project_id: int, message: str, step: str = ""):
+    """Push a progress update via WebSocket + record in task memory."""
+    from app.api.ws import broadcast_sync
+
+    broadcast_sync("task_progress", {
+        "task_id": task_id,
+        "project_id": project_id,
+        "message": message,
+        "step": step,
+    })
+    try:
+        mem.add_task_memory(task_id, message, {"type": "progress", "step": step})
+    except Exception:
+        pass
 
 
 def run_agent_pipeline(task_id: int):
@@ -34,54 +51,78 @@ def run_agent_pipeline(task_id: int):
         db.commit()
         broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "running"})
 
-        # Record task start in memory
-        mem.add_task_memory(task_id, f"Task started: {task.title}", {"type": "lifecycle"})
+        _progress(task_id, project_id, "任务开始执行", "start")
+        _progress(task_id, project_id, f"任务目标：{task.title}", "goal")
         if task.description:
-            mem.add_task_memory(task_id, f"Task description: {task.description}", {"type": "requirement"})
+            _progress(task_id, project_id, f"任务描述：{task.description}", "desc")
 
         project = db.query(Project).get(project_id)
         if not project or not project.workspace_path:
             _fail_task(db, task, "Project workspace not found")
             return
 
-        # Build and run the CrewAI pipeline
-        from agent_service.crews.review_pipeline import build_crew
-
-        # Get the agent's model preference
+        # Get the agent
         agent = db.query(Agent).get(task.agent_id)
         model_name = agent.model if agent and agent.model else "deepseek-chat"
+        agent_name = agent.name if agent else "Unknown"
 
-        # Push agent status → working
         if agent:
             agent.status = AgentStatus.WORKING
             db.commit()
             broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
 
-        # ── Branch isolation: create task branch ──────────────────────
+        # ── Step 1: Prepare workspace ──────────────────────────────
+        _progress(task_id, project_id, "正在准备项目工作空间...", "prepare")
+        workspace = project.workspace_path
+
+        # ── Step 2: Create task branch ─────────────────────────────
         branch_name = f"task/{task.id}"
-        git.create_branch(project.workspace_path, branch_name)
+        _progress(task_id, project_id, f"创建 Git 工作分支：{branch_name}", "branch")
+        git.create_branch(workspace, branch_name)
+
+        # ── Step 3: Build CrewAI pipeline ──────────────────────────
+        _progress(task_id, project_id, f"启动 Agent「{agent_name}」", "agent_start")
+        _progress(task_id, project_id, f"使用模型：{model_name}", "model")
+
+        from agent_service.crews.review_pipeline import build_crew
 
         crew = build_crew(
-            project.workspace_path,
+            workspace,
             model_name,
             task_id=task_id,
             project_id=project_id,
         )
-        mem.add_task_memory(task_id, "CrewAI pipeline starting", {"type": "pipeline"})
+
+        # ── Step 4: Run pipeline ───────────────────────────────────
+        _progress(task_id, project_id, "第 1/4 步：代码工程师正在生成代码...", "step_1_codegen")
+        _progress(task_id, project_id, "Agent 正在查看现有代码结构，分析需求...", "step_1_detail")
+
         result = crew.kickoff(inputs={"task_description": task.description or task.title})
+
+        _progress(task_id, project_id, "第 2/4 步：代码审查员正在检查代码质量...", "step_2_review")
+        _progress(task_id, project_id, "第 3/4 步：安全审查员正在扫描安全漏洞...", "step_3_security")
+        _progress(task_id, project_id, "第 4/4 步：正在汇总审查报告...", "step_4_summary")
 
         # Extract the final output (summarizer's report)
         summary = str(result) if result else ""
-        mem.add_task_memory(task_id, f"Pipeline completed. Summary length: {len(summary)} chars",
-                           {"type": "pipeline"})
+        summary_len = len(summary)
 
-        # Commit changes on task branch (so they survive branch switches)
-        git.commit(project.workspace_path, f"Task #{task.id} — agent changes")
+        _progress(task_id, project_id, f"审查报告已生成（{summary_len} 字符）", "report_done")
 
-        # Get diff — only this task's changes vs master
-        diff = git.diff_vs_master(project.workspace_path)
-        if not diff:
+        # ── Step 5: Commit & Diff ──────────────────────────────────
+        _progress(task_id, project_id, "正在提交代码变更到 Git...", "commit")
+        commit_hash = git.commit(workspace, f"Task #{task.id} — agent changes")
+        if commit_hash:
+            _progress(task_id, project_id, f"已提交：{commit_hash[:7]}", "committed")
+
+        _progress(task_id, project_id, "正在生成代码差异对比...", "diff")
+        diff = git.diff_vs_master(workspace)
+        if not diff or diff == "":
             diff = "# No code changes detected"
+            _progress(task_id, project_id, "未检测到代码变更", "diff_empty")
+        else:
+            diff_lines = diff.count('\n')
+            _progress(task_id, project_id, f"代码差异：{diff_lines} 行", "diff_done")
 
         # Store review
         review = Review(
@@ -95,14 +136,18 @@ def run_agent_pipeline(task_id: int):
         db.refresh(review)
 
         # ── Save to project memory ──────────────────────────────────
-        mem.add_project_memory(
-            project_id,
-            f"Task #{task_id} ({task.title}): {summary[:500]}",
-            {"type": "review_result", "task_id": str(task_id), "status": "pending"},
-        )
+        try:
+            mem.add_project_memory(
+                project_id,
+                f"Task #{task_id} ({task.title}): {summary[:500]}",
+                {"type": "review_result", "task_id": str(task_id), "status": "pending"},
+            )
+        except Exception:
+            pass
 
-        # Switch back to master — keep working tree clean for file manager
-        git.switch_branch(project.workspace_path, "master")
+        # Switch back to master
+        _progress(task_id, project_id, "切换回主分支，清理工作区...", "cleanup")
+        git.switch_branch(workspace, "master")
 
         # Push review created
         broadcast_sync("review_update", {
@@ -112,14 +157,14 @@ def run_agent_pipeline(task_id: int):
             "status": "pending",
         })
 
-        # Update task → reviewing (wait for human), agent → done
+        # Update task & agent status → done
         task.status = TaskStatus.REVIEWING
         agent = db.query(Agent).get(task.agent_id)
         if agent:
             agent.status = AgentStatus.DONE
         db.commit()
 
-        mem.add_task_memory(task_id, "Task completed, awaiting human review", {"type": "lifecycle"})
+        _progress(task_id, project_id, "执行完毕，等待人工审查", "done")
 
         broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "reviewing"})
         broadcast_sync("agent_update", {"id": task.agent_id, "status": "done"})
@@ -140,6 +185,10 @@ def _fail_task(db, task: Task, error: str):
     from app.api.ws import broadcast_sync
 
     project_id = task.project_id
+    task_id = task.id
+
+    _progress(task_id, project_id, f"执行失败：{error[:200]}", "error")
+
     task.status = TaskStatus.FAILED
     agent = db.query(Agent).get(task.agent_id)
     if agent:
