@@ -130,6 +130,29 @@ async function createFolder() {
   finally { creating.value = false }
 }
 
+async function handleTreeDelete(path: string) {
+  if (!selectedProjectId.value) return
+  const name = path.split('/').pop() || path
+  const confirmDialog = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要删除「${name}」吗？此操作不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${selectedProjectId.value}/file`, { params: { path } })
+        MessagePlugin.success(`已删除 ${name}`)
+        if (selectedFile.value === path) {
+          selectedFile.value = ''
+          fileContent.value = ''
+        }
+        fileTreeRef.value?.loadFiles()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+      confirmDialog.destroy()
+    },
+  })
+}
+
 async function deleteSelected() {
   if (!selectedProjectId.value || !selectedFile.value) return
   const path = selectedFile.value
@@ -201,7 +224,7 @@ async function deleteSelected() {
             <input ref="folderInput" type="file" webkitdirectory style="display:none" @change="handleFolderUpload" />
           </div>
         </div>
-        <FileTree ref="fileTreeRef" :project-id="selectedProjectId" @select="handleSelect" />
+        <FileTree ref="fileTreeRef" :project-id="selectedProjectId" @select="handleSelect" @delete-node="handleTreeDelete" />
       </div>
       <div class="file-view-panel" v-loading="loadingFile">
         <template v-if="selectedFile">

@@ -6,6 +6,7 @@ const props = defineProps<{ projectId: number }>()
 
 const emit = defineEmits<{
   select: [path: string]
+  deleteNode: [path: string]
 }>()
 
 interface TreeNode {
@@ -69,6 +70,11 @@ function handleClick(node: TreeNode) {
   }
 }
 
+function handleDelete(e: Event, path: string) {
+  e.stopPropagation()
+  emit('deleteNode', path)
+}
+
 onMounted(() => loadFiles())
 watch(() => props.projectId, () => loadFiles())
 
@@ -82,65 +88,78 @@ defineExpose({ loadFiles })
       <t-button size="small" variant="text" @click="loadFiles">刷新</t-button>
     </div>
     <div class="tree-body">
-      <!-- Recursive tree rendering -->
       <template v-for="node in treeData" :key="node.path">
+        <!-- Root node -->
         <div
           class="tree-node-item"
           :class="{ active: selectedPath === node.path }"
           :style="{ paddingLeft: '12px' }"
           @click="handleClick(node)"
         >
-          <!-- Expand/carety for dirs -->
           <span v-if="node.type === 'dir'" class="tree-caret">
             <svg v-if="node.loading" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
             <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" :style="{ transform: node.expanded ? 'rotate(90deg)' : '' }"><polyline points="9 18 15 12 9 6"/></svg>
           </span>
           <span v-else class="tree-caret-spacer"></span>
-          <!-- Icon -->
           <span class="tree-icon" :class="node.type">
             <svg v-if="node.type === 'dir'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
             <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </span>
           <span class="tree-label">{{ node.name }}</span>
+          <button class="tree-delete-btn" title="删除" @click="handleDelete($event, node.path)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+          </button>
         </div>
-        <!-- Children -->
+
+        <!-- Root children (depth 1) -->
         <template v-if="node.expanded && node.children">
-          <div
-            v-for="child in node.children"
-            :key="child.path"
-            class="tree-node-item"
-            :class="{ active: selectedPath === child.path }"
-            :style="{ paddingLeft: '28px' }"
-            @click="handleClick(child)"
-          >
-            <span v-if="child.type === 'dir'" class="tree-caret">
-              <svg v-if="child.loading" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
-              <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" :style="{ transform: child.expanded ? 'rotate(90deg)' : '' }"><polyline points="9 18 15 12 9 6"/></svg>
-            </span>
-            <span v-else class="tree-caret-spacer"></span>
-            <span class="tree-icon" :class="child.type">
-              <svg v-if="child.type === 'dir'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            </span>
-            <span class="tree-label">{{ child.name }}</span>
-            <!-- Grandchildren -->
+          <template v-for="child in node.children" :key="child.path">
+            <div
+              class="tree-node-item"
+              :class="{ active: selectedPath === child.path }"
+              :style="{ paddingLeft: '28px' }"
+              @click="handleClick(child)"
+            >
+              <span v-if="child.type === 'dir'" class="tree-caret">
+                <svg v-if="child.loading" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" :style="{ transform: child.expanded ? 'rotate(90deg)' : '' }"><polyline points="9 18 15 12 9 6"/></svg>
+              </span>
+              <span v-else class="tree-caret-spacer"></span>
+              <span class="tree-icon" :class="child.type">
+                <svg v-if="child.type === 'dir'" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              </span>
+              <span class="tree-label">{{ child.name }}</span>
+              <button class="tree-delete-btn" title="删除" @click="handleDelete($event, child.path)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+              </button>
+            </div>
+
+            <!-- Child's children (depth 2) -->
             <template v-if="child.expanded && child.children">
               <div
                 v-for="grandchild in child.children"
                 :key="grandchild.path"
                 class="tree-node-item"
                 :class="{ active: selectedPath === grandchild.path }"
-                :style="{ paddingLeft: '44px', marginLeft: '-16px', marginTop: '0' }"
-                @click.stop="handleClick(grandchild)"
+                :style="{ paddingLeft: '44px' }"
+                @click="handleClick(grandchild)"
               >
-                <span class="tree-icon grandchild-icon" :class="grandchild.type">
+                <span v-if="grandchild.type === 'dir'" class="tree-caret">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </span>
+                <span v-else class="tree-caret-spacer"></span>
+                <span class="tree-icon" :class="grandchild.type" style="width:12px;height:12px">
                   <svg v-if="grandchild.type === 'dir'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                   <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                 </span>
                 <span class="tree-label">{{ grandchild.name }}</span>
+                <button class="tree-delete-btn" title="删除" @click="handleDelete($event, grandchild.path)">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                </button>
               </div>
             </template>
-          </div>
+          </template>
         </template>
       </template>
       <div v-if="treeData.length === 0 && !loading" class="tree-empty">
@@ -226,14 +245,30 @@ defineExpose({ loadFiles })
 .tree-icon.file {
   color: var(--muted-foreground);
 }
-.grandchild-icon {
-  width: 14px;
-  height: 14px;
-}
-
 .tree-label {
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.tree-delete-btn {
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  border-radius: var(--radius-sm);
+  border: none; background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+}
+.tree-node-item:hover .tree-delete-btn {
+  opacity: 1;
+}
+.tree-delete-btn:hover {
+  background: var(--danger-light);
+  color: var(--danger);
 }
 
 .spin {

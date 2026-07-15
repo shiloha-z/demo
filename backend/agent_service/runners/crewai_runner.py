@@ -205,7 +205,8 @@ class CrewAIRunner(BaseRunner):
 
         summary_task = Task(
             description=(
-                "请将代码审查员和安全审查员的审查意见汇总为一份统一报告。\n"
+                "请将代码审查员和安全审查员的审查意见汇总为一份统一报告。"
+                "所有输出必须使用中文。\n"
                 "报告结构：\n"
                 "## 审查总结\n（总体评价，1-2句话）\n"
                 "## 严重问题\n（高危问题，必须修复）\n"
@@ -215,7 +216,7 @@ class CrewAIRunner(BaseRunner):
                 "最后，用 MemoryRecord 将本次审查中值得注意的发现"
                 "记录到项目记忆（scope: project）或全局记忆（scope: global）。"
             ),
-            expected_output="结构化的Markdown审查报告",
+            expected_output="结构化的 Markdown 中文审查报告",
             agent=summarizer,
         )
 

@@ -28,32 +28,35 @@ STAGES = [
      "prompt": (
          "You are a senior software engineer. Based on the task below, analyze the "
          "existing codebase first (read relevant files), then write the required code. "
-         "Write complete, production-quality code with comments. Use Edit/Write tools.\n\n"
+         "Write complete, production-quality code with comments (Chinese or English). "
+         "Use Edit/Write tools. Your response to the user must be in Chinese.\n\n"
          "Task: {task_description}"
      )},
     {"key": "reviewer",   "label": "代码审查员",
      "prompt": (
-         "You are a strict code reviewer. Review ALL the code changes in this workspace. "
-         "Read every modified file. Check for: logic errors, naming, potential bugs "
-         "(null/undefined, edge cases), error handling, code readability. "
-         "List each issue with: file path, severity (high/medium/low), and fix suggestion."
+         "你是一位严格的代码审查专家。请审查此工作区中的所有代码变更。"
+         "仔细阅读每个被修改的文件。检查：逻辑错误、命名规范、潜在 bug "
+         "（空值/边界情况）、错误处理、代码可读性。"
+         "对每个问题列出：文件路径、严重程度（高/中/低）、修复建议。"
+         "所有输出必须使用中文。"
      )},
     {"key": "security",   "label": "安全审查员",
      "prompt": (
-         "You are a security engineer. Audit ALL code in this workspace for vulnerabilities. "
-         "Check: SQL injection, XSS, command injection, path traversal, hardcoded secrets/keys, "
-         "insecure encryption (MD5, weak ciphers), missing input validation, auth issues. "
-         "For each finding: file path, vulnerability type, severity, fix recommendation."
+         "你是一位资深安全工程师。请审计此工作区中所有代码的安全漏洞。"
+         "检查：SQL 注入、XSS、命令注入、路径遍历、硬编码密钥/密码、"
+         "不安全加密（MD5、弱密码套件）、输入验证缺失、认证授权问题。"
+         "对每个发现给出：文件路径、漏洞类型、严重程度、修复建议。"
+         "所有输出必须使用中文。"
      )},
     {"key": "summarizer", "label": "审查汇总员",
      "prompt": (
-         "You are a tech lead. Consolidate the code review and security audit findings "
-         "into a single structured Markdown report:\n"
-         "## 审查总结\n(1-2 sentence overall assessment)\n"
-         "## 严重问题\n(must-fix high-severity issues)\n"
-         "## 一般问题\n(medium-severity, suggested fixes)\n"
-         "## 建议改进\n(low-priority improvements)\n"
-         "## 审查结论\n(pass / changes needed)"
+         "你是一位技术主管。请将代码审查和安全审查的发现整合为一份结构化的 Markdown 报告：\n"
+         "## 审查总结\n（1-2 句话的总体评价）\n"
+         "## 严重问题\n（必须修复的高危问题）\n"
+         "## 一般问题\n（中等严重程度，建议修复）\n"
+         "## 建议改进\n（低优先级的改进建议）\n"
+         "## 审查结论\n（通过 / 需要修改）\n\n"
+         "所有输出必须使用中文。"
      )},
 ]
 

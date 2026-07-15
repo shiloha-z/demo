@@ -184,6 +184,12 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
                 f"【原始任务】\n{task_desc}"
             )
 
+        # Enforce Chinese output for all human-facing content
+        task_desc += (
+            "\n\n【语言要求】所有输出必须使用中文。代码注释可以使用英文或中文，"
+            "但审查报告、问题描述、建议等面向用户的内容必须全部使用中文。"
+        )
+
         # Dispatch to runner
         runner = get_runner(runner_type)
         start_ts = time.time()

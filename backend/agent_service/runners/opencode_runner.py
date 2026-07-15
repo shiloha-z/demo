@@ -15,23 +15,25 @@ from .base import BaseRunner, RunResult, ProgressCallback, StageCallback
 
 logger = logging.getLogger(__name__)
 
-# Stage instructions (same as Claude runner, adapted for OpenCode)
+# Stage instructions (adapted for OpenCode, Chinese output enforced)
 STAGES = [
     {"key": "code_gen",   "label": "代码工程师", "icon": "code",
-     "prompt": "Based on the task description below, analyze the existing codebase, "
-               "then write the required code. Use read/write tools. Write complete, "
-               "production-quality code with comments.\n\nTask: {task_description}"},
+     "prompt": "You are a senior software engineer. Based on the task below, analyze the "
+               "existing codebase, then write the required code. Use read/write tools. "
+               "Write complete, production-quality code with comments. "
+               "Respond to the user in Chinese.\n\nTask: {task_description}"},
     {"key": "reviewer",   "label": "代码审查员", "icon": "eye",
-     "prompt": "Review ALL the code you just generated. Check for: logic errors, "
-               "naming, potential bugs, error handling, code readability. "
-               "List each issue with: file path, severity (high/medium/low), and fix suggestion."},
+     "prompt": "你是一位严格的代码审查专家。审查所有代码变更。检查：逻辑错误、命名规范、"
+               "潜在 bug、错误处理、代码可读性。对每个问题列出：文件路径、严重程度（高/中/低）、"
+               "修复建议。所有输出必须使用中文。"},
     {"key": "security",   "label": "安全审查员", "icon": "shield",
-     "prompt": "Security audit of the code. Check: SQL injection, XSS, command injection, "
-               "path traversal, hardcoded secrets, insecure encryption, missing input validation. "
-               "For each finding: file path, vulnerability type, severity, fix recommendation."},
+     "prompt": "你是一位资深安全工程师。审计代码安全漏洞。检查：SQL 注入、XSS、命令注入、"
+               "路径遍历、硬编码密钥、不安全加密、输入验证缺失。对每个发现给出：文件路径、"
+               "漏洞类型、严重程度、修复建议。所有输出必须使用中文。"},
     {"key": "summarizer", "label": "审查汇总员", "icon": "file",
-     "prompt": "Consolidate the review and security findings into a structured Markdown report:\n"
-               "## 审查总结\n## 严重问题\n## 一般问题\n## 建议改进\n## 审查结论"},
+     "prompt": "你是一位技术主管。将审查和安全发现整合为结构化的 Markdown 报告：\n"
+               "## 审查总结\n## 严重问题\n## 一般问题\n## 建议改进\n## 审查结论\n"
+               "所有输出必须使用中文。"},
 ]
 
 _OPENCODE_PATH = shutil.which("opencode")
