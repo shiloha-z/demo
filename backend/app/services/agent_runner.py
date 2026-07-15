@@ -112,19 +112,19 @@ def run_agent_pipeline(task_id: int):
             "status": "pending",
         })
 
-        # Update task & agent status → done
-        task.status = TaskStatus.COMPLETED
+        # Update task → reviewing (wait for human), agent → done
+        task.status = TaskStatus.REVIEWING
         agent = db.query(Agent).get(task.agent_id)
         if agent:
             agent.status = AgentStatus.DONE
         db.commit()
 
-        mem.add_task_memory(task_id, "Task completed successfully", {"type": "lifecycle"})
+        mem.add_task_memory(task_id, "Task completed, awaiting human review", {"type": "lifecycle"})
 
-        broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "completed"})
+        broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "reviewing"})
         broadcast_sync("agent_update", {"id": task.agent_id, "status": "done"})
 
-        logger.info(f"Task {task_id} completed, review #{review.id} stored")
+        logger.info(f"Task {task_id} reviewing, review #{review.id} stored")
 
     except Exception as e:
         logger.exception(f"Task {task_id} failed")

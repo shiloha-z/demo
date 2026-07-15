@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Review, ReviewStatus, Version
+from app.models.models import User, Review, ReviewStatus, Task, TaskStatus, Version
 from app.services import git_service as git
 from app.services import memory_service as mem
 
@@ -50,6 +50,12 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
     review.status = ReviewStatus.APPROVED
+
+    # Update linked task status → approved
+    task = db.query(Task).get(review.task_id)
+    if task:
+        task.status = TaskStatus.APPROVED
+
     db.commit()
 
     # Merge task branch → master, then commit
@@ -93,6 +99,12 @@ def reject_review(
         raise HTTPException(status_code=404, detail="Review not found")
     review.status = ReviewStatus.REJECTED
     review.human_feedback = feedback
+
+    # Update linked task status → rejected
+    task = db.query(Task).get(review.task_id)
+    if task:
+        task.status = TaskStatus.REJECTED
+
     db.commit()
 
     # Switch back to master and delete the task branch

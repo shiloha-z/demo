@@ -20,11 +20,15 @@ const archiving = ref(false)
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
 const statusLabels: Record<string, string> = {
-  pending: '等待中', running: '执行中', completed: '已完成', failed: '失败',
+  pending: '等待中', running: '执行中', reviewing: '待审核',
+  approved: '已通过', rejected: '已驳回', completed: '已完成', failed: '失败',
 }
 const statusColors: Record<string, string> = {
   pending: 'var(--warning)',
   running: 'var(--primary)',
+  reviewing: '#f59e0b',
+  approved: 'var(--success)',
+  rejected: 'var(--danger)',
   completed: 'var(--success)',
   failed: 'var(--danger)',
 }
@@ -249,7 +253,7 @@ function renderMarkdown(text: string) {
               <span class="task-id">#{{ t.id }}</span>
               <div class="task-item-actions">
                 <button
-                  v-if="t.status === 'completed' || t.status === 'failed'"
+                  v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing'"
                   class="archive-btn"
                   title="归档"
                   @click="archiveTask(t, $event)"
@@ -406,7 +410,9 @@ function renderMarkdown(text: string) {
             <span class="spinner" v-if="taskDetail.status === 'running' || taskDetail.status === 'pending'"></span>
             <p v-if="taskDetail.status === 'running'">Agent 正在执行中...</p>
             <p v-else-if="taskDetail.status === 'pending'">等待执行...</p>
+            <p v-else-if="taskDetail.status === 'reviewing'">Agent 执行完成，等待审查中...</p>
             <p v-else-if="taskDetail.status === 'failed'">任务执行失败，无审查结果</p>
+            <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
           </div>
         </div>
 

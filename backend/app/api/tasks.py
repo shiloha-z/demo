@@ -159,9 +159,18 @@ def create_task(
         raise HTTPException(status_code=404, detail="Agent not found")
 
     # ── Conflict guard ───────────────────────────────────────────────
-    # Agent must be idle (one agent can only run one task at a time)
+    # Agent must be idle — one agent can only run one task at a time
     if agent.status == AgentStatus.WORKING:
         raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+    # Also block if agent has a task awaiting review (must approve/reject first)
+    existing_reviewing = (
+        db.query(Task)
+        .filter(Task.agent_id == req.agent_id, Task.status == TaskStatus.REVIEWING)
+        .first()
+    )
+    if existing_reviewing:
+        raise HTTPException(status_code=409,
+            detail=f"Agent「{agent.name}」有任务 #${existing_reviewing.id} 待审核，请先处理审查")
 
     task = Task(
         agent_id=req.agent_id,
@@ -203,8 +212,8 @@ def archive_task(
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING):
-        raise HTTPException(status_code=400, detail="只有已完成或失败的任务才能归档")
+    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.REVIEWING):
+        raise HTTPException(status_code=400, detail="只有已结束的任务才能归档（已通过/已驳回/已完成/失败）")
     if task.archived:
         raise HTTPException(status_code=400, detail="任务已归档")
     task.archived = True

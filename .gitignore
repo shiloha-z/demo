@@ -20,6 +20,9 @@ dist/
 # Workspace (runtime data)
 workspaces/
 
+# ChromaDB (vector DB runtime data)
+chroma_data/
+
 # Reference projects
 references/
 
