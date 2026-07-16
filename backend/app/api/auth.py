@@ -130,28 +130,31 @@ def upload_avatar(
     db: Session = Depends(get_db),
 ):
     """Upload a profile avatar image. Max 2 MB."""
-    # Validate size
-    file.file.seek(0, 2)
-    size = file.file.tell()
-    file.file.seek(0)
-    if size > _MAX_AVATAR_SIZE:
-        raise HTTPException(status_code=400, detail="头像文件不能超过 2 MB")
-
-    # Validate type
+    # Validate type first
     ext = Path(file.filename or "avatar.png").suffix.lower()
     if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp"):
         raise HTTPException(status_code=400, detail="不支持的图片格式，请使用 PNG/JPG/GIF/WebP")
 
+    # Read content and validate size
+    content = file.file.read()
+    if len(content) > _MAX_AVATAR_SIZE:
+        raise HTTPException(status_code=400, detail="头像文件不能超过 2 MB")
+    if len(content) == 0:
+        raise HTTPException(status_code=400, detail="头像文件不能为空")
+
     # Remove old avatar if exists
     if user.avatar_url:
-        old_path = _AVATAR_DIR / Path(user.avatar_url).name
+        old_name = user.avatar_url.rsplit("/", 1)[-1]
+        old_path = _AVATAR_DIR / old_name
         if old_path.exists():
-            os.remove(old_path)
+            try:
+                os.remove(old_path)
+            except OSError:
+                pass
 
     # Save new avatar
     safe_name = f"{user.id}_{uuid.uuid4().hex[:8]}{ext}"
     dest = _AVATAR_DIR / safe_name
-    content = file.file.read()
     dest.write_bytes(content)
 
     user.avatar_url = f"/api/auth/avatar/{safe_name}"

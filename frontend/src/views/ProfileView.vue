@@ -61,14 +61,22 @@ async function handleAvatarUpload(e: Event) {
   const file = input.files?.[0]
   if (!file) return
 
+  // Client-side size check
+  if (file.size > 2 * 1024 * 1024) {
+    alert('头像文件不能超过 2 MB')
+    input.value = ''
+    return
+  }
+
   avatarUploading.value = true
   try {
     const form = new FormData()
     form.append('file', file)
     const { data } = await api.post('/auth/profile/avatar', form)
     profile.value.avatar_url = data.avatar_url + '?t=' + Date.now()
-  } catch { /* ignore */ }
-  finally {
+  } catch (e: any) {
+    alert(e?.response?.data?.detail || '头像上传失败，请重试')
+  } finally {
     avatarUploading.value = false
     input.value = ''
   }
