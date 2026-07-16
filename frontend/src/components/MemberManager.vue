@@ -62,15 +62,19 @@ const processedRequests = computed(() =>
 )
 
 let unsubMember: (() => void) | null = null
+let unsubJoinReq: (() => void) | null = null
 
 onMounted(async () => {
   await loadAll()
   unsubMember = wsStore.on('member_update', (data: any) => {
     if (data.project_id === props.projectId) loadAll()
   })
+  unsubJoinReq = wsStore.on('join_request', (data: any) => {
+    if (data.project_id === props.projectId) loadAll()
+  })
 })
 
-onUnmounted(() => { unsubMember?.() })
+onUnmounted(() => { unsubMember?.(); unsubJoinReq?.() })
 
 async function loadAll() {
   loading.value = true

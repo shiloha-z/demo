@@ -513,6 +513,18 @@ def apply_join_project(
     db.commit()
     db.refresh(join_req)
 
+    # Notify project members in real-time
+    try:
+        from app.api.ws import broadcast_sync_to_project
+        broadcast_sync_to_project(project.id, "join_request", {
+            "project_id": project.id,
+            "request_id": join_req.id,
+            "username": user.username,
+            "status": "pending",
+        })
+    except Exception:
+        pass
+
     return {"message": f"已申请加入项目「{project.name}」，请等待项目负责人审批", "request_id": join_req.id}
 
 
