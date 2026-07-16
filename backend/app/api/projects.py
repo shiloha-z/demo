@@ -528,21 +528,6 @@ def apply_join_project(
     except Exception:
         pass
 
-    # Push to message center
-    try:
-        from app.services import message_service as msg
-        from app.models.models import MessageCategory, MessageLevel
-        msg.push(
-            title="新的加入申请",
-            body=f"用户 {user.username} 申请加入项目「{project.name}」",
-            category=MessageCategory.MEMBER,
-            level=MessageLevel.INFO,
-            project_id=project.id,
-            link=f"/dashboard",
-        )
-    except Exception:
-        pass
-
     return {"message": f"已申请加入项目「{project.name}」，请等待项目负责人审批", "request_id": join_req.id}
 
 
