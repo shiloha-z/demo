@@ -64,6 +64,11 @@ def _ensure_vote_round(review: Review, db: Session) -> ReviewRound:
         required_approvals=max(1, min(2, len(member_ids))),
     )
     db.add(round_)
+    try:
+        db.flush()
+    except Exception:
+        db.rollback()
+        return db.query(ReviewRound).filter(ReviewRound.review_id == review.id).first()
     db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in member_ids])
     db.commit()
     return round_
