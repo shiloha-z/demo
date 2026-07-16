@@ -35,6 +35,12 @@ class ReviewStatus(str, Enum):
     REJECTED = "rejected"
 
 
+class ProjectRole(str, Enum):
+    OWNER = "owner"      # 项目主管 — 完全控制，可转让
+    ADMIN = "admin"      # 管理员 — 管理成员（除 owner），管理任务/审查
+    MEMBER = "member"    # 一般成员 — 查看、创建任务、聊天
+
+
 # ── Tables ────────────────────────────────────────────────────────────
 
 class User(Base):
@@ -64,6 +70,40 @@ class Project(Base):
     @property
     def owner_name(self) -> str:
         return self.owner.username if self.owner else ""
+
+
+class ProjectMember(Base):
+    __tablename__ = "project_members"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    role = Column(SAEnum(ProjectRole), default=ProjectRole.MEMBER, nullable=False)
+    joined_at = Column(DateTime, default=_now)
+
+    user = relationship("User")
+    project = relationship("Project")
+
+
+class JoinStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class JoinRequest(Base):
+    __tablename__ = "join_requests"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    username = Column(String(50), nullable=False)
+    status = Column(SAEnum(JoinStatus), default=JoinStatus.PENDING, nullable=False)
+    created_at = Column(DateTime, default=_now)
+    reviewed_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+    project = relationship("Project")
 
 
 class Agent(Base):

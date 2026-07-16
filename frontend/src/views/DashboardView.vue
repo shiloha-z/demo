@@ -3,6 +3,7 @@ import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
+import MemberManager from '../components/MemberManager.vue'
 import api from '../api'
 
 const store = useProjectStore()
@@ -10,6 +11,14 @@ const router = useRouter()
 const dialogVisible = ref(false)
 const newProject = ref({ name: '', description: '', workspace_name: '' })
 const creating = ref(false)
+
+const memberDialogVisible = ref(false)
+const memberDialogProject = ref<{ id: number; name: string } | null>(null)
+
+function openMembers(p: any) {
+  memberDialogProject.value = { id: p.id, name: p.name }
+  memberDialogVisible.value = true
+}
 
 const activeAgentCount = ref(0)
 const pendingReviewCount = ref(0)
@@ -185,6 +194,9 @@ function goProject(p: any) {
             <span>{{ formatTime(p.created_at) }}</span>
           </div>
         </div>
+        <button class="btn-members" @click.stop="openMembers(p)" title="成员管理">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
         <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         </button>
@@ -219,6 +231,16 @@ function goProject(p: any) {
           {{ creating ? '创建中...' : '创建' }}
         </t-button>
       </template>
+    </t-dialog>
+
+    <!-- Member management dialog -->
+    <t-dialog v-model:visible="memberDialogVisible" width="560px" :footer="false">
+      <MemberManager
+        v-if="memberDialogProject"
+        :project-id="memberDialogProject.id"
+        :project-name="memberDialogProject.name"
+        @close="memberDialogVisible = false"
+      />
     </t-dialog>
   </div>
 </template>
@@ -285,6 +307,15 @@ function goProject(p: any) {
 }
 .project-card:hover .btn-delete { opacity: 1; }
 .btn-delete:hover { background: var(--danger-light); color: var(--danger); }
+
+.btn-members {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
+}
+.project-card:hover .btn-members { opacity: 1; }
+.btn-members:hover { background: var(--primary-light); color: var(--primary); }
 
 .field-hint {
   font-size: 11px; color: var(--muted-foreground);

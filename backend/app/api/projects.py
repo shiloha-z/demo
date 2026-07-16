@@ -90,6 +90,11 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
     db.commit()
     db.refresh(project)
 
+    # Auto-add creator as project owner
+    from app.models.models import ProjectMember, ProjectRole
+    db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
+    db.commit()
+
     # Workspace folder: use custom name if provided, otherwise sanitize project name
     dirname = _sanitize_dirname(req.workspace_name or req.name)
     workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, dirname))
