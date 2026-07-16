@@ -3,7 +3,6 @@ import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import DiffViewer from '../components/DiffViewer.vue'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import TaskTimeline from '../components/TaskTimeline.vue'
 import type { StageState } from '../components/PipelineStepper.vue'
@@ -42,8 +41,7 @@ const pipelineStages = ref<StageState[]>([
   { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
 ])
 
-// Real-time code preview
-const codePreviewDiff = ref<string | null>(null)
+const showReviewDiff = ref(false)
 
 const statusLabels: Record<string, string> = {
   pending: '等待中', running: '执行中', paused: '已暂停', reviewing: '待审核',
@@ -142,7 +140,6 @@ const timelineTasks = computed(() => {
 let unsubTask: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
 let unsubStage: (() => void) | null = null
-let unsubPreview: (() => void) | null = null
 
 onMounted(() => {
   unsubTask = wsStore.on('task_update', (data: any) => {
@@ -176,18 +173,12 @@ onMounted(() => {
       }
     }
   })
-  unsubPreview = wsStore.on('code_preview', (data: any) => {
-    if (selectedTask.value?.id === data.task_id) {
-      codePreviewDiff.value = data.diff
-    }
-  })
 })
 
 onUnmounted(() => {
   if (unsubTask) unsubTask()
   if (unsubProgress) unsubProgress()
   if (unsubStage) unsubStage()
-  if (unsubPreview) unsubPreview()
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
@@ -214,21 +205,34 @@ const filteredTasks = computed(() => {
 async function selectTask(task: any) {
   if (selectedTask.value?.id !== task.id) {
     taskProgress.value = wsStore.getTaskProgress(task.id)
-    codePreviewDiff.value = null
+    showReviewDiff.value = false
     showWorkspace.value = false
     taskFiles.value = []
     selectedTaskFile.value = null
-    // Reset pipeline stages
-    pipelineStages.value = [
-      { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: task.status === 'running' ? 'running' : 'waiting', startedAt: null, doneAt: null },
-      { key: 'reviewer',   label: '代码审查员', icon: 'eye',    status: 'waiting', startedAt: null, doneAt: null },
-      { key: 'security',   label: '安全审查员', icon: 'shield', status: 'waiting', startedAt: null, doneAt: null },
-      { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
-    ]
-    // If task is already done/reviewing, mark all as done
-    if (task.status === 'reviewing' || task.status === 'approved' || task.status === 'rejected') {
-      pipelineStages.value.forEach(s => { s.status = 'done' })
-      pipelineStages.value = [...pipelineStages.value]
+    const cachedStages = wsStore.getTaskPipelineStages(task.id)
+    if (cachedStages.length > 0) {
+      // Restore the latest stage events captured by the shared WebSocket
+      // store.  This keeps the stepper accurate after navigating away and
+      // back while the task is still running.
+      const cachedByKey = new Map(cachedStages.map(stage => [stage.key, stage]))
+      pipelineStages.value = pipelineStages.value.map(stage => ({
+        ...stage,
+        ...(cachedByKey.get(stage.key) || {}),
+      }))
+    } else {
+      pipelineStages.value = [
+        { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: task.status === 'running' ? 'running' : 'waiting', startedAt: null, doneAt: null },
+        { key: 'reviewer',   label: '代码审查员', icon: 'eye',    status: 'waiting', startedAt: null, doneAt: null },
+        { key: 'security',   label: '安全审查员', icon: 'shield', status: 'waiting', startedAt: null, doneAt: null },
+        { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
+      ]
+      // There may be no cached WebSocket events after a full page reload.
+      // Completed tasks can still be reconstructed from their persisted task
+      // status in that case.
+      if (task.status === 'reviewing' || task.status === 'approved' || task.status === 'rejected') {
+        pipelineStages.value.forEach(s => { s.status = 'done' })
+        pipelineStages.value = [...pipelineStages.value]
+      }
     }
   }
   selectedTask.value = task
@@ -236,10 +240,6 @@ async function selectTask(task: any) {
   try {
     const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`)
     taskDetail.value = data
-    // Backfill code preview from stored review diff (WebSocket event may have been missed)
-    if (!codePreviewDiff.value && data?.review?.diff_content && data.review.diff_content !== '# No code changes detected') {
-      codePreviewDiff.value = data.review.diff_content
-    }
   } catch {
     taskDetail.value = null
   } finally {
@@ -780,20 +780,17 @@ async function resumeTask(task: any, event: Event) {
               </div>
             </div>
 
-            <!-- Real-time code preview -->
-            <div v-if="codePreviewDiff" class="detail-section">
-              <h4 class="detail-label">代码预览（实时）</h4>
-              <div class="diff-container">
-                <DiffViewer :diff="codePreviewDiff" />
-              </div>
-            </div>
-
             <div class="detail-section">
               <div class="detail-label-row">
                 <h4 class="detail-label">审查结果</h4>
                 <span class="review-status-badge" :style="{ color: reviewStatusColors[taskDetail.review.status] }">
                   {{ reviewStatusLabels[taskDetail.review.status] || taskDetail.review.status }}
                 </span>
+                <button
+                  v-if="taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'"
+                  class="diff-toggle"
+                  @click="showReviewDiff = !showReviewDiff"
+                >{{ showReviewDiff ? '收起代码' : '展开代码' }}</button>
                 <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
                   <t-button size="small" theme="warning" variant="outline" @click="openRejectDialog">驳回并修改</t-button>
                   <t-button size="small" theme="success" @click="approveReview">通过</t-button>
@@ -801,10 +798,10 @@ async function resumeTask(task: any, event: Event) {
                 </div>
               </div>
 
-              <div class="diff-container" v-if="taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'">
+              <div class="diff-container" v-if="showReviewDiff && taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'">
                 <DiffViewer :diff="taskDetail.review.diff_content" />
               </div>
-              <div v-else class="no-diff">无代码变更</div>
+              <div v-if="!taskDetail.review.diff_content || taskDetail.review.diff_content === '# No code changes detected'" class="no-diff">无代码变更</div>
 
               <div class="summary-box" v-if="taskDetail.review.agent_review_summary" v-html="renderMarkdown(taskDetail.review.agent_review_summary)" />
 
@@ -842,14 +839,6 @@ async function resumeTask(task: any, event: Event) {
               </div>
             </div>
 
-            <!-- Real-time code preview (during execution) -->
-            <div v-if="codePreviewDiff" class="detail-section">
-              <h4 class="detail-label">代码预览（实时）</h4>
-              <div class="diff-container">
-                <DiffViewer :diff="codePreviewDiff" />
-              </div>
-            </div>
-
             <div class="no-review-status">
               <span class="spinner" v-if="taskDetail.status === 'running' || taskDetail.status === 'pending'"></span>
               <p v-if="taskDetail.status === 'running'">Agent 正在执行中...</p>
@@ -883,11 +872,12 @@ async function resumeTask(task: any, event: Event) {
                   v-for="f in taskFiles"
                   :key="f.path"
                   class="workspace-file-item"
-                  :class="{ active: selectedTaskFile?.path === f.path }"
+                  :class="{ active: selectedTaskFile?.path === f.path, modified: f.modified }"
                   @click="loadTaskFile(selectedTask.id, f.path)"
                 >
                   <span class="workspace-file-icon">{{ f.type === 'tree' ? '📁' : fileIcon(f.name) }}</span>
                   <span class="workspace-file-name">{{ f.name }}</span>
+                  <span v-if="f.modified" class="workspace-modified-label">已修改</span>
                 </div>
               </div>
             </div>
@@ -1146,6 +1136,11 @@ async function resumeTask(task: any, event: Event) {
 }
 .workspace-file-item:hover { background: var(--surface-hover); }
 .workspace-file-item.active { background: var(--primary-light); color: var(--primary); }
+.workspace-file-item.modified { color: var(--success); font-weight: 600; }
+.workspace-modified-label {
+  margin-left: auto; padding: 1px 5px; border-radius: 999px;
+  background: var(--success-light); color: var(--success); font-size: 10px;
+}
 .workspace-file-icon { flex-shrink: 0; font-size: 13px; }
 .workspace-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -1219,6 +1214,12 @@ async function resumeTask(task: any, event: Event) {
 .detail-label { font-size: 12px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 .detail-label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .detail-label-row .detail-label { margin: 0; }
+.diff-toggle {
+  border: 1px solid var(--surface-border); border-radius: 999px;
+  padding: 3px 9px; background: var(--surface); color: var(--muted-foreground);
+  font-size: 11px; line-height: 1.2; cursor: pointer;
+}
+.diff-toggle:hover { color: var(--foreground); background: var(--surface-hover); }
 .review-status-badge { font-size: 12px; font-weight: 700; }
 
 .review-actions { display: flex; gap: 6px; margin-left: auto; }

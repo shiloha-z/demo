@@ -3,6 +3,14 @@ import { ref } from 'vue'
 
 type WsCallback = (data: any) => void
 type TaskProgressEntry = { message: string; step: string; timestamp: string }
+type TaskPipelineStage = {
+  key: string
+  label: string
+  icon: string
+  status: 'waiting' | 'running' | 'done' | 'error'
+  startedAt: string | null
+  doneAt: string | null
+}
 
 const MAX_TASK_PROGRESS_ENTRIES = 500
 
@@ -20,6 +28,10 @@ export const useWebSocketStore = defineStore('websocket', () => {
   const subscribers = new Map<string, Set<WsCallback>>()
   // Keep progress outside route components so navigating away does not lose it.
   const taskProgressById = new Map<number, TaskProgressEntry[]>()
+  // Stage events have the same lifetime requirement as progress logs.  Route
+  // components can unmount while an agent is running, so retain the latest
+  // state for each task in the shared store.
+  const taskPipelineById = new Map<number, TaskPipelineStage[]>()
 
   function recordTaskProgress(data: any) {
     const taskId = Number(data?.task_id)
@@ -39,6 +51,33 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   function getTaskProgress(taskId: number): TaskProgressEntry[] {
     return [...(taskProgressById.get(taskId) || [])]
+  }
+
+  function recordTaskPipelineStage(data: any) {
+    const taskId = Number(data?.task_id)
+    if (!Number.isInteger(taskId) || taskId <= 0 || !data?.stage) return
+
+    const status = data.status
+    if (!['waiting', 'running', 'done', 'error'].includes(status)) return
+    const stages = taskPipelineById.get(taskId) || []
+    const index = stages.findIndex(stage => stage.key === data.stage)
+    const previous = index >= 0 ? stages[index] : undefined
+    const timestamp = data.timestamp || new Date().toISOString()
+    const next: TaskPipelineStage = {
+      key: String(data.stage),
+      label: String(data.label || previous?.label || data.stage),
+      icon: String(data.icon || previous?.icon || 'circle'),
+      status,
+      startedAt: status === 'running' ? (previous?.startedAt || timestamp) : (previous?.startedAt || null),
+      doneAt: status === 'done' || status === 'error' ? timestamp : (previous?.doneAt || null),
+    }
+    if (index >= 0) stages.splice(index, 1, next)
+    else stages.push(next)
+    taskPipelineById.set(taskId, stages)
+  }
+
+  function getTaskPipelineStages(taskId: number): TaskPipelineStage[] {
+    return (taskPipelineById.get(taskId) || []).map(stage => ({ ...stage }))
   }
 
   function connect() {
@@ -79,6 +118,9 @@ export const useWebSocketStore = defineStore('websocket', () => {
         if (msg.type === 'task_progress') {
           recordTaskProgress(msg.data)
         }
+        if (msg.type === 'pipeline_stage') {
+          recordTaskPipelineStage(msg.data)
+        }
 
         // Notify subscribers
         const subs = subscribers.get(msg.type)
@@ -118,6 +160,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
     connected.value = false
     taskProgressById.clear()
+    taskPipelineById.clear()
   }
 
   function scheduleReconnect() {
@@ -164,5 +207,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
   }
 
-  return { connected, lastMessage, connect, disconnect, on, send, getTaskProgress }
+  return {
+    connected, lastMessage, connect, disconnect, on, send,
+    getTaskProgress, getTaskPipelineStages,
+  }
 })

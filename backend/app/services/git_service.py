@@ -549,6 +549,25 @@ def diff_vs_master(workspace: str) -> str:
         return get_diff(workspace)
 
 
+@_workspace_locked
+def changed_files_vs_base(workspace: str, ref: str = "") -> set[str]:
+    """Return files changed from the base branch, including untracked files."""
+    repo = get_repo(workspace)
+    if not repo:
+        return set()
+    try:
+        base = _get_base_branch(repo)
+        args = ["--name-only", base]
+        if ref:
+            args.append(ref)
+        changed = set(filter(None, repo.git.diff(*args).splitlines()))
+    except GitCommandError:
+        changed = set()
+    if not ref:
+        changed.update(path.replace("\\", "/") for path in repo.untracked_files)
+    return changed
+
+
 # ── File operations (always read from master branch) ───────────────────
 
 _EXCLUDED = {".git", "__pycache__", "node_modules", ".venv", "dist"}

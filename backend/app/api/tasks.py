@@ -549,8 +549,28 @@ def task_file_tree(
     project = db.query(Project).get(project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
+    branch_name = task.branch_name or f"task/{task_id}"
+    task_workspace = task.worktree_path if task.worktree_path and git.get_repo(task.worktree_path) else ""
     try:
-        nodes = git.list_files_snapshot(project.workspace_path, f"task/{task_id}", path)
+        # Prefer the isolated task worktree so the panel also shows files that
+        # have been written but not committed yet.
+        workspace = task_workspace or project.workspace_path
+        nodes = git.list_files(workspace, path) if task_workspace else git.list_files_snapshot(
+            project.workspace_path, branch_name, path
+        )
+        changed_paths = git.changed_files_vs_base(workspace, "" if task_workspace else branch_name)
+
+        def mark_changed(items: list[dict]) -> bool:
+            any_changed = False
+            for item in items:
+                child_changed = mark_changed(item.get("children") or [])
+                item_path = item.get("path", "")
+                own_changed = item_path in changed_paths
+                item["modified"] = own_changed or child_changed
+                any_changed = any_changed or item["modified"]
+            return any_changed
+
+        mark_changed(nodes)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"files": nodes}
@@ -572,8 +592,12 @@ def task_read_file(
     project = db.query(Project).get(project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
+    branch_name = task.branch_name or f"task/{task_id}"
+    task_workspace = task.worktree_path if task.worktree_path and git.get_repo(task.worktree_path) else ""
     try:
-        content = git.read_file_snapshot(project.workspace_path, f"task/{task_id}", path)
+        content = git.read_file(task_workspace, path) if task_workspace else git.read_file_snapshot(
+            project.workspace_path, branch_name, path
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError:

@@ -86,7 +86,6 @@ const sections = [
   {
     label: '系统',
     items: [
-      { path: '/settings', icon: 'settings', label: '系统设置' },
       { path: '/messages', icon: 'bell', label: '消息中心', badge: true },
     ],
   },

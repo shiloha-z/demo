@@ -209,8 +209,14 @@ def _run_agent_pipeline(
         on_progress = _make_progress_cb(task_id, project_id)
         on_stage = _make_stage_cb(task_id, project_id)
 
-        # Build task description with optional feedback for revision rounds
-        task_desc = task.description or task.title
+        # Always include both fields.  A title is commonly the only requirement
+        # entered in the UI, while a detailed description may add constraints.
+        # Keeping their labels also prevents CLI-backed agents from mistaking
+        # the surrounding orchestration prompt for the actual user request.
+        task_desc = (
+            f"任务标题：{task.title.strip()}\n"
+            f"任务详情：{(task.description or task.title).strip()}"
+        )
         if feedback:
             task_desc = (
                 f"【人工审查反馈 — 请根据以下意见修改代码】\n"

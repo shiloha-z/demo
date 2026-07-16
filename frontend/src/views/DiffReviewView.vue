@@ -70,17 +70,6 @@ async function loadReviews() {
   }
 }
 
-async function approve(review: any) {
-  loading.value = true
-  try {
-    await api.post(`/reviews/${review.id}/approve`)
-    MessagePlugin.success('审查已通过，已进入项目合并队列')
-    await loadReviews()
-    if (selectedReview.value?.id === review.id) selectedReview.value = null
-  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
-  finally { loading.value = false }
-}
-
 const canVote = computed(() => voteSummary.value?.reviewers?.some((r: any) => r.user_id === auth.userId))
 const hasApprovalQuorum = computed(() => {
   const summary = voteSummary.value
@@ -90,25 +79,24 @@ const hasApprovalQuorum = computed(() => {
     summary.reject_count === 0,
   )
 })
-const approvalButtonText = computed(() => {
-  const summary = voteSummary.value
-  if (!summary) return '等待投票信息'
-  return hasApprovalQuorum.value
-    ? '确认进入合并队列'
-    : `等待投票 (${summary.approve_count}/${summary.required_approvals})`
-})
-
 async function castVote(decision: 'approve' | 'reject') {
   if (!selectedReview.value) return
   loading.value = true
   try {
-    await api.post(`/reviews/${selectedReview.value.id}/vote`, {
+    const reviewId = selectedReview.value.id
+    const { data } = await api.post(`/reviews/${reviewId}/vote`, {
       decision,
       comment: voteComment.value.trim(),
     })
     voteComment.value = ''
-    const { data } = await api.get(`/reviews/${selectedReview.value.id}/votes`)
-    voteSummary.value = data
+    if (data.queued_for_merge) {
+      MessagePlugin.success('通过票数已满足，已自动进入项目合并队列')
+      await loadReviews()
+      if (selectedReview.value?.id === reviewId) selectedReview.value = null
+      return
+    }
+    const votes = await api.get(`/reviews/${reviewId}/votes`)
+    voteSummary.value = votes.data
     MessagePlugin.success(decision === 'approve' ? '已投通过票' : '已投驳回票')
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '投票失败')) }
   finally { loading.value = false }
@@ -214,13 +202,7 @@ function formatDate(d: string) {
             <h3>审查 #{{ selectedReview.id }}</h3>
             <div class="detail-actions" v-if="selectedReview.status === 'pending'">
               <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="openRejectDialog">驳回并修改</t-button>
-              <t-button
-                size="small"
-                theme="success"
-                :disabled="loading || !hasApprovalQuorum"
-                :title="hasApprovalQuorum ? '投票已满足要求，可确认进入合并队列' : '请先在下方完成所需的通过投票'"
-                @click="approve(selectedReview)"
-              >{{ approvalButtonText }}</t-button>
+              <span v-if="hasApprovalQuorum" class="merge-queue-hint">通过票数已满足，正在进入合并队列</span>
               <t-button size="small" theme="default" variant="text" :disabled="loading" @click="closeReview(selectedReview)">结束</t-button>
             </div>
           </div>
@@ -316,6 +298,12 @@ function formatDate(d: string) {
 .detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 .detail-header h3 { font-size: 16px; font-weight: 700; margin: 0; }
 .detail-actions { display: flex; gap: 8px; }
+.merge-queue-hint {
+  display: inline-flex; align-items: center;
+  padding: 0 8px; border-radius: var(--radius-sm);
+  color: var(--success); background: var(--success-light);
+  font-size: 12px;
+}
 
 .detail-section { margin-bottom: 20px; }
 .detail-label { font-size: 13px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }

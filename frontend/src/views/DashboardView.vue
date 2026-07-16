@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -23,6 +23,17 @@ function openMembers(p: any) {
 const joinDialogVisible = ref(false)
 const joinProjectId = ref('')
 const joining = ref(false)
+const searchKeyword = ref('')
+
+const visibleProjects = computed(() => {
+  const keyword = searchKeyword.value.trim().toLocaleLowerCase()
+  if (!keyword) return store.projects
+  return store.projects.filter((project: any) => [
+    project.name,
+    project.description,
+    project.owner_name,
+  ].some((value) => String(value || '').toLocaleLowerCase().includes(keyword)))
+})
 
 async function handleJoin() {
   if (!joinProjectId.value.trim()) return
@@ -140,15 +151,6 @@ function goProject(p: any) {
   router.push('/files')
 }
 
-function copyProjectId(id: string, event: Event) {
-  event.stopPropagation()
-  navigator.clipboard.writeText(id).then(() => {
-    MessagePlugin.success('项目 ID 已复制')
-  }).catch(() => {
-    MessagePlugin.warning('复制失败，请手动复制')
-  })
-}
-
 async function handleJoinProject(p: any, event: Event) {
   event.stopPropagation()
   if (!p.project_id) {
@@ -176,6 +178,13 @@ async function handleJoinProject(p: any, event: Event) {
         <p class="page-desc">管理你的项目和 Agent 工作区</p>
       </div>
       <div class="header-actions">
+        <t-input
+          v-model="searchKeyword"
+          clearable
+          size="medium"
+          style="width: 220px"
+          placeholder="搜索项目名称、描述或负责人"
+        />
         <t-select
           v-model="store.sortBy"
           size="medium"
@@ -254,9 +263,9 @@ async function handleJoinProject(p: any, event: Event) {
     </div>
 
     <!-- Project Grid -->
-    <div v-if="store.projects.length > 0" class="project-grid">
+    <div v-if="visibleProjects.length > 0" class="project-grid">
       <article
-        v-for="p in store.projects"
+        v-for="p in visibleProjects"
         :key="p.id"
         class="project-card"
         @click="goProject(p)"
@@ -271,10 +280,6 @@ async function handleJoinProject(p: any, event: Event) {
             <span>{{ p.owner_name || '—' }}</span>
             <span>·</span>
             <span>{{ formatTime(p.created_at) }}</span>
-          </div>
-          <div class="project-card-id" v-if="p.project_id" @click.stop="copyProjectId(p.project_id, $event)">
-            {{ p.project_id }}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </div>
         </div>
         <button v-if="!p.is_member" class="btn-join" @click.stop="handleJoinProject(p, $event)" title="申请加入" :disabled="joining">
@@ -437,21 +442,6 @@ async function handleJoinProject(p: any, event: Event) {
 .project-card-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--foreground); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
-.project-card-id {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-top: 4px; padding: 2px 8px;
-  font-size: 10.5px; color: var(--muted-foreground);
-  font-family: var(--font-mono);
-  background: var(--surface-hover);
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  user-select: none;
-}
-.project-card-id:hover {
-  color: var(--primary);
-  background: var(--primary-light);
-}
 .project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all var(--transition-base); flex-shrink: 0; }
 .project-card:hover .project-card-arrow { opacity: 1; color: var(--primary); }
 

@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, timezone
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ except ImportError:
     mem = None
 
 router = APIRouter(prefix="/api", tags=["Reviews"])
+logger = logging.getLogger(__name__)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -105,8 +107,14 @@ def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
     broadcast_sync("task_update", {
         "id": task.id, "project_id": task.project_id, "status": "merge_queued",
     })
-    from app.services.execution_service import enqueue_merge
-    enqueue_merge(task.id)
+    # The approval has already been persisted above.  A temporary in-process
+    # scheduling failure must not turn a successful approval into a 500; the
+    # startup recovery hook will pick up this persisted queue item on restart.
+    try:
+        from app.services.execution_service import enqueue_merge
+        enqueue_merge(task.id)
+    except Exception:
+        logger.exception("Failed to wake merge queue for task %s", task.id)
     return {"message": "Approved and queued for merge"}
 
 
@@ -211,6 +219,7 @@ def cast_review_vote(
     db.commit()
     summary = _vote_summary(review, db)
     round_ = _ensure_vote_round(review, db)
+    queued_for_merge = False
     if body.decision == "reject" and round_.veto_on_reject:
         task = db.query(Task).get(review.task_id)
         if task and task.status == TaskStatus.REVIEWING:
@@ -231,6 +240,16 @@ def cast_review_vote(
             db.commit()
             from app.services.execution_service import enqueue_agent_run
             enqueue_agent_run(task.id, feedback=feedback)
+    elif (
+        summary["reject_count"] == 0
+        and summary["approve_count"] >= summary["required_approvals"]
+    ):
+        # Reaching the configured quorum is the approval action itself.  Do
+        # not make a reviewer repeat it with a separate "confirm merge" click.
+        task = db.query(Task).get(review.task_id)
+        if task and task.status == TaskStatus.REVIEWING:
+            _queue_review_merge(review, task, db)
+            queued_for_merge = True
     from app.api.ws import broadcast_sync_to_project
     broadcast_sync_to_project(review.project_id, "review_vote_update", {
         "review_id": review.id,
@@ -244,7 +263,7 @@ def cast_review_vote(
             "project_id": review.project_id,
             "status": "rejected",
         })
-    return summary
+    return {**summary, "queued_for_merge": queued_for_merge}
 
 
 @router.post("/reviews/{review_id}/approve")

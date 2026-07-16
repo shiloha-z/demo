@@ -14,23 +14,46 @@ import os
 import json
 import asyncio
 import logging
+from pathlib import Path
 from .base import BaseRunner, RunResult, ProgressCallback, StageCallback
 
 logger = logging.getLogger(__name__)
 
-# Check if claude CLI is available
 import shutil
-_CLAUDE_PATH = shutil.which("claude")
+
+
+def _find_claude_cli() -> str | None:
+    """Return the native executable, not the Windows ``claude.CMD`` shim.
+
+    A .CMD shim forwards ``%*`` through cmd.exe.  Long prompts containing
+    non-ASCII text or shell metacharacters can therefore be altered before
+    Claude Code receives them.  The npm package includes claude.exe next to
+    that shim, so prefer it whenever it is available.
+    """
+    command = shutil.which("claude")
+    if not command:
+        return None
+    command_path = Path(command)
+    if os.name == "nt" and command_path.suffix.lower() in {".cmd", ".bat"}:
+        native = command_path.parent / "node_modules" / "@anthropic-ai" / "claude-code" / "bin" / "claude.exe"
+        if native.is_file():
+            return str(native)
+    return command
+
+
+_CLAUDE_PATH = _find_claude_cli()
 
 # Stage definitions
 STAGES = [
     {"key": "code_gen",   "label": "代码工程师",
      "prompt": (
-         "You are a senior software engineer. Based on the task below, analyze the "
+         "You are a senior software engineer. The complete user task is included "
+         "verbatim inside <user_task> below. Do not ask the user to provide the task "
+         "again; implement it directly. First analyze the "
          "existing codebase first (read relevant files), then write the required code. "
          "Write complete, production-quality code with comments (Chinese or English). "
          "Use Edit/Write tools. Your response to the user must be in Chinese.\n\n"
-         "Task: {task_description}"
+         "<user_task>\n{task_description}\n</user_task>"
      )},
     {"key": "reviewer",   "label": "代码审查员",
      "prompt": (
