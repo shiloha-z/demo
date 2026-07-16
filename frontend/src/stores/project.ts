@@ -4,6 +4,7 @@ import api from '../api'
 
 export interface Project {
   id: number
+  project_id: string | null
   name: string
   description: string
   owner_id: number

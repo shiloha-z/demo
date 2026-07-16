@@ -1,4 +1,4 @@
-import os, re, shutil
+import os, re, shutil, secrets, string
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from typing import List
@@ -9,7 +9,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole
+from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -36,6 +36,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectResponse(BaseModel):
     id: int
+    project_id: str | None = None
     name: str
     description: str
     owner_id: int
@@ -63,6 +64,13 @@ def _sanitize_dirname(name: str) -> str:
     # Strip leading/trailing underscores
     safe = safe.strip('_')
     return safe or 'project'
+
+
+def _generate_project_id() -> str:
+    """Generate a canonical project ID: PROJ-YYYYMMDD-XXXXXX."""
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    random_part = ''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+    return f"PROJ-{date_part}-{random_part}"
 
 
 def _require_membership(project_id: int, user: User, db: Session) -> Project:
@@ -160,14 +168,24 @@ def list_projects(
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    project = Project(name=req.name, description=req.description, owner_id=user.id)
+    # Generate unique project_id
+    project_id = _generate_project_id()
+    while db.query(Project).filter(Project.project_id == project_id).first():
+        project_id = _generate_project_id()
+
+    project = Project(name=req.name, description=req.description, owner_id=user.id, project_id=project_id)
     db.add(project)
     db.commit()
     db.refresh(project)
 
-    # Auto-add creator as project owner
-    db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
-    db.commit()
+    # Auto-add creator as project owner (skip if already exists)
+    existing = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == user.id,
+    ).first()
+    if not existing:
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
+        db.commit()
 
     # Workspace folder: use custom name if provided, otherwise sanitize project name
     dirname = _sanitize_dirname(req.workspace_name or req.name)
@@ -422,3 +440,157 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     _broadcast_project_update("deleted", project_id)
 
     return {"message": f"项目「{project.name}」已删除"}
+
+
+# ── Join requests ────────────────────────────────────────────────────
+
+class JoinApplyRequest(BaseModel):
+    project_id: str = Field(..., description="项目规范 ID，如 PROJ-20260716-abc123")
+
+
+class JoinRequestResponse(BaseModel):
+    id: int
+    project_id: int
+    user_id: int
+    username: str
+    status: str
+    created_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+@router.post("/join", status_code=status.HTTP_201_CREATED)
+def apply_join_project(
+    req: JoinApplyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Apply to join a project by canonical project_id."""
+    project = db.query(Project).filter(Project.project_id == req.project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail=f"项目 {req.project_id} 不存在")
+
+    # Already a member?
+    if project.owner_id == user.id:
+        raise HTTPException(status_code=409, detail="你已经是该项目的负责人")
+    existing_member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == user.id,
+    ).first()
+    if existing_member:
+        raise HTTPException(status_code=409, detail="你已经是该项目的成员")
+
+    # Already applied?
+    existing_req = db.query(JoinRequest).filter(
+        JoinRequest.project_id == project.id,
+        JoinRequest.user_id == user.id,
+        JoinRequest.status == JoinStatus.PENDING,
+    ).first()
+    if existing_req:
+        raise HTTPException(status_code=409, detail="你已经申请过加入该项目，请等待审批")
+
+    join_req = JoinRequest(
+        project_id=project.id,
+        user_id=user.id,
+        username=user.username,
+        status=JoinStatus.PENDING,
+    )
+    db.add(join_req)
+    db.commit()
+    db.refresh(join_req)
+
+    return {"message": f"已申请加入项目「{project.name}」，请等待项目负责人审批", "request_id": join_req.id}
+
+
+@router.get("/{project_id}/applications", response_model=list[JoinRequestResponse])
+def list_applications(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List pending join requests. Only owner/admin can view."""
+    project = _require_membership(project_id, user, db)
+    if project.owner_id != user.id:
+        membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+        ).first()
+        if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
+            raise HTTPException(status_code=403, detail="只有项目主管或管理员才能查看申请列表")
+
+    requests = db.query(JoinRequest).filter(
+        JoinRequest.project_id == project_id,
+        JoinRequest.status == JoinStatus.PENDING,
+    ).order_by(JoinRequest.created_at.desc()).all()
+
+    return [JoinRequestResponse.model_validate(r) for r in requests]
+
+
+@router.post("/{project_id}/applications/{app_id}/approve")
+def approve_application(
+    project_id: int,
+    app_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Approve a join request. Only owner/admin can approve."""
+    project = _require_membership(project_id, user, db)
+    if project.owner_id != user.id:
+        membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+        ).first()
+        if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
+            raise HTTPException(status_code=403, detail="只有项目主管或管理员才能审批申请")
+
+    join_req = db.query(JoinRequest).filter(
+        JoinRequest.id == app_id,
+        JoinRequest.project_id == project_id,
+    ).first()
+    if not join_req:
+        raise HTTPException(status_code=404, detail="申请记录不存在")
+    if join_req.status != JoinStatus.PENDING:
+        raise HTTPException(status_code=400, detail="该申请已被处理")
+
+    join_req.status = JoinStatus.APPROVED
+    join_req.reviewed_at = datetime.now(timezone.utc)
+
+    # Add as member
+    db.add(ProjectMember(project_id=project_id, user_id=join_req.user_id, role=ProjectRole.MEMBER))
+    db.commit()
+
+    return {"message": f"已通过 {join_req.username} 的加入申请"}
+
+
+@router.post("/{project_id}/applications/{app_id}/reject")
+def reject_application(
+    project_id: int,
+    app_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Reject a join request. Only owner/admin can reject."""
+    project = _require_membership(project_id, user, db)
+    if project.owner_id != user.id:
+        membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+        ).first()
+        if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
+            raise HTTPException(status_code=403, detail="只有项目主管或管理员才能审批申请")
+
+    join_req = db.query(JoinRequest).filter(
+        JoinRequest.id == app_id,
+        JoinRequest.project_id == project_id,
+    ).first()
+    if not join_req:
+        raise HTTPException(status_code=404, detail="申请记录不存在")
+    if join_req.status != JoinStatus.PENDING:
+        raise HTTPException(status_code=400, detail="该申请已被处理")
+
+    join_req.status = JoinStatus.REJECTED
+    join_req.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {"message": f"已驳回 {join_req.username} 的加入申请"}

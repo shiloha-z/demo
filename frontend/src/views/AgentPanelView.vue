@@ -19,9 +19,10 @@ const modelsLoading = ref(false)
 const showCreateAgent = ref(false)
 const showCreateTask = ref(false)
 const selectedAgent = ref<any>(null)
-const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai' })
+const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai', skill_id: null as number | null })
 const newTask = ref({ title: '', description: '', project_id: null as number | null })
 const loading = ref(false)
+const skills = ref<any[]>([])
 
 const roleLabels: Record<string, string> = {
   code_gen: '代码工程师',
@@ -110,7 +111,7 @@ async function createAgent() {
     await api.post('/agents', newAgent.value)
     MessagePlugin.success('Agent 已创建')
     showCreateAgent.value = false
-    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '', runner_type: 'crewai' }
+    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '', runner_type: 'crewai', skill_id: null }
     await loadAgents()
   } finally { loading.value = false }
 }
@@ -170,6 +171,43 @@ async function checkRunnerAvailability(runnerType: string) {
   }
 }
 
+async function fetchSkills() {
+  try {
+    const { data } = await api.get('/skills')
+    skills.value = Array.isArray(data) ? data : []
+  } catch (e: any) {
+    console.error('加载技能列表失败:', e?.response?.status, e?.response?.data || e?.message)
+  }
+}
+
+const skillOptions = computed(() => skills.value.map((s: any) => ({ value: s.id, label: s.name })))
+
+function onSkillSelect(skillId: number | string | null | undefined) {
+  if (skillId == null || skillId === '') return
+  const skill = skills.value.find((s: any) => s.id == skillId)
+  if (!skill) return
+
+  if (newAgent.value.system_prompt && newAgent.value.system_prompt.trim()) {
+    // If user already typed something, confirm before overwriting
+    const confirmDialog = DialogPlugin.confirm({
+      header: '覆盖提示词',
+      body: '当前已填写系统提示词，选择技能模板将覆盖现有内容。是否继续？',
+      confirmBtn: { content: '覆盖', theme: 'primary' },
+      cancelBtn: '取消',
+      onConfirm: () => {
+        newAgent.value.system_prompt = skill.prompt_content
+        confirmDialog.destroy()
+      },
+      onCancel: () => {
+        newAgent.value.skill_id = null
+        confirmDialog.destroy()
+      },
+    })
+  } else {
+    newAgent.value.system_prompt = skill.prompt_content
+  }
+}
+
 function lastResultLabel(status: string | null): string {
   if (!status) return ''
   const map: Record<string, string> = {
@@ -187,7 +225,7 @@ function lastResultLabel(status: string | null): string {
         <h1 class="page-title">Agent 池</h1>
         <p class="page-desc">全局 Agent 管理，可在任意项目中复用</p>
       </div>
-      <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type)">
+      <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type); fetchSkills()">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </template>
@@ -202,7 +240,7 @@ function lastResultLabel(status: string | null): string {
       </div>
       <h3>暂无 Agent</h3>
       <p>创建你的第一个 AI Agent，可在任意项目中指派任务</p>
-      <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels(newAgent.runner_type)">创建 Agent</t-button>
+      <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels(newAgent.runner_type); fetchSkills()">创建 Agent</t-button>
     </div>
 
     <div v-else class="agent-grid">
@@ -306,6 +344,8 @@ function lastResultLabel(status: string | null): string {
         </t-select>
         <label class="field-label">系统提示词（选填）</label>
         <textarea v-model="newAgent.system_prompt" class="field-textarea" rows="3" placeholder="自定义 Agent 行为..." />
+        <label class="field-label">从技能模板加载（可选）</label>
+        <t-select v-model="newAgent.skill_id" :options="skillOptions" placeholder="选择已有技能模板..." clearable @change="onSkillSelect" />
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateAgent = false">取消</t-button>

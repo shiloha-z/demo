@@ -162,6 +162,8 @@ def delete_agent(
     agent = db.query(Agent).filter(Agent.id == agent_id, Agent.creator_id == user.id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="只有 Agent 创建者才能删除")
     db.delete(agent)
     db.commit()
     return {"message": "Deleted"}

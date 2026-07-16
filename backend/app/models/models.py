@@ -56,12 +56,14 @@ class User(Base):
     avatar_url = Column(String(500), default="")
 
     agents = relationship("Agent", back_populates="creator")
+    skills = relationship("Skill", back_populates="creator")
 
 
 class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(30), unique=True, nullable=True, index=True)  # 规范 ID: PROJ-20260716-abc123
     name = Column(String(100), nullable=False)
     description = Column(Text, default="")
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -124,6 +126,20 @@ class Agent(Base):
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
 
     creator = relationship("User", back_populates="agents")
+
+
+class Skill(Base):
+    __tablename__ = "skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, default="")
+    prompt_content = Column(Text, default="")
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    creator = relationship("User", back_populates="skills")
 
 
 class Task(Base):

@@ -65,11 +65,21 @@ def get_member(project_id: int, user_id: int, db: Session) -> ProjectMember | No
 
 
 def require_member(project_id: int, user: User, db: Session) -> ProjectMember:
-    """Require that the user is a member of the project. Raises 403 if not."""
+    """Require that the user is a member of the project. Owner is always allowed."""
     member = get_member(project_id, user.id, db)
-    if not member:
-        raise HTTPException(status_code=403, detail="You are not a member of this project")
-    return member
+    if member:
+        return member
+    # Owner is always considered a member, even if no ProjectMember record
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if project and project.owner_id == user.id:
+        # Return a synthetic member for owner
+        return ProjectMember(
+            project_id=project_id,
+            user_id=user.id,
+            role=ProjectRole.OWNER,
+            joined_at=project.created_at,
+        )
+    raise HTTPException(status_code=403, detail="You are not a member of this project")
 
 
 def require_role(project_id: int, user: User, db: Session, *roles: str) -> ProjectMember:

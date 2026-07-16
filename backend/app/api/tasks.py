@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.core.permissions import require_project_member
 from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review
 from app.services import git_service as git
 
@@ -15,6 +14,24 @@ router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
 
 # Separate router for global task listing (no project_id in path)
 global_router = APIRouter(prefix="/api/tasks", tags=["Tasks Global"])
+
+
+# ── Permission helper ─────────────────────────────────────────────────
+
+def _check_task_access(project_id: int, user: User, db: Session) -> Project:
+    """Verify user is a member of the project. Raises 404/403."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.owner_id == user.id:
+        return project
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user.id,
+    ).first()
+    if not member:
+        raise HTTPException(status_code=403, detail="只有项目成员才能进行此操作")
+    return project
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -105,7 +122,7 @@ def list_tasks(
     user: User = Depends(get_current_user),
 ):
     """List tasks for a project. Set ?archived=true to show only archived tasks."""
-    require_project_member(project_id, user, db)
+    _check_task_access(project_id, user, db)
     sort_map = {
         "created_desc": desc(Task.created_at),
         "created_asc": asc(Task.created_at),
@@ -147,7 +164,7 @@ def get_task_detail(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    require_project_member(project_id, user, db)
+    _check_task_access(project_id, user, db)
     task = (
         db.query(Task)
         .filter(Task.id == task_id, Task.project_id == project_id)
@@ -194,9 +211,9 @@ def create_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    require_project_member(project_id, user, db)
+    _check_task_access(project_id, user, db)
 
-    # Validate agent exists (globally)
+    # Validate agent exists (globally, only own agents)
     agent = db.query(Agent).filter(Agent.id == req.agent_id, Agent.creator_id == user.id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
@@ -252,6 +269,7 @@ def start_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Manually start a pending task. Agent must be idle."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -286,6 +304,7 @@ def stop_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Stop a running or pending task, set status to paused."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -319,6 +338,7 @@ def resume_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Resume a paused task."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -353,6 +373,7 @@ def archive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Archive a completed or failed task. Pending/running tasks cannot be archived."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -374,6 +395,7 @@ def unarchive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Restore an archived task back to the active list."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -393,6 +415,7 @@ def delete_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Permanently delete a task. Only archived tasks can be deleted."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
@@ -412,6 +435,7 @@ def batch_delete_tasks(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Batch delete archived tasks."""
     require_project_member(project_id, user, db)
     tasks = db.query(Task).filter(

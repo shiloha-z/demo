@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    model_config = ConfigDict(env_file=".env")
+    model_config = ConfigDict(env_file=".env", extra="allow")
 
     DATABASE_URL: str = "sqlite:///./data.db"
     JWT_SECRET: str = "dev-secret-change-in-production"
