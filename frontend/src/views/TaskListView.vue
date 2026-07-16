@@ -196,6 +196,9 @@ async function selectTask(task: any) {
   if (selectedTask.value?.id !== task.id) {
     taskProgress.value = []
     codePreviewDiff.value = null
+    showWorkspace.value = false
+    taskFiles.value = []
+    selectedTaskFile.value = null
     // Reset pipeline stages
     pipelineStages.value = [
       { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: task.status === 'running' ? 'running' : 'waiting', startedAt: null, doneAt: null },
@@ -364,6 +367,13 @@ function hasActivePipeline(task: any): boolean {
 }
 
 // ── Task workspace ──────────────────────────────────────────────
+function toggleWorkspace() {
+  showWorkspace.value = !showWorkspace.value
+  if (showWorkspace.value) {
+    loadTaskFiles(selectedTask.value.id)
+  }
+}
+
 async function loadTaskFiles(taskId: number) {
   const pid = store.currentProject?.id
   if (!pid) return
@@ -696,7 +706,7 @@ async function resumeTask(task: any, event: Event) {
                 v-if="['running','paused','reviewing'].includes(taskDetail.status)"
                 class="workspace-btn"
                 :class="{ active: showWorkspace }"
-                @click="showWorkspace = !showWorkspace; if (showWorkspace) loadTaskFiles(selectedTask.id)"
+                @click="toggleWorkspace()"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 <span>工作空间</span>
