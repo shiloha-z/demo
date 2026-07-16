@@ -290,6 +290,7 @@ const icons: Record<string, string> = {
   border-radius: 9px; padding: 0 5px;
   transition: opacity 0.2s ease, max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
+  animation: badgePulse 2s ease-in-out infinite;
 }
 
 .sidebar-nav.collapsed .nav-badge {
@@ -308,6 +309,7 @@ const icons: Record<string, string> = {
   border-radius: 50%;
   background: var(--danger);
   border: 2px solid var(--app-shell);
+  animation: dotPulse 2s ease-in-out infinite;
 }
 
 /* ── Collapsed nav ──────────────────────────────────────────────── */
@@ -331,5 +333,13 @@ const icons: Record<string, string> = {
 
 .sidebar-nav.collapsed .nav-item.active .nav-icon {
   opacity: 1;
+}
+@keyframes badgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); box-shadow: 0 0 6px var(--danger); }
+}
+@keyframes dotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; transform: scale(1.3); }
 }
 </style>
