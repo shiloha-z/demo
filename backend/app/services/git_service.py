@@ -415,6 +415,22 @@ def list_files(workspace: str, subpath: str = "", ref: str = "") -> list[dict[st
     return []
 
 
+def list_files_snapshot(workspace: str, ref: str, subpath: str = "") -> list[dict[str, Any]]:
+    """Read a committed Git snapshot without taking the mutable workspace lock.
+
+    `git ls-tree` only reads immutable objects addressed by ``ref``. Task
+    workspace previews use this path so they remain responsive while an agent
+    owns the working tree lock to write files or switch branches.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return []
+    try:
+        return _list_from_git(repo, ref, subpath)
+    except (GitCommandError, OSError, ValueError):
+        return []
+
+
 def _list_from_git(repo: Repo, base: str, subpath: str) -> list[dict[str, Any]]:
     """List files using git ls-tree from a specific branch."""
     nodes: list[dict] = []
@@ -516,6 +532,20 @@ def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024, ref: st
         return f"// File too large ({size} bytes, max {max_size * 2})"
     with open(target, "r", encoding="utf-8", errors="replace") as f:
         return f.read(max_size)
+
+
+def read_file_snapshot(workspace: str, ref: str, filepath: str, max_size: int = 256 * 1024) -> str:
+    """Read a committed Git snapshot without waiting for workspace writers."""
+    repo = get_repo(workspace)
+    if not repo:
+        raise FileNotFoundError(f"Git repository not found: {workspace}")
+    try:
+        content = repo.git.show(f"{ref}:{filepath}")
+    except GitCommandError as exc:
+        raise FileNotFoundError(f"File not found in {ref}: {filepath}") from exc
+    if len(content) > max_size * 2:
+        return f"// File too large ({len(content)} chars, max {max_size * 2})"
+    return content[:max_size]
 
 
 @_workspace_locked

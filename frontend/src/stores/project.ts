@@ -10,6 +10,7 @@ export interface Project {
   owner_id: number
   owner_name: string
   workspace_path: string
+  is_member: boolean
   created_at: string | null
   updated_at: string | null
 }

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.permissions import require_project_member
 from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
 from app.services import git_service as git
 
@@ -213,8 +214,9 @@ def create_task(
 ):
     _check_task_access(project_id, user, db)
 
-    # Validate agent exists (globally, only own agents)
-    agent = db.query(Agent).filter(Agent.id == req.agent_id, Agent.creator_id == user.id).first()
+    # Agents are shared globally; the project membership check above controls
+    # who may assign work in this project.
+    agent = db.query(Agent).filter(Agent.id == req.agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -282,11 +284,31 @@ def start_task(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.status == AgentStatus.WORKING:
-        raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+        active_task = db.query(Task).filter(
+            Task.agent_id == agent.id,
+            Task.status == TaskStatus.RUNNING,
+        ).first()
+        if active_task:
+            raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+        # Recover from an interrupted request that set the agent to WORKING
+        # before the background runner was successfully queued.
+        agent.status = AgentStatus.IDLE
 
-    # Update agent status
+    # Persist both states before queueing the background runner, so clients do
+    # not briefly see a pending task with a working agent.
     agent.status = AgentStatus.WORKING
+    task.status = TaskStatus.RUNNING
+    task.started_at = datetime.now(timezone.utc)
     db.commit()
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_update", {
+        "id": task.id, "project_id": project_id, "status": "running",
+        "started_at": task.started_at.isoformat(),
+    })
+    broadcast_sync("agent_update", {
+        "id": agent.id, "status": "working", "current_task_id": task.id,
+    })
 
     # Run agent pipeline in background (pipeline broadcasts agent_update with full detail)
     from app.services.agent_runner import run_agent_pipeline
@@ -521,7 +543,7 @@ def task_file_tree(
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
     try:
-        nodes = git.list_files(project.workspace_path, path, ref=f"task/{task_id}")
+        nodes = git.list_files_snapshot(project.workspace_path, f"task/{task_id}", path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"files": nodes}
@@ -544,7 +566,7 @@ def task_read_file(
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
     try:
-        content = git.read_file(project.workspace_path, path, ref=f"task/{task_id}")
+        content = git.read_file_snapshot(project.workspace_path, f"task/{task_id}", path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError:

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -22,12 +22,15 @@ const sortBy = ref('created_desc')
 const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
 const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
+const progressLogEl = ref<HTMLElement | null>(null)
 const archiving = ref(false)
 const timelineDrawerVisible = ref(false)
 const showWorkspace = ref(false)
 const taskFiles = ref<any[]>([])
 const selectedTaskFile = ref<any>(null)
 const loadingTaskFiles = ref(false)
+const taskFileCache = new Map<number, { files: any[]; loadedAt: number }>()
+const TASK_FILE_CACHE_TTL = 10_000
 const statusFilter = ref('all')
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
@@ -100,6 +103,20 @@ function formatTimestamp(iso: string): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+function appendProgress(entry: { message: string; step: string; timestamp?: string }) {
+  taskProgress.value.push({
+    message: entry.message,
+    step: entry.step,
+    timestamp: entry.timestamp || new Date().toISOString(),
+  })
+  // Keep the most recent output in view without forcing the user to scroll.
+  nextTick(() => {
+    if (progressLogEl.value) {
+      progressLogEl.value.scrollTop = progressLogEl.value.scrollHeight
+    }
+  })
+}
+
 // ── Timeline tasks computed from loaded tasks ──────────────────
 const timelineTasks = computed(() => {
   return tasks.value
@@ -126,6 +143,7 @@ onMounted(() => {
   unsubTask = wsStore.on('task_update', (data: any) => {
     const pid = store.currentProject?.id
     if (pid && data.project_id === pid) {
+      taskFileCache.delete(data.id)
       loadTasks()
       if (selectedTask.value?.id === data.id) {
         selectTask(selectedTask.value)
@@ -134,11 +152,7 @@ onMounted(() => {
   })
   unsubProgress = wsStore.on('task_progress', (data: any) => {
     if (selectedTask.value?.id === data.task_id) {
-      taskProgress.value.push({
-        message: data.message,
-        step: data.step,
-        timestamp: data.timestamp || new Date().toISOString(),
-      })
+      appendProgress(data)
     }
   })
   unsubStage = wsStore.on('pipeline_stage', (data: any) => {
@@ -377,11 +391,17 @@ function toggleWorkspace() {
 async function loadTaskFiles(taskId: number) {
   const pid = store.currentProject?.id
   if (!pid) return
+  const cached = taskFileCache.get(taskId)
+  if (cached && Date.now() - cached.loadedAt < TASK_FILE_CACHE_TTL) {
+    taskFiles.value = cached.files
+    return
+  }
   loadingTaskFiles.value = true
   taskFiles.value = []
   try {
     const { data } = await api.get(`/projects/${pid}/tasks/${taskId}/files`)
     taskFiles.value = data.files || []
+    taskFileCache.set(taskId, { files: taskFiles.value, loadedAt: Date.now() })
   } catch { taskFiles.value = [] }
   finally { loadingTaskFiles.value = false }
 }
@@ -452,6 +472,8 @@ async function submitCreateTask() {
 async function startTask(task: any, event: Event) {
   event.stopPropagation()
   try {
+    // Select before sending the request so no early WebSocket progress message is missed.
+    await selectTask(task)
     await api.post(`/projects/${task.project_id}/tasks/${task.id}/start`)
     MessagePlugin.success(`任务 #${task.id} 已开始执行`)
     await loadTasks()
@@ -734,11 +756,17 @@ async function resumeTask(task: any, event: Event) {
             </div>
 
             <!-- Progress log — with timestamps -->
-            <div v-if="taskProgress.length > 0" class="progress-log">
-              <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
-                <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
-                <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
-                <span class="progress-msg">{{ entry.message }}</span>
+            <div v-if="taskProgress.length > 0" class="execution-log">
+              <div class="execution-log-header">
+                <span>执行日志</span>
+                <span class="execution-log-state">已完成 {{ taskProgress.length }} 条</span>
+              </div>
+              <div ref="progressLogEl" class="progress-log">
+                <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
+                  <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
+                  <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
+                  <span class="progress-msg">{{ entry.message }}</span>
+                </div>
               </div>
             </div>
 
@@ -785,11 +813,22 @@ async function resumeTask(task: any, event: Event) {
             </div>
 
             <!-- Progress log with timestamps -->
-            <div v-if="taskProgress.length > 0" class="progress-log">
-              <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
-                <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
-                <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
-                <span class="progress-msg">{{ entry.message }}</span>
+            <div v-if="hasActivePipeline(taskDetail) || taskProgress.length > 0" class="execution-log">
+              <div class="execution-log-header">
+                <span>执行日志</span>
+                <span class="execution-log-state" :class="{ waiting: taskProgress.length === 0 }">
+                  {{ taskProgress.length > 0 ? `实时输出 · ${taskProgress.length} 条` : '正在连接 Agent…' }}
+                </span>
+              </div>
+              <div ref="progressLogEl" class="progress-log" :class="{ empty: taskProgress.length === 0 }">
+                <div v-for="(entry, i) in taskProgress" :key="i" class="progress-entry" :class="entry.step">
+                  <span class="progress-time">{{ formatTimestamp(entry.timestamp) }}</span>
+                  <span class="progress-icon">{{ stepIcon(entry.step) }}</span>
+                  <span class="progress-msg">{{ entry.message }}</span>
+                </div>
+                <div v-if="taskProgress.length === 0" class="progress-empty">
+                  已发送启动指令，等待 Agent 输出执行进度…
+                </div>
               </div>
             </div>
 
@@ -1214,11 +1253,20 @@ async function resumeTask(task: any, event: Event) {
 .no-review-status { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
 
 /* ── Enhanced progress log ─────────────────────────── */
+.execution-log { margin-bottom: 12px; }
+.execution-log-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 0 2px 6px; font-size: 12px; font-weight: 700; color: var(--foreground);
+}
+.execution-log-state { font-size: 11px; font-weight: 500; color: var(--success); }
+.execution-log-state.waiting { color: var(--primary); }
 .progress-log {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md); padding: 10px 14px;
   margin-bottom: 12px; max-height: 360px; overflow-y: auto;
 }
+.progress-log.empty { min-height: 48px; display: flex; align-items: center; }
+.progress-empty { font-size: 12px; color: var(--muted-foreground); }
 .progress-entry {
   display: flex; align-items: flex-start; gap: 8px;
   padding: 3px 0; font-size: 12.5px;

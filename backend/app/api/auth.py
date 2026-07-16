@@ -14,6 +14,28 @@ router = APIRouter(prefix="/api/auth", tags=["Auth"])
 _AVATAR_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "avatars"
 _AVATAR_DIR.mkdir(parents=True, exist_ok=True)
 _MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
+_AVATAR_URL_PREFIX = "/api/auth/profile/avatar"
+
+
+def _avatar_url(value: str | None) -> str:
+    """Return the canonical public URL, including for legacy stored URLs."""
+    if not value:
+        return ""
+    filename = Path(value.split("?", 1)[0]).name
+    return f"{_AVATAR_URL_PREFIX}/{filename}" if filename else ""
+
+
+def _image_format(content: bytes) -> str | None:
+    """Validate the image signature without trusting the extension or MIME type."""
+    if content.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if content.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if content.startswith((b"GIF87a", b"GIF89a")):
+        return "gif"
+    if len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP":
+        return "webp"
+    return None
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -96,7 +118,7 @@ def get_profile(
         email=user.email or "",
         phone=user.phone or "",
         bio=user.bio or "",
-        avatar_url=user.avatar_url or "",
+        avatar_url=_avatar_url(user.avatar_url),
     )
 
 
@@ -119,7 +141,7 @@ def update_profile(
         email=user.email or "",
         phone=user.phone or "",
         bio=user.bio or "",
-        avatar_url=user.avatar_url or "",
+        avatar_url=_avatar_url(user.avatar_url),
     )
 
 
@@ -142,30 +164,45 @@ def upload_avatar(
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="头像文件不能为空")
 
-    # Remove old avatar if exists
-    if user.avatar_url:
-        old_name = user.avatar_url.rsplit("/", 1)[-1]
-        old_path = _AVATAR_DIR / old_name
-        if old_path.exists():
-            try:
-                os.remove(old_path)
-            except OSError:
-                pass
+    actual_format = _image_format(content)
+    if not actual_format:
+        raise HTTPException(status_code=400, detail="上传文件不是有效的图片")
+    allowed_extensions = {
+        "png": {".png"},
+        "jpeg": {".jpg", ".jpeg"},
+        "gif": {".gif"},
+        "webp": {".webp"},
+    }
+    if ext not in allowed_extensions[actual_format]:
+        raise HTTPException(status_code=400, detail="图片内容与文件扩展名不一致")
 
-    # Save new avatar
+    old_path = _AVATAR_DIR / Path((user.avatar_url or "").split("?", 1)[0]).name
     safe_name = f"{user.id}_{uuid.uuid4().hex[:8]}{ext}"
     dest = _AVATAR_DIR / safe_name
     dest.write_bytes(content)
 
-    user.avatar_url = f"/api/auth/avatar/{safe_name}"
-    db.commit()
+    user.avatar_url = f"{_AVATAR_URL_PREFIX}/{safe_name}"
+    try:
+        db.commit()
+    except Exception:
+        dest.unlink(missing_ok=True)
+        raise
+
+    if old_path != dest and old_path.is_file():
+        try:
+            os.remove(old_path)
+        except OSError:
+            pass
 
     return {"avatar_url": user.avatar_url}
 
 
 @router.get("/profile/avatar/{filename}")
+@router.get("/avatar/{filename}", include_in_schema=False)
 def serve_avatar(filename: str):
     """Serve an uploaded avatar file."""
+    if Path(filename).name != filename:
+        raise HTTPException(status_code=404, detail="Avatar not found")
     file_path = _AVATAR_DIR / filename
     if not file_path.exists() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="Avatar not found")
@@ -175,4 +212,8 @@ def serve_avatar(filename: str):
         ".gif": "image/gif", ".webp": "image/webp",
     }
     from fastapi.responses import FileResponse
-    return FileResponse(str(file_path), media_type=mime_map.get(ext, "application/octet-stream"))
+    return FileResponse(
+        str(file_path),
+        media_type=mime_map.get(ext, "application/octet-stream"),
+        headers={"Cache-Control": "no-store"},
+    )

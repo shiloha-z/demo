@@ -11,6 +11,10 @@ const wsStore = useWebSocketStore()
 const route = useRoute()
 
 const agents = ref<any[]>([])
+const agentFilter = ref<'all' | 'mine'>('all')
+const filteredAgents = computed(() =>
+  agentFilter.value === 'mine' ? agents.value.filter(agent => agent.is_creator) : agents.value
+)
 const availableModels = ref<{ id: string; name: string }[]>([])
 const runnerCheckResult = ref<{ available: boolean; checked: boolean; hint?: string; cli_name?: string } | null>(null)
 const modelsLoading = ref(false)
@@ -234,17 +238,22 @@ function lastResultLabel(status: string | null): string {
     </div>
 
     <!-- Agents -->
-    <div v-if="agents.length === 0" class="empty-card">
+    <div class="agent-filter" role="group" aria-label="Agent 筛选">
+      <button :class="{ active: agentFilter === 'all' }" @click="agentFilter = 'all'">全部 Agent（{{ agents.length }}）</button>
+      <button :class="{ active: agentFilter === 'mine' }" @click="agentFilter = 'mine'">我创建的（{{ agents.filter(a => a.is_creator).length }}）</button>
+    </div>
+
+    <div v-if="filteredAgents.length === 0" class="empty-card">
       <div class="empty-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16.01"/><line x1="16" y1="16" x2="16" y2="16.01"/></svg>
       </div>
-      <h3>暂无 Agent</h3>
-      <p>创建你的第一个 AI Agent，可在任意项目中指派任务</p>
+      <h3>{{ agentFilter === 'mine' ? '暂无我创建的 Agent' : '暂无 Agent' }}</h3>
+      <p>{{ agentFilter === 'mine' ? '可切换到全部 Agent 查看共享 Agent，或创建一个新的 Agent' : '创建你的第一个 AI Agent，可在任意项目中指派任务' }}</p>
       <t-button theme="primary" variant="outline" @click="showCreateAgent = true; loadModels(newAgent.runner_type); fetchSkills()">创建 Agent</t-button>
     </div>
 
     <div v-else class="agent-grid">
-      <article v-for="a in agents" :key="a.id" class="agent-card" :class="{ 'agent-working': a.status === 'working' }">
+      <article v-for="a in filteredAgents" :key="a.id" class="agent-card" :class="{ 'agent-working': a.status === 'working' }">
         <!-- Avatar -->
         <div class="agent-avatar" :style="{ background: roleColors[a.role] || 'var(--muted-foreground)' }">
           {{ a.name.charAt(0) }}
@@ -264,6 +273,7 @@ function lastResultLabel(status: string | null): string {
             <span class="runner-badge" :style="{ background: (runnerColors[a.runner_type] || 'var(--muted-foreground)') + '14', color: runnerColors[a.runner_type] || 'var(--muted-foreground)' }">
               {{ runnerLabels[a.runner_type] || a.runner_type || 'CrewAI' }}
             </span>
+            <span v-if="a.creator_name" class="creator-tag">{{ a.is_creator ? '我创建的' : `创建者：${a.creator_name}` }}</span>
           </div>
 
           <!-- Working state: show current task -->
@@ -289,7 +299,7 @@ function lastResultLabel(status: string | null): string {
         <!-- Actions -->
         <div class="agent-actions">
           <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
-          <t-button size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
+          <t-button v-if="a.is_creator" size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
             <template #icon>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
             </template>
@@ -388,6 +398,9 @@ function lastResultLabel(status: string | null): string {
   border-radius: var(--radius-lg); box-shadow: var(--shadow-surface);
   transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
+.agent-filter { display: flex; gap: 4px; margin-bottom: 16px; }
+.agent-filter button { border: 1px solid var(--surface-border); background: var(--surface); color: var(--muted-foreground); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.agent-filter button:hover, .agent-filter button.active { color: var(--primary); border-color: var(--primary); background: var(--primary-lighter); }
 .agent-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
 .agent-card.agent-working {
   border-color: var(--primary);
@@ -404,6 +417,7 @@ function lastResultLabel(status: string | null): string {
 .agent-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted-foreground); margin-top: 3px; flex-wrap: wrap; }
 .role-badge { padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 .model-tag { padding: 1px 6px; border-radius: 99px; font-size: 10px; color: var(--muted-foreground); background: var(--surface-hover); font-family: var(--font-mono); }
+.creator-tag { font-size: 11px; color: var(--muted-foreground); }
 .agent-actions { display: flex; gap: 2px; flex-shrink: 0; margin-top: 2px; }
 
 /* Current task indicator */

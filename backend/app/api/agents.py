@@ -2,7 +2,7 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 
 from app.core.database import get_db
@@ -36,6 +36,9 @@ class AgentResponse(BaseModel):
     current_task_id: int | None = None
     current_task_title: str | None = None
     last_task_status: str | None = None
+    creator_id: int
+    creator_name: str = ""
+    is_creator: bool = False
 
     class Config:
         from_attributes = True
@@ -45,7 +48,9 @@ class AgentResponse(BaseModel):
 
 @router.get("", response_model=list[AgentResponse])
 def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agents = db.query(Agent).filter(Agent.creator_id == user.id).all()
+    # Agents are a shared pool. Project-level permission is enforced when a
+    # user assigns one to a task; ownership only controls deletion.
+    agents = db.query(Agent).options(joinedload(Agent.creator)).order_by(Agent.id.desc()).all()
     result = []
     for a in agents:
         # Task stats
@@ -86,7 +91,7 @@ def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_
             role=a.role,
             model=a.model,
             runner_type=a.runner_type or "crewai",
-            system_prompt=a.system_prompt,
+            system_prompt=a.system_prompt if a.creator_id == user.id else "",
             status=a.status.value if hasattr(a.status, 'value') else str(a.status),
             total_tasks=total_tasks,
             approved_tasks=approved_tasks,
@@ -94,6 +99,9 @@ def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_
             current_task_id=current_task_id,
             current_task_title=current_task_title,
             last_task_status=last_task_status,
+            creator_id=a.creator_id,
+            creator_name=a.creator.display_name or a.creator.username if a.creator else "",
+            is_creator=a.creator_id == user.id,
         ))
     return result
 
@@ -116,7 +124,20 @@ def create_agent(
     db.add(agent)
     db.commit()
     db.refresh(agent)
-    return AgentResponse.model_validate(agent)
+    from app.api.ws import broadcast_sync
+    broadcast_sync("agent_update", {"id": agent.id, "status": "created"})
+    return AgentResponse(
+        id=agent.id,
+        name=agent.name,
+        role=agent.role,
+        model=agent.model,
+        runner_type=agent.runner_type or "crewai",
+        system_prompt=agent.system_prompt,
+        status=agent.status.value,
+        creator_id=user.id,
+        creator_name=user.display_name or user.username,
+        is_creator=True,
+    )
 
 
 # Runner CLI detection table
