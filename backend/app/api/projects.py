@@ -185,9 +185,10 @@ def file_tree(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """List project files from the master branch (approved state only)."""
     workspace = _get_workspace(project_id, user, db)
     try:
-        nodes = git.list_files(workspace, path)
+        nodes = git.list_files(workspace, path, ref="master")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"files": nodes}
@@ -200,9 +201,10 @@ def read_file(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """Read a file from the master branch (approved state only)."""
     workspace = _get_workspace(project_id, user, db)
     try:
-        content = git.read_file(workspace, path)
+        content = git.read_file(workspace, path, ref="master")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError:

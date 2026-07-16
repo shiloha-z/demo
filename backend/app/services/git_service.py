@@ -340,18 +340,30 @@ def _get_base_branch(repo: Repo) -> str:
     return _BASE_BRANCH[path]
 
 
-def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
-    """List files from the project workspace (filesystem-first).
+def list_files(workspace: str, subpath: str = "", ref: str = "") -> list[dict[str, Any]]:
+    """List files from the project workspace.
 
-    Reads the actual working tree so the file manager reflects the current
-    state including uncommitted changes and task-branch work.
-    Falls back to git ls-tree if the filesystem path doesn't exist.
+    If `ref` is given (e.g. "master"), lists from that git branch snapshot.
+    If `ref` is None (default), lists from the filesystem working tree.
+
+    The file manager UI passes ref="master" to show the approved project state;
+    agent tools pass ref=None to see the current working tree.
     """
+    if ref:
+        repo = get_repo(workspace)
+        if repo:
+            try:
+                return _list_from_git(repo, ref, subpath)
+            except Exception:
+                pass
+        return []
+
+    # Filesystem listing
     target_dir = _verify_safe_path(workspace, subpath)
     if os.path.isdir(target_dir):
         return _list_from_fs(workspace, subpath)
 
-    # Fallback to git for paths that only exist in committed history
+    # Fallback to git if filesystem path doesn't exist yet
     repo = get_repo(workspace)
     if repo:
         try:
@@ -433,30 +445,36 @@ def _list_from_fs(workspace: str, subpath: str) -> list[dict[str, Any]]:
     return nodes
 
 
-def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024) -> str:
-    """Read file content from the working tree (filesystem), with git fallback."""
-    # Try filesystem first — always reflects current working-tree state
+def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024, ref: str = "") -> str:
+    """Read file content from the project workspace.
+
+    If `ref` is given (e.g. "master"), reads from that git branch snapshot.
+    If `ref` is "" (default), reads from the filesystem working tree.
+
+    The file manager UI passes ref="master" to show the approved project state;
+    agent tools pass no ref to read the current working tree.
+    """
+    if ref:
+        repo = get_repo(workspace)
+        if repo:
+            try:
+                content = repo.git.show(f"{ref}:{filepath}")
+                if len(content) > max_size * 2:
+                    return f"// File too large ({len(content)} chars, max {max_size * 2})"
+                return content[:max_size]
+            except GitCommandError:
+                raise FileNotFoundError(f"File not found in {ref}: {filepath}")
+        raise FileNotFoundError(f"File not found: {filepath}")
+
+    # Filesystem read — always reflects current working-tree state
     target = _verify_safe_path(workspace, filepath)
-    if os.path.isfile(target):
-        size = os.path.getsize(target)
-        if size > max_size * 2:
-            return f"// File too large ({size} bytes, max {max_size * 2})"
-        with open(target, "r", encoding="utf-8", errors="replace") as f:
-            return f.read(max_size)
-
-    # Fallback to git (for committed files that may have been deleted from working tree)
-    repo = get_repo(workspace)
-    if repo:
-        base = _get_base_branch(repo)
-        try:
-            content = repo.git.show(f"{base}:{filepath}")
-            if len(content) > max_size * 2:
-                return f"// File too large ({len(content)} chars, max {max_size * 2})"
-            return content[:max_size]
-        except GitCommandError:
-            pass
-
-    raise FileNotFoundError(f"File not found: {filepath}")
+    if not os.path.isfile(target):
+        raise FileNotFoundError(f"File not found: {filepath}")
+    size = os.path.getsize(target)
+    if size > max_size * 2:
+        return f"// File too large ({size} bytes, max {max_size * 2})"
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        return f.read(max_size)
 
 
 def write_file(workspace: str, filepath: str, content: str) -> str:
