@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.models import User, Project, Agent, Task, TaskStatus, AgentStatus, Review
+from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
 
@@ -434,3 +435,51 @@ def list_all_tasks(db: Session = Depends(get_db), user: User = Depends(get_curre
         .all()
     )
     return [_task_to_response(t) for t in tasks]
+
+
+# ── Task workspace (browse task branch files) ─────────────────────────
+
+@router.get("/{task_id}/files")
+def task_file_tree(
+    project_id: int,
+    task_id: int,
+    path: str = Query(default=""),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """List files from the task's working branch (task/{task_id})."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    project = db.query(Project).get(project_id)
+    if not project or not project.workspace_path:
+        raise HTTPException(status_code=400, detail="Workspace not initialized")
+    try:
+        nodes = git.list_files(project.workspace_path, path, ref=f"task/{task_id}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"files": nodes}
+
+
+@router.get("/{task_id}/file")
+def task_read_file(
+    project_id: int,
+    task_id: int,
+    path: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Read a file from the task's working branch (task/{task_id})."""
+    task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    project = db.query(Project).get(project_id)
+    if not project or not project.workspace_path:
+        raise HTTPException(status_code=400, detail="Workspace not initialized")
+    try:
+        content = git.read_file(project.workspace_path, path, ref=f"task/{task_id}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="File not found")
+    return {"path": path, "content": content}

@@ -24,6 +24,10 @@ const archiveChecked = ref<Set<number>>(new Set())
 const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
 const archiving = ref(false)
 const timelineDrawerVisible = ref(false)
+const showWorkspace = ref(false)
+const taskFiles = ref<any[]>([])
+const selectedTaskFile = ref<any>(null)
+const loadingTaskFiles = ref(false)
 const statusFilter = ref('all')
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
@@ -359,6 +363,40 @@ function hasActivePipeline(task: any): boolean {
   return task?.status === 'running' || task?.status === 'pending'
 }
 
+// ── Task workspace ──────────────────────────────────────────────
+async function loadTaskFiles(taskId: number) {
+  const pid = store.currentProject?.id
+  if (!pid) return
+  loadingTaskFiles.value = true
+  taskFiles.value = []
+  try {
+    const { data } = await api.get(`/projects/${pid}/tasks/${taskId}/files`)
+    taskFiles.value = data.files || []
+  } catch { taskFiles.value = [] }
+  finally { loadingTaskFiles.value = false }
+}
+
+async function loadTaskFile(taskId: number, path: string) {
+  const pid = store.currentProject?.id
+  if (!pid) return
+  try {
+    const { data } = await api.get(`/projects/${pid}/tasks/${taskId}/file`, { params: { path } })
+    selectedTaskFile.value = { path, content: data.content }
+  } catch { /* ignore */ }
+}
+
+function fileIcon(filename: string): string {
+  const ext = (filename || '').split('.').pop()?.toLowerCase() || ''
+  const map: Record<string, string> = {
+    py: '🐍', js: '🟨', ts: '🟦', vue: '💚', jsx: '⚛️', tsx: '⚛️',
+    css: '🎨', scss: '🎨', html: '🌐', md: '📝', json: '📋',
+    yaml: '⚙️', yml: '⚙️', toml: '⚙️', xml: '📋',
+    go: '🔵', rs: '🦀', java: '☕', c: '⚙️', cpp: '⚙️', h: '📄',
+    png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️',
+  }
+  return map[ext] || '📄'
+}
+
 // ── Create task dialog ──────────────────────────────────────────
 const showCreateTask = ref(false)
 const agents = ref<any[]>([])
@@ -654,6 +692,15 @@ async function resumeTask(task: any, event: Event) {
               </div>
             </div>
             <div class="detail-header-right">
+              <button
+                v-if="['running','paused','reviewing'].includes(taskDetail.status)"
+                class="workspace-btn"
+                :class="{ active: showWorkspace }"
+                @click="showWorkspace = !showWorkspace; if (showWorkspace) loadTaskFiles(selectedTask.id)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                <span>工作空间</span>
+              </button>
               <div class="detail-time" v-if="taskDetail.created_at">
                 {{ formatDate(taskDetail.created_at) }}
               </div>
@@ -751,6 +798,46 @@ async function resumeTask(task: any, event: Event) {
               <p v-else-if="taskDetail.status === 'reviewing'">Agent 执行完成，等待审查中...</p>
               <p v-else-if="taskDetail.status === 'failed'">任务执行失败，无审查结果</p>
               <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
+            </div>
+          </div>
+
+          <!-- Workspace file panel -->
+          <div v-if="showWorkspace" class="workspace-panel">
+            <div class="workspace-panel-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+              <span>工作空间 · 任务 #{{ selectedTask.id }}</span>
+              <button class="workspace-close-btn" @click="showWorkspace = false">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
+            </div>
+            <div class="workspace-panel-body">
+              <div v-if="loadingTaskFiles" class="workspace-loading">
+                <span class="spinner"></span> 加载中...
+              </div>
+              <div v-else-if="taskFiles.length === 0" class="workspace-empty">
+                暂无文件（任务可能尚未提交代码）
+              </div>
+              <div v-else class="workspace-file-list">
+                <div
+                  v-for="f in taskFiles"
+                  :key="f.path"
+                  class="workspace-file-item"
+                  :class="{ active: selectedTaskFile?.path === f.path }"
+                  @click="loadTaskFile(selectedTask.id, f.path)"
+                >
+                  <span class="workspace-file-icon">{{ f.type === 'tree' ? '📁' : fileIcon(f.name) }}</span>
+                  <span class="workspace-file-name">{{ f.name }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="selectedTaskFile" class="workspace-file-content">
+              <div class="workspace-file-content-header">
+                <span>{{ selectedTaskFile.path }}</span>
+                <button class="workspace-close-btn" @click="selectedTaskFile = null">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+              </div>
+              <pre class="workspace-file-code">{{ selectedTaskFile.content }}</pre>
             </div>
           </div>
         </div>
@@ -927,6 +1014,76 @@ async function resumeTask(task: any, event: Event) {
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .detail-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .detail-time { font-size: 12px; color: var(--muted-foreground); flex-shrink: 0; }
+
+/* ── Workspace button ────────────────────────────── */
+.workspace-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 12px; border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); background: var(--surface);
+  color: var(--muted-foreground); font-size: 12px; font-weight: 500;
+  font-family: var(--font-sans); cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+}
+.workspace-btn:hover, .workspace-btn.active {
+  border-color: var(--primary); color: var(--primary);
+  background: var(--primary-light);
+}
+
+/* ── Workspace panel ─────────────────────────────── */
+.workspace-panel {
+  border-top: 1px solid var(--surface-border);
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  max-height: 320px;
+}
+.workspace-panel-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  font-size: 12px; font-weight: 600; color: var(--foreground);
+  background: var(--surface-hover);
+  flex-shrink: 0;
+}
+.workspace-close-btn {
+  margin-left: auto;
+  width: 22px; height: 22px;
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm);
+}
+.workspace-close-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+.workspace-panel-body {
+  flex: 1; overflow-y: auto; padding: 6px 10px;
+}
+.workspace-loading, .workspace-empty {
+  font-size: 12px; color: var(--muted-foreground); padding: 16px; text-align: center;
+}
+.workspace-file-list { display: flex; flex-direction: column; }
+.workspace-file-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  cursor: pointer; font-size: 12px; color: var(--foreground);
+  transition: background var(--transition-fast);
+}
+.workspace-file-item:hover { background: var(--surface-hover); }
+.workspace-file-item.active { background: var(--primary-light); color: var(--primary); }
+.workspace-file-icon { flex-shrink: 0; font-size: 13px; }
+.workspace-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.workspace-file-content { border-top: 1px solid var(--surface-border); flex-shrink: 0; }
+.workspace-file-content-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 14px; font-size: 11px; color: var(--muted-foreground);
+  background: var(--surface-hover);
+}
+.workspace-file-code {
+  margin: 0; padding: 8px 14px;
+  font-size: 11px; font-family: var(--font-mono);
+  line-height: 1.5; max-height: 200px; overflow: auto;
+  background: var(--page-canvas); color: var(--foreground);
+  white-space: pre-wrap; word-break: break-all;
+}
 
 /* ── Timeline slide panel ─────────────────────────── */
 .timeline-slide-panel {
