@@ -78,6 +78,12 @@ onUnmounted(() => { unsubMember?.(); unsubJoinReq?.() })
 
 async function loadAll() {
   loading.value = true
+  // Reset state for this project
+  members.value = []
+  joinRequests.value = []
+  isMember.value = false
+  myRole.value = ''
+
   try {
     const { data } = await api.get(`/projects/${props.projectId}/members`)
     members.value = Array.isArray(data) ? data : []

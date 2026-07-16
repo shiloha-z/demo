@@ -327,9 +327,10 @@ async function handleJoinProject(p: any, event: Event) {
     </t-dialog>
 
     <!-- Member management dialog -->
-    <t-dialog v-model:visible="memberDialogVisible" width="560px" :footer="false">
+    <t-dialog v-model:visible="memberDialogVisible" width="560px" :footer="false" @closed="memberDialogProject = null">
       <MemberManager
         v-if="memberDialogProject"
+        :key="memberDialogProject.id"
         :project-id="memberDialogProject.id"
         :project-name="memberDialogProject.name"
         :project-code="memberDialogProject.projectCode"

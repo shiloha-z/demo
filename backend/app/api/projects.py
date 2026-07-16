@@ -559,8 +559,7 @@ def list_applications(
 
     requests = db.query(JoinRequest).filter(
         JoinRequest.project_id == project_id,
-        JoinRequest.status == JoinStatus.PENDING,
-    ).order_by(JoinRequest.created_at.desc()).all()
+    ).order_by(JoinRequest.status == "pending", JoinRequest.created_at.desc()).all()
 
     return [JoinRequestResponse.model_validate(r) for r in requests]
 
