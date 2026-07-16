@@ -47,6 +47,7 @@ class BaseRunner(ABC):
         model_name: str,
         task_id: int,
         project_id: int,
+        agent_id: int = 0,
         *,
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
@@ -59,6 +60,7 @@ class BaseRunner(ABC):
             model_name: LLM model identifier (e.g. "deepseek-chat", "claude-sonnet-4-20250514").
             task_id: Task ID for progress reporting.
             project_id: Project ID for progress reporting.
+            agent_id: Configured Agent ID for agent-scoped memory.
             on_progress: Optional callback for step-level progress messages.
             on_stage: Optional callback for pipeline stage transitions.
 

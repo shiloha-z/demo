@@ -316,7 +316,7 @@ def transfer_ownership(
     target_pm.role = ProjectRole.OWNER
 
     # Update project owner_id shortcut
-    project = db.query(Project).get(project_id)
+    project = db.get(Project, project_id)
     old_owner_name = ""
     if project:
         old_owner_name = project.owner_name
@@ -365,7 +365,7 @@ def list_join_requests(
     """List join requests for a project. Owner/admin only."""
     require_role(project_id, user, db, "owner", "admin")
 
-    project = db.query(Project).get(project_id)
+    project = db.get(Project, project_id)
     requests = (
         db.query(JoinRequest)
         .filter(JoinRequest.project_id == project_id)
@@ -435,7 +435,7 @@ def request_join(
     if pending:
         raise HTTPException(status_code=409, detail="You already have a pending join request")
 
-    project = db.query(Project).get(project_id)
+    project = db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 

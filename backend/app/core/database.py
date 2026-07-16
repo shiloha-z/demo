@@ -28,6 +28,11 @@ def get_db():
 
 def init_db():
     """Create all tables and apply lightweight schema migrations. Call on startup."""
+    # Ensure every ORM model has registered its table/columns before metadata
+    # creation and additive migrations are evaluated.  This also makes the
+    # helper safe to call from scripts and tests, not only from FastAPI's
+    # fully-imported application startup path.
+    import app.models.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
 
@@ -59,6 +64,14 @@ def _migrate_schema():
 
         _repair_project_memberships(conn, existing_tables)
         _backfill_project_codes(conn, existing_tables)
+        # Python-side column defaults do not populate rows that predate an
+        # additive SQLite migration.  Preserve the product default for those
+        # legacy tasks explicitly.
+        if "tasks" in existing_tables:
+            conn.execute(text("""
+                UPDATE tasks SET approval_percent = 50
+                WHERE approval_percent IS NULL
+            """))
 
 
 def _repair_project_memberships(conn, existing_tables: set[str]) -> None:

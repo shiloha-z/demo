@@ -6,6 +6,7 @@ pydantic-settings==2.5.0
 python-jose[cryptography]==3.3.0
 # passlib removed — using hashlib.pbkdf2_hmac instead
 python-multipart==0.0.9
+httpx==0.28.1
 gitpython==3.1.43
 crewai==0.80.0
 chromadb==0.5.0

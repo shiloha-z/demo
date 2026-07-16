@@ -13,7 +13,7 @@ Agents:
 
 Each agent has access to:
   - FileRead/FileWrite/GitDiff tools (workspace-scoped)
-  - MemorySearch/MemoryRecord tools (3-layer ChromaDB memory)
+  - MemorySearch/MemoryRecord tools (task / agent / project / global ChromaDB memory)
 """
 
 import os
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
-               task_id: int = 0, project_id: int = 0,
+               task_id: int = 0, project_id: int = 0, agent_id: int = 0,
                task_callback=None) -> Crew:
     """Build the review pipeline crew for a given workspace.
 
@@ -36,6 +36,7 @@ def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
         model_name: LLM model to use (default: deepseek-chat).
         task_id: Current task ID (for memory scoping).
         project_id: Current project ID (for memory scoping).
+        agent_id: Configured Agent ID (for agent-memory scoping).
         task_callback: Optional callback(task_output) fired after each task.
     """
 
@@ -44,9 +45,9 @@ def build_crew(workspace_path: str, model_name: str = "deepseek-chat",
     write_tool = FileWriteTool(workspace=workspace_path)
     diff_tool = GitDiffTool(workspace=workspace_path)
 
-    # Memory tools — scoped to this task+project
-    mem_search = MemorySearchTool(task_id=task_id, project_id=project_id)
-    mem_record = MemoryRecordTool(task_id=task_id, project_id=project_id)
+    # Memory tools — scoped to this task, configured Agent, and project.
+    mem_search = MemorySearchTool(task_id=task_id, agent_id=agent_id, project_id=project_id)
+    mem_record = MemoryRecordTool(task_id=task_id, agent_id=agent_id, project_id=project_id)
 
     # LLM config — reads API key + base URL from env
     api_key = os.getenv("DEEPSEEK_API_KEY", "")

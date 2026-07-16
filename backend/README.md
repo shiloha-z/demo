@@ -65,6 +65,15 @@ cp .env.example .env
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
+### Run regression tests
+
+The backend test suite uses Python's built-in `unittest` runner and does not
+require an additional test dependency:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
 ### Required Environment Variables
 
 | Variable | Default | Notes |
@@ -75,13 +84,13 @@ python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `JWT_SECRET` | `dev-secret-change-in-production` | Change in prod |
 | `WORKSPACE_ROOT` | `../workspaces` | Where git repos are stored |
 
-### Important: DB Migration on Schema Change
+### Database schema updates
 
-When ORM models are modified (new columns, new tables), **delete `data.db`** and restart — SQLAlchemy's `create_all()` only creates missing tables, it does **NOT** migrate existing ones.
-
-```bash
-del data.db && python -m uvicorn app.main:app --port 8000
-```
+Startup creates missing tables and applies the project's additive SQLite
+migrations, so an existing `data.db` does not need to be deleted when a table
+or supported column is added. Back up the database before deploying schema
+changes. Renames, removals and complex constraint changes still require an
+explicit versioned migration instead of the additive startup helper.
 
 ## API Endpoints
 

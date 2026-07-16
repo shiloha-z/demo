@@ -154,6 +154,9 @@ class Task(Base):
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
+    # Approval threshold chosen when the task is created.  It is converted to
+    # a concrete vote count when this task's review round is generated.
+    approval_percent = Column(Integer, default=50, nullable=True)
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
     archived = Column(Boolean, default=False)
     # Every task executes in an isolated Git worktree.  The project workspace
@@ -281,3 +284,20 @@ class Message(Base):
     link = Column(String(300), default="")   # 点击跳转，如 /reviews?task_id=12
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_now)
+
+
+class MessageRead(Base):
+    """Per-user read receipt for a message.
+
+    ``Message.read`` is retained for compatibility with legacy databases, but
+    new read operations are recorded here so one user no longer changes the
+    unread state seen by everyone else.
+    """
+
+    __tablename__ = "message_reads"
+    __table_args__ = (UniqueConstraint("message_id", "user_id", name="uq_message_read"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    read_at = Column(DateTime, default=_now, nullable=False)

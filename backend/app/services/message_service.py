@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models.models import (
     Message,
+    MessageRead,
     MessageCategory,
     MessageLevel,
     Project,
@@ -87,7 +88,12 @@ def _broadcast(msg: Message) -> None:
         pass
 
 
-def unread_count(db: Session, project_id: int | None = None, recipient_id: int | None = None) -> int:
+def unread_count(
+    db: Session,
+    project_id: int | None = None,
+    recipient_id: int | None = None,
+    user_id: int | None = None,
+) -> int:
     q = db.query(Message).filter(Message.read == False)  # noqa: E712
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
@@ -95,4 +101,9 @@ def unread_count(db: Session, project_id: int | None = None, recipient_id: int |
         q = q.filter(
             (Message.recipient_id == recipient_id) | (Message.recipient_id.is_(None))
         )
+    if user_id is not None:
+        read_message_ids = db.query(MessageRead.message_id).filter(
+            MessageRead.user_id == user_id
+        )
+        q = q.filter(~Message.id.in_(read_message_ids))
     return q.count()

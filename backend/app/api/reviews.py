@@ -226,7 +226,7 @@ def cast_review_vote(
     round_ = _ensure_vote_round(review, db)
     queued_for_merge = False
     if body.decision == "reject" and round_.veto_on_reject:
-        task = db.query(Task).get(review.task_id)
+        task = db.get(Task, review.task_id)
         if task and task.status == TaskStatus.REVIEWING:
             rejected_votes = db.query(ReviewVote).filter(
                 ReviewVote.review_id == review.id,
@@ -239,10 +239,28 @@ def cast_review_vote(
             review.human_feedback = feedback
             task.status = TaskStatus.RUNNING
             task.completed_at = None
-            agent = db.query(Agent).get(task.agent_id)
+            agent = db.get(Agent, task.agent_id)
             if agent:
                 agent.status = AgentStatus.WORKING
             db.commit()
+            if mem:
+                try:
+                    memory_doc = (
+                        f"Review #{review.id} (task #{task.id}) was rejected. "
+                        f"Apply this feedback on the retry: {feedback}"
+                    )
+                    metadata = {
+                        "type": "review_decision",
+                        "review_id": str(review.id),
+                        "task_id": str(task.id),
+                        "project_id": str(review.project_id),
+                        "agent_id": str(task.agent_id),
+                        "decision": "rejected",
+                    }
+                    mem.add_agent_memory(task.agent_id, memory_doc, metadata)
+                    mem.add_project_memory(review.project_id, memory_doc, metadata)
+                except Exception:
+                    logger.exception("Failed to record review feedback in hierarchical memory")
             from app.services.execution_service import enqueue_agent_run
             enqueue_agent_run(task.id, feedback=feedback)
     elif (
@@ -251,7 +269,7 @@ def cast_review_vote(
     ):
         # Reaching the configured quorum is the approval action itself.  Do
         # not make a reviewer repeat it with a separate "confirm merge" click.
-        task = db.query(Task).get(review.task_id)
+        task = db.get(Task, review.task_id)
         if task and task.status == TaskStatus.REVIEWING:
             _queue_review_merge(review, task, db)
             queued_for_merge = True
@@ -283,7 +301,7 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         raise HTTPException(status_code=400, detail="Project workspace not initialized")
 
     # Update linked task status → approved
-    task = db.query(Task).get(review.task_id)
+    task = db.get(Task, review.task_id)
     if not task or task.status != TaskStatus.REVIEWING:
         raise HTTPException(status_code=409, detail="Task is not awaiting review")
     votes = _vote_summary(review, db)
@@ -298,7 +316,7 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
 
     # Merge task branch → master, then commit
     from app.models.models import Project
-    proj = db.query(Project).get(review.project_id)
+    proj = db.get(Project, review.project_id)
     if proj and proj.workspace_path:
         branch_name = f"task/{review.task_id}"
         # 1. Merge task branch into master (agent already committed on the branch)
@@ -389,14 +407,14 @@ def reject_review(
     review.human_feedback = feedback
 
     # Update task → running, agent → working for re-run
-    task = db.query(Task).get(review.task_id)
+    task = db.get(Task, review.task_id)
     if not task or task.status != TaskStatus.REVIEWING:
         raise HTTPException(status_code=409, detail="Task is not awaiting review")
     task.status = TaskStatus.RUNNING
     task.completed_at = None
 
     # Set agent to WORKING to prevent concurrent task creation during the gap
-    agent = db.query(Agent).get(task.agent_id) if task else None
+    agent = db.get(Agent, task.agent_id) if task else None
     if agent:
         agent.status = AgentStatus.WORKING
 
@@ -420,13 +438,25 @@ def reject_review(
             "current_task_id": task.id if task else None,
         })
 
-    # Record to project memory
-    try:
-        mem.add_project_memory(review.project_id,
-            f"Review #{review_id} (task #{review.task_id}) REJECTED. Feedback: {feedback}",
-            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected"})
-    except Exception:
-        pass
+    # Preserve retry feedback in both the Agent and project layers.
+    if mem:
+        try:
+            memory_doc = (
+                f"Review #{review_id} (task #{review.task_id}) REJECTED. "
+                f"Feedback to address: {feedback}"
+            )
+            metadata = {
+                "type": "review_decision",
+                "review_id": str(review_id),
+                "task_id": str(review.task_id),
+                "project_id": str(review.project_id),
+                "agent_id": str(task.agent_id),
+                "decision": "rejected",
+            }
+            mem.add_agent_memory(task.agent_id, memory_doc, metadata)
+            mem.add_project_memory(review.project_id, memory_doc, metadata)
+        except Exception:
+            logger.exception("Failed to record review feedback in hierarchical memory")
 
     # Push system message
     try:
@@ -468,7 +498,7 @@ def close_review(
     review.status = ReviewStatus.REJECTED
 
     # Update linked task status → rejected (terminal)
-    task = db.query(Task).get(review.task_id)
+    task = db.get(Task, review.task_id)
     if not task or task.status != TaskStatus.REVIEWING:
         raise HTTPException(status_code=409, detail="Task is not awaiting review")
     task.status = TaskStatus.REJECTED
@@ -477,20 +507,28 @@ def close_review(
 
     # Switch back to master and delete the task branch
     from app.models.models import Project
-    proj = db.query(Project).get(review.project_id)
+    proj = db.get(Project, review.project_id)
     if proj and proj.workspace_path:
         branch_name = f"task/{review.task_id}"
         git.switch_branch(proj.workspace_path, "master")
         git.delete_branch(proj.workspace_path, branch_name)
 
-    # Record to project memory
+    # Record the terminal outcome in the Agent and project layers.
     if mem:
         try:
-            mem.add_project_memory(review.project_id,
-                f"Review #{review_id} (task #{review.task_id}) CLOSED (terminal rejection).",
-                {"type": "review_decision", "review_id": str(review_id), "decision": "closed"})
+            memory_doc = f"Review #{review_id} (task #{review.task_id}) CLOSED (terminal rejection)."
+            metadata = {
+                "type": "review_decision",
+                "review_id": str(review_id),
+                "task_id": str(review.task_id),
+                "project_id": str(review.project_id),
+                "agent_id": str(task.agent_id),
+                "decision": "closed",
+            }
+            mem.add_agent_memory(task.agent_id, memory_doc, metadata)
+            mem.add_project_memory(review.project_id, memory_doc, metadata)
         except Exception:
-            pass
+            logger.exception("Failed to record terminal review outcome in hierarchical memory")
 
     # Push system message
     try:

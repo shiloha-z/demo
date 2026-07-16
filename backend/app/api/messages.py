@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Message, MessageCategory, MessageLevel
+from app.models.models import User, Message, MessageCategory, MessageLevel, MessageRead
 
 router = APIRouter(prefix="/api", tags=["Messages"])
 
@@ -54,10 +54,25 @@ def list_messages(
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
     if unread_only:
-        q = q.filter(Message.read == False)  # noqa: E712
+        read_message_ids = db.query(MessageRead.message_id).filter(
+            MessageRead.user_id == user.id
+        )
+        q = q.filter(
+            Message.read == False,  # noqa: E712
+            ~Message.id.in_(read_message_ids),
+        )
     if category:
         q = q.filter(Message.category == category)
     messages = q.order_by(Message.created_at.desc()).limit(limit).all()
+    message_ids = [m.id for m in messages]
+    read_ids = set()
+    if message_ids:
+        read_ids = {
+            row[0] for row in db.query(MessageRead.message_id).filter(
+                MessageRead.user_id == user.id,
+                MessageRead.message_id.in_(message_ids),
+            ).all()
+        }
     return [
         MessageResponse(
             id=m.id,
@@ -68,7 +83,7 @@ def list_messages(
             title=m.title,
             body=m.body,
             link=m.link,
-            read=m.read,
+            read=bool(m.read) or m.id in read_ids,
             created_at=m.created_at.isoformat() if m.created_at else None,
         )
         for m in messages
@@ -83,8 +98,7 @@ def unread_message_count(
 ):
     from app.services import message_service as msg
 
-    # recipient_id not yet used for filtering in phase-1 (system broadcast).
-    count = msg.unread_count(db, project_id=project_id)
+    count = msg.unread_count(db, project_id=project_id, user_id=user.id)
     return {"count": count}
 
 
@@ -98,9 +112,13 @@ def mark_read(
     if not m:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Message not found")
-    m.read = True
-    db.commit()
-    db.refresh(m)
+    receipt = db.query(MessageRead).filter(
+        MessageRead.message_id == m.id,
+        MessageRead.user_id == user.id,
+    ).first()
+    if not receipt:
+        db.add(MessageRead(message_id=m.id, user_id=user.id))
+        db.commit()
     return MessageResponse(
         id=m.id,
         recipient_id=m.recipient_id,
@@ -110,7 +128,7 @@ def mark_read(
         title=m.title,
         body=m.body,
         link=m.link,
-        read=m.read,
+        read=True,
         created_at=m.created_at.isoformat() if m.created_at else None,
     )
 
@@ -124,6 +142,19 @@ def mark_all_read(
     q = db.query(Message).filter(Message.read == False)  # noqa: E712
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
-    q.update({Message.read: True})
+    message_ids = [row[0] for row in q.with_entities(Message.id).all()]
+    existing = set()
+    if message_ids:
+        existing = {
+            row[0] for row in db.query(MessageRead.message_id).filter(
+                MessageRead.user_id == user.id,
+                MessageRead.message_id.in_(message_ids),
+            ).all()
+        }
+    db.add_all([
+        MessageRead(message_id=message_id, user_id=user.id)
+        for message_id in message_ids
+        if message_id not in existing
+    ])
     db.commit()
     return ReadAllResponse()

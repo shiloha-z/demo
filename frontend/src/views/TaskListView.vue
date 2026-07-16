@@ -326,8 +326,12 @@ async function deleteOne(task: any, event?: Event) {
 async function approveReview() {
   if (!taskDetail.value?.review) return
   try {
-    await api.post(`/reviews/${taskDetail.value.review.id}/approve`)
-    MessagePlugin.success('审查已通过，已提交到 Git')
+    const { data } = await api.post(`/reviews/${taskDetail.value.review.id}/vote`, {
+      decision: 'approve',
+      comment: '',
+    })
+    if (data.queued_for_merge) MessagePlugin.success('已达到通过票数，任务进入合并队列')
+    else MessagePlugin.success(`已投通过票（${data.approve_count}/${data.required_approvals}）`)
     if (selectedTask.value) await selectTask(selectedTask.value)
     await loadTasks()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
@@ -435,7 +439,7 @@ function fileIcon(filename: string): string {
 // ── Create task dialog ──────────────────────────────────────────
 const showCreateTask = ref(false)
 const agents = ref<any[]>([])
-const newTaskForm = ref({ agent_id: null as number | null, title: '', description: '' })
+const newTaskForm = ref({ agent_id: null as number | null, title: '', description: '', approval_percent: 50 })
 const creatingTask = ref(false)
 
 async function loadAgents() {
@@ -450,7 +454,7 @@ function openCreateTaskDialog() {
     MessagePlugin.warning('请先在侧边栏选择一个项目')
     return
   }
-  newTaskForm.value = { agent_id: null, title: '', description: '' }
+  newTaskForm.value = { agent_id: null, title: '', description: '', approval_percent: 50 }
   loadAgents()
   showCreateTask.value = true
 }
@@ -463,6 +467,7 @@ async function submitCreateTask() {
       title: newTaskForm.value.title,
       description: newTaskForm.value.description,
       agent_id: newTaskForm.value.agent_id,
+      approval_percent: newTaskForm.value.approval_percent,
     })
     MessagePlugin.success('任务已创建，待开始执行')
     showCreateTask.value = false
@@ -491,7 +496,7 @@ async function stopTask(task: any, event: Event) {
   event.stopPropagation()
   try {
     await api.post(`/projects/${task.project_id}/tasks/${task.id}/stop`)
-    MessagePlugin.success(`任务 #${task.id} 已暂停`)
+    MessagePlugin.success(`任务 #${task.id} 暂停请求已提交，当前执行步骤结束后生效`)
     await loadTasks()
     if (selectedTask.value?.id === task.id) {
       selectedTask.value = null
@@ -931,6 +936,11 @@ async function resumeTask(task: any, event: Event) {
         <t-input v-model="newTaskForm.title" placeholder="例如：写一个用户登录接口" />
         <label class="field-label">详细描述</label>
         <textarea v-model="newTaskForm.description" class="field-textarea" rows="4" placeholder="描述清楚你要 Agent 做什么..." />
+        <label class="field-label">所需通过票数</label>
+        <t-input-number v-model="newTaskForm.approval_percent" :min="1" :max="100" theme="normal">
+          <template #suffix>%</template>
+        </t-input-number>
+        <p class="field-hint">按审查人总数向上取整计算，达到所需通过票数后进入合并队列。</p>
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>

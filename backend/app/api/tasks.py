@@ -41,12 +41,14 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(default="")
     agent_id: int
+    approval_percent: int = Field(default=50, ge=1, le=100)
 
 
 class TaskResponse(BaseModel):
     id: int
     title: str
     description: str
+    approval_percent: int = 50
     status: str
     archived: bool = False
     agent_id: int
@@ -71,6 +73,7 @@ class TaskDetailResponse(BaseModel):
     id: int
     title: str
     description: str
+    approval_percent: int = 50
     status: str
     agent_id: int
     project_id: int
@@ -103,6 +106,7 @@ def _task_to_response(t: Task) -> TaskResponse:
         id=t.id,
         title=t.title,
         description=t.description,
+        approval_percent=t.approval_percent or 50,
         status=t.status.value if hasattr(t.status, 'value') else t.status,
         archived=bool(t.archived),
         agent_id=t.agent_id,
@@ -187,6 +191,7 @@ def get_task_detail(
         id=task.id,
         title=task.title,
         description=task.description,
+        approval_percent=task.approval_percent or 50,
         status=task.status.value if hasattr(task.status, 'value') else task.status,
         agent_id=task.agent_id,
         project_id=task.project_id,
@@ -254,6 +259,7 @@ def create_task(
         project_id=project_id,
         title=req.title,
         description=req.description,
+        approval_percent=req.approval_percent,
         status=TaskStatus.PENDING,
     )
     db.add(task)
@@ -286,7 +292,7 @@ def start_task(
     if task.status != TaskStatus.PENDING:
         raise HTTPException(status_code=400, detail=f"只有待开始的任务才能启动，当前状态：{task.status.value}")
 
-    agent = db.query(Agent).get(task.agent_id)
+    agent = db.get(Agent, task.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.status == AgentStatus.WORKING:
@@ -299,13 +305,28 @@ def start_task(
         # Recover from an interrupted request that set the agent to WORKING
         # before the background runner was successfully queued.
         agent.status = AgentStatus.IDLE
+        db.flush()
 
-    # Persist both states before queueing the background runner, so clients do
-    # not briefly see a pending task with a working agent.
-    agent.status = AgentStatus.WORKING
-    task.status = TaskStatus.RUNNING
-    task.started_at = datetime.now(timezone.utc)
+    # Claim the task and agent conditionally in one transaction. Concurrent
+    # start requests can no longer both pass the read-before-write checks.
+    started_at = datetime.now(timezone.utc)
+    claimed_task = db.query(Task).filter(
+        Task.id == task.id,
+        Task.status == TaskStatus.PENDING,
+    ).update({
+        Task.status: TaskStatus.RUNNING,
+        Task.started_at: started_at,
+    }, synchronize_session=False)
+    claimed_agent = db.query(Agent).filter(
+        Agent.id == agent.id,
+        Agent.status != AgentStatus.WORKING,
+    ).update({Agent.status: AgentStatus.WORKING}, synchronize_session=False)
+    if not claimed_task or not claimed_agent:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="任务或 Agent 已被其他请求启动")
     db.commit()
+    db.refresh(task)
+    db.refresh(agent)
 
     from app.api.ws import broadcast_sync
     broadcast_sync("task_update", {
@@ -319,7 +340,14 @@ def start_task(
     # A bounded executor queues independent worktrees; requests never create
     # unbounded concurrent model calls.
     from app.services.execution_service import enqueue_agent_run
-    enqueue_agent_run(task.id)
+    if not enqueue_agent_run(task.id):
+        task.status = TaskStatus.PENDING
+        task.started_at = None
+        agent.status = AgentStatus.IDLE
+        db.commit()
+        broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "pending"})
+        broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+        raise HTTPException(status_code=409, detail="任务已在执行或执行器正在关闭，请稍后重试")
 
     return _task_to_response(task)
 
@@ -344,16 +372,25 @@ def stop_task(
 
     task.status = TaskStatus.PAUSED
 
-    # Restore agent to idle
-    agent = db.query(Agent).get(task.agent_id)
-    if agent and agent.status == AgentStatus.WORKING:
+    # Running tasks use cooperative (soft) pause. Keep the Agent busy until
+    # the current runner call returns, otherwise another task could start with
+    # the same Agent while the first one is still consuming resources.
+    from app.services.execution_service import is_agent_run_active
+    agent = db.get(Agent, task.agent_id)
+    run_active = is_agent_run_active(task.id)
+    other_active = db.query(Task.id).filter(
+        Task.agent_id == task.agent_id,
+        Task.id != task.id,
+        Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION]),
+    ).first()
+    if agent and not run_active and not other_active and agent.status == AgentStatus.WORKING:
         agent.status = AgentStatus.IDLE
 
     db.commit()
 
     from app.api.ws import broadcast_sync
     broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "paused"})
-    if agent:
+    if agent and not run_active and not other_active:
         broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
 
     return _task_to_response(task)
@@ -376,19 +413,43 @@ def resume_task(
     if task.status != TaskStatus.PAUSED:
         raise HTTPException(status_code=400, detail=f"只有已暂停的任务才能继续执行，当前状态：{task.status.value}")
 
-    agent = db.query(Agent).get(task.agent_id)
+    from app.services.execution_service import enqueue_agent_run, is_agent_run_active
+    if is_agent_run_active(task.id):
+        raise HTTPException(status_code=409, detail="当前执行仍在结束中，请稍后再恢复")
+
+    agent = db.get(Agent, task.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.status == AgentStatus.WORKING:
         raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
 
-    # Restore agent status
-    agent.status = AgentStatus.WORKING
+    # Claim both rows conditionally. Two simultaneous resume requests cannot
+    # both transition the same paused task back to running.
+    started_at = datetime.now(timezone.utc)
+    claimed_task = db.query(Task).filter(
+        Task.id == task.id,
+        Task.status == TaskStatus.PAUSED,
+    ).update({
+        Task.status: TaskStatus.RUNNING,
+        Task.started_at: started_at,
+    }, synchronize_session=False)
+    claimed_agent = db.query(Agent).filter(
+        Agent.id == agent.id,
+        Agent.status != AgentStatus.WORKING,
+    ).update({Agent.status: AgentStatus.WORKING}, synchronize_session=False)
+    if not claimed_task or not claimed_agent:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="任务或 Agent 已被其他请求恢复")
     db.commit()
+    db.refresh(task)
+    db.refresh(agent)
 
     # Resume in the task's existing isolated worktree.
-    from app.services.execution_service import enqueue_agent_run
-    enqueue_agent_run(task.id, resume=True)
+    if not enqueue_agent_run(task.id, resume=True):
+        task.status = TaskStatus.PAUSED
+        agent.status = AgentStatus.IDLE
+        db.commit()
+        raise HTTPException(status_code=409, detail="任务恢复入队失败，请稍后重试")
 
     return _task_to_response(task)
 
@@ -546,7 +607,7 @@ def task_file_tree(
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    project = db.query(Project).get(project_id)
+    project = db.get(Project, project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
     branch_name = task.branch_name or f"task/{task_id}"
@@ -589,7 +650,7 @@ def task_read_file(
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    project = db.query(Project).get(project_id)
+    project = db.get(Project, project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
     branch_name = task.branch_name or f"task/{task_id}"

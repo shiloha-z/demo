@@ -1,6 +1,28 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onBeforeUnmount, shallowRef } from 'vue'
-import * as monaco from 'monaco-editor'
+// The full `monaco-editor` entry registers every language and language
+// service, including multi-megabyte TypeScript workers. This viewer only
+// needs syntax highlighting, so load the editor API and supported basic
+// languages explicitly.
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js'
+import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/css/css.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/go/go.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/html/html.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/java/java.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/php/php.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/python/python.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/rust/rust.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution.js'
+import 'monaco-editor/esm/vs/basic-languages/yaml/yaml.contribution.js'
+import 'monaco-editor/esm/vs/language/json/monaco.contribution.js'
 import { useThemeStore } from '../stores/theme'
 
 const props = defineProps<{

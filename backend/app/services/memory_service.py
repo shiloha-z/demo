@@ -1,7 +1,8 @@
-"""ChromaDB 三层记忆系统 — task / project / global.
+"""ChromaDB 分层记忆系统 — task / agent / project / global.
 
 Collection design:
   - task_memory_{task_id}    — 单次任务执行的上下文（任务完成后可清理）
+  - agent_memory_{agent_id}  — 指定 Agent 的历史经验（跨项目、跨任务）
   - project_memory_{proj_id} — 项目级别的知识积累（跨任务共享）
   - global_memory            — 跨项目的通用模式与经验
 
@@ -16,9 +17,6 @@ import os
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
-
-import chromadb
-from chromadb.config import Settings as ChromaSettings
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +61,15 @@ def _project_collection(project_id: int) -> str:
     return f"project_memory_{project_id}"
 
 
+def _agent_collection(agent_id: int) -> str:
+    return f"agent_memory_{agent_id}"
+
+
 GLOBAL_COLLECTION = "global_memory"
 
-# Capacity caps — project/global collections keep only the most recent N entries;
+# Capacity caps — durable collections keep only the most recent N entries;
 # older entries are evicted on write to bound retrieval noise and storage growth.
+AGENT_MEMORY_CAP = 150
 PROJECT_MEMORY_CAP = 200
 GLOBAL_MEMORY_CAP = 200
 
@@ -126,11 +129,33 @@ def add_task_memory(task_id: int, doc: str, metadata: dict | None = None) -> str
     col = _get_or_create(_task_collection(task_id))
     if col is None:
         return ""
-    meta = metadata or {}
+    meta = dict(metadata or {})
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     uid = _new_uid(f"t{task_id}")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
     logger.debug(f"Task memory [{uid}]: {doc[:80]}...")
+    return uid
+
+
+def add_agent_memory(agent_id: int, doc: str, metadata: dict | None = None) -> str:
+    """Record a reusable lesson for one configured Agent.
+
+    Agent memory is intentionally independent of a project so an Agent can
+    retain its own coding/review habits across assignments.  Project-specific
+    facts should continue to be written to project memory instead.
+    """
+    if agent_id <= 0:
+        return ""
+    col = _get_or_create(_agent_collection(agent_id))
+    if col is None:
+        return ""
+    meta = dict(metadata or {})
+    meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
+    meta.setdefault("agent_id", str(agent_id))
+    uid = _new_uid(f"a{agent_id}")
+    col.add(documents=[doc], metadatas=[meta], ids=[uid])
+    _enforce_cap(col, AGENT_MEMORY_CAP)
+    logger.debug(f"Agent memory [{uid}]: {doc[:80]}...")
     return uid
 
 
@@ -139,7 +164,7 @@ def add_project_memory(project_id: int, doc: str, metadata: dict | None = None) 
     col = _get_or_create(_project_collection(project_id))
     if col is None:
         return ""
-    meta = metadata or {}
+    meta = dict(metadata or {})
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     uid = _new_uid(f"p{project_id}")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
@@ -153,7 +178,7 @@ def add_global_memory(doc: str, metadata: dict | None = None) -> str:
     col = _get_or_create(GLOBAL_COLLECTION)
     if col is None:
         return ""
-    meta = metadata or {}
+    meta = dict(metadata or {})
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
     uid = _new_uid("g")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
@@ -174,18 +199,40 @@ def search_project_memory(project_id: int, query: str, n_results: int = 5) -> li
     return _search(name, query, n_results)
 
 
+def search_agent_memory(agent_id: int, query: str, n_results: int = 5) -> list[str]:
+    """Semantic search across durable experience owned by one Agent."""
+    if agent_id <= 0:
+        return []
+    return _search(_agent_collection(agent_id), query, n_results)
+
+
 def search_global_memory(query: str, n_results: int = 5) -> list[str]:
     """Semantic search across global (cross-project) memories."""
     return _search(GLOBAL_COLLECTION, query, n_results)
 
 
-def search_all(task_id: int, project_id: int, query: str, n_results: int = 3) -> dict[str, list[str]]:
-    """Search all three memory layers at once. More recent/specific layers first."""
-    return {
+def search_all(
+    task_id: int,
+    project_id: int,
+    query: str,
+    n_results: int = 3,
+    *,
+    agent_id: int = 0,
+) -> dict[str, list[str]]:
+    """Search every layer from the most specific to the most reusable.
+
+    Task memory is ephemeral and exact to the active run, Agent memory
+    captures the assigned Agent's habits, project memory carries shared code
+    context, and global memory contains general patterns.
+    """
+    results = {
         "task": search_task_memory(task_id, query, n_results),
-        "project": search_project_memory(project_id, query, n_results),
-        "global": search_global_memory(query, n_results),
     }
+    if agent_id > 0:
+        results["agent"] = search_agent_memory(agent_id, query, n_results)
+    results["project"] = search_project_memory(project_id, query, n_results)
+    results["global"] = search_global_memory(query, n_results)
+    return results
 
 
 def get_recent_task_memories(task_id: int, n: int = 10) -> list[str]:
@@ -194,28 +241,51 @@ def get_recent_task_memories(task_id: int, n: int = 10) -> list[str]:
     return _get_recent(name, n)
 
 
-def build_memory_context(project_id: int, query: str, n_results: int = 5) -> str:
-    """Aggregate project + global memories into a single injectable text block.
+def build_memory_context(
+    project_id: int,
+    query: str,
+    n_results: int = 5,
+    *,
+    task_id: int = 0,
+    agent_id: int = 0,
+) -> str:
+    """Aggregate hierarchical memory into one injectable text block.
 
-    Used by the orchestrator to *proactively* feed historical context into the
-    task prompt — so the agent starts each run with relevant prior knowledge
-    rather than having to remember to search. Returns "" when no memories exist.
+    The order is task → agent → project → global.  This lets the runner prefer
+    current execution context before reusable Agent experience, shared project
+    facts, and finally generic lessons.
     """
     if not mem_ok():
         return ""
 
     blocks: list[str] = []
+    seen: set[str] = set()
+
+    def append_block(label: str, docs: list[str]) -> None:
+        unique_docs = [doc for doc in docs if doc and doc not in seen]
+        seen.update(unique_docs)
+        if unique_docs:
+            blocks.append(label + "\n" + "\n".join(f"- {doc}" for doc in unique_docs))
+
+    if task_id > 0:
+        try:
+            append_block("【当前任务上下文】", search_task_memory(task_id, query, n_results))
+        except Exception:
+            logger.exception("build_memory_context: task search failed")
+
+    if agent_id > 0:
+        try:
+            append_block("【Agent 历史经验】", search_agent_memory(agent_id, query, n_results))
+        except Exception:
+            logger.exception("build_memory_context: agent search failed")
+
     try:
-        proj = search_project_memory(project_id, query, n_results)
-        if proj:
-            blocks.append("【项目历史经验】\n" + "\n".join(f"- {d}" for d in proj))
+        append_block("【项目历史经验】", search_project_memory(project_id, query, n_results))
     except Exception:
         logger.exception("build_memory_context: project search failed")
 
     try:
-        glob = search_global_memory(query, n_results)
-        if glob:
-            blocks.append("【通用模式/经验】\n" + "\n".join(f"- {d}" for d in glob))
+        append_block("【通用模式/经验】", search_global_memory(query, n_results))
     except Exception:
         logger.exception("build_memory_context: global search failed")
 

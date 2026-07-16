@@ -1,7 +1,7 @@
 """Agent pipeline runner — bridges FastAPI ↔ Agent Runners.
 
 Runs in a background thread via FastAPI BackgroundTasks to avoid blocking the event loop.
-Integrates with the ChromaDB 3-layer memory system.
+Integrates with the ChromaDB 4-layer memory system (task / agent / project / global).
 Pushes real-time progress via WebSocket `task_progress` and `pipeline_stage` events.
 
 Supports multiple runner backends via agent.runner_type:
@@ -12,9 +12,10 @@ Supports multiple runner backends via agent.runner_type:
 
 import logging
 import time
+import math
 from datetime import datetime, timezone
 from app.core.database import SessionLocal
-from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, ReviewRound, ReviewReviewer, Project, ProjectMember
+from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, ReviewRound, ReviewReviewer, ReviewVote, Project, ProjectMember
 from app.services import git_service as git
 
 # Lazy import — memory_service may fail if chromadb not installed
@@ -126,7 +127,7 @@ def _run_agent_pipeline(
     db = SessionLocal()
     task = None
     try:
-        task = db.query(Task).get(task_id)
+        task = db.get(Task, task_id)
         if not task:
             logger.error(f"Task {task_id} not found")
             return
@@ -151,13 +152,13 @@ def _run_agent_pipeline(
         if task.description:
             _progress(task_id, project_id, f"📝 任务描述：{task.description}", "desc")
 
-        project = db.query(Project).get(project_id)
+        project = db.get(Project, project_id)
         if not project or not project.workspace_path:
             _fail_task(db, task, "Project workspace not found")
             return
 
         # Get the agent
-        agent = db.query(Agent).get(task.agent_id)
+        agent = db.get(Agent, task.agent_id)
         model_name = agent.model if agent and agent.model else "deepseek-chat"
         agent_name = agent.name if agent else "Unknown"
         runner_type = agent.runner_type if agent and agent.runner_type else "crewai"
@@ -239,6 +240,8 @@ def _run_agent_pipeline(
                     project_id,
                     f"{task.title} {task.description or ''}",
                     n_results=5,
+                    task_id=task_id,
+                    agent_id=task.agent_id,
                 )
                 if history:
                     task_desc = (
@@ -260,10 +263,19 @@ def _run_agent_pipeline(
             model_name=model_name,
             task_id=task_id,
             project_id=project_id,
+            agent_id=task.agent_id,
             on_progress=on_progress,
             on_stage=on_stage,
         )
         elapsed = time.time() - start_ts
+
+        # Pause is cooperative for runners that cannot be interrupted safely.
+        # Stop before committing/review creation once the current runner call
+        # returns; the task worktree is retained for a later resume.
+        db.refresh(task)
+        if task.status == TaskStatus.PAUSED:
+            _progress(task_id, project_id, "⏸️ 当前执行步骤已结束，任务保持暂停", "paused")
+            return
 
         # Handle runner error
         if result.error:
@@ -303,6 +315,13 @@ def _run_agent_pipeline(
                 "timestamp": _now_iso(),
             })
 
+        # A pause may arrive while Git commit/diff work is in progress. Do not
+        # expose a review that resume would immediately supersede.
+        db.refresh(task)
+        if task.status == TaskStatus.PAUSED:
+            _progress(task_id, project_id, "⏸️ 代码已保留在任务分支，任务保持暂停", "paused")
+            return
+
         # Store review
         review = Review(
             task_id=task.id,
@@ -320,21 +339,30 @@ def _run_agent_pipeline(
         reviewer_ids = [row[0] for row in db.query(ProjectMember.user_id).filter(
             ProjectMember.project_id == project_id
         ).all()]
-        required_approvals = max(1, min(2, len(reviewer_ids)))
+        approval_percent = max(1, min(100, task.approval_percent or 50))
+        required_approvals = max(
+            1,
+            math.ceil(len(reviewer_ids) * approval_percent / 100),
+        )
         db.add(ReviewRound(review_id=review.id, required_approvals=required_approvals))
         db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in reviewer_ids])
         db.commit()
 
-        # ── Save to project memory ──────────────────────────────────
+        # ── Save reusable task outcome to Agent + project memory ─────
         if mem:
             try:
-                mem.add_project_memory(
-                    project_id,
-                    f"Task #{task_id} ({task.title}) [{runner_type}]: {summary[:500]}",
-                    {"type": "review_result", "task_id": str(task_id), "runner_type": runner_type},
-                )
+                memory_doc = f"Task #{task_id} ({task.title}) [{runner_type}]: {summary[:500]}"
+                memory_metadata = {
+                    "type": "review_result",
+                    "task_id": str(task_id),
+                    "project_id": str(project_id),
+                    "agent_id": str(task.agent_id),
+                    "runner_type": runner_type,
+                }
+                mem.add_agent_memory(task.agent_id, memory_doc, memory_metadata)
+                mem.add_project_memory(project_id, memory_doc, memory_metadata)
             except Exception:
-                pass
+                logger.exception("Failed to record task outcome in hierarchical memory")
 
         # Switch back to master
         _progress(task_id, project_id, "🔙 切换回主分支，清理工作区...", "cleanup")
@@ -351,15 +379,19 @@ def _run_agent_pipeline(
         # Check if task was paused while pipeline was running
         db.refresh(task)
         if task.status == TaskStatus.PAUSED:
+            db.query(ReviewVote).filter(ReviewVote.review_id == review.id).delete()
+            db.query(ReviewReviewer).filter(ReviewReviewer.review_id == review.id).delete()
+            db.query(ReviewRound).filter(ReviewRound.review_id == review.id).delete()
+            db.delete(review)
+            db.commit()
             _progress(task_id, project_id, "⏸️ 任务已被暂停，保留工作分支", "paused")
             logger.info(f"Task {task_id} paused by user, keeping branch {branch_name}")
-            db.close()
             return
 
         # Update task & agent status → reviewing
         task.status = TaskStatus.REVIEWING
         task.completed_at = datetime.now(timezone.utc)
-        agent = db.query(Agent).get(task.agent_id)
+        agent = db.get(Agent, task.agent_id)
         if agent:
             agent.status = AgentStatus.DONE
         db.commit()
@@ -429,22 +461,27 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
 
     task.status = TaskStatus.FAILED
     task.completed_at = datetime.now(timezone.utc)
-    agent = db.query(Agent).get(task.agent_id)
+    agent = db.get(Agent, task.agent_id)
     if agent:
         agent.status = AgentStatus.IDLE
     db.commit()
 
-    # Record failure in project memory (persists across runs, so the next task
-    # can read "why this failed" via build_memory_context injection).
+    # Preserve failure lessons for both the assigned Agent and the project so
+    # future work can avoid repeating the same issue.
     if mem:
         try:
-            mem.add_project_memory(
-                project_id,
-                f"Task #{task_id} ({task.title}) [{runner_type}] 执行失败：{error[:300]}",
-                {"type": "error", "task_id": str(task_id), "runner_type": runner_type},
-            )
+            memory_doc = f"Task #{task_id} ({task.title}) [{runner_type}] 执行失败：{error[:300]}"
+            memory_metadata = {
+                "type": "error",
+                "task_id": str(task_id),
+                "project_id": str(project_id),
+                "agent_id": str(task.agent_id),
+                "runner_type": runner_type,
+            }
+            mem.add_agent_memory(task.agent_id, memory_doc, memory_metadata)
+            mem.add_project_memory(project_id, memory_doc, memory_metadata)
         except Exception:
-            pass
+            logger.exception("Failed to record task failure in hierarchical memory")
 
     broadcast_sync("task_update", {
         "id": task.id, "project_id": project_id, "status": "failed",

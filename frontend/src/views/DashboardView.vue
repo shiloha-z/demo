@@ -129,8 +129,9 @@ function deleteProject(p: any, event: Event) {
     cancelBtn: '取消',
     onConfirm: async () => {
       try {
-        await api.delete(`/projects/${p.id}`)
-        MessagePlugin.success(`项目「${p.name}」已删除`)
+        const { data } = await api.delete(`/projects/${p.id}`)
+        if (data.warning) MessagePlugin.warning(data.warning)
+        else MessagePlugin.success(`项目「${p.name}」已删除`)
         await store.fetchProjects()
         await loadStats()
         if (store.currentProject?.id === p.id) store.setCurrentProject(null)

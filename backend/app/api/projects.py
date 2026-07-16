@@ -1,3 +1,4 @@
+import logging
 import os, re, shutil, secrets, string
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
@@ -9,10 +10,11 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, ReviewVote, ReviewReviewer, ReviewRound
+from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, MessageRead, ReviewVote, ReviewReviewer, ReviewRound
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
+logger = logging.getLogger(__name__)
 
 
 def _broadcast_project_update(action: str, project_id: int) -> None:
@@ -187,44 +189,48 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
         project_id = _generate_project_id()
 
     project = Project(name=req.name, description=req.description, owner_id=user.id, project_id=project_id)
-    db.add(project)
-    db.commit()
-    db.refresh(project)
-
-    # Auto-add creator as project owner (skip if already exists)
-    existing = db.query(ProjectMember).filter(
-        ProjectMember.project_id == project.id,
-        ProjectMember.user_id == user.id,
-    ).first()
-    if not existing:
-        db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
-        db.commit()
-
-    # Workspace folder: use custom name if provided, otherwise sanitize project name
-    dirname = _sanitize_dirname(req.workspace_name or req.name)
-    workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, dirname))
-    # If the preferred name already exists, append project id as suffix
-    if os.path.exists(workspace):
-        workspace = os.path.abspath(os.path.join(settings.WORKSPACE_ROOT, f"{dirname}_{project.id}"))
-    project.workspace_path = workspace
-    db.commit()
-
-    os.makedirs(workspace, exist_ok=True)
+    workspace = ""
+    workspace_created = False
     try:
+        # Flush obtains the project id without making a partially initialized
+        # project visible to other requests.
+        db.add(project)
+        db.flush()
+        db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
+
+        dirname = _sanitize_dirname(req.workspace_name or req.name)
+        workspace_root = os.path.abspath(settings.WORKSPACE_ROOT)
+        os.makedirs(workspace_root, exist_ok=True)
+        workspace = os.path.join(workspace_root, dirname)
+        try:
+            os.makedirs(workspace, exist_ok=False)
+        except FileExistsError:
+            workspace = os.path.join(workspace_root, f"{dirname}_{project.id}")
+            os.makedirs(workspace, exist_ok=False)
+        workspace_created = True
+        project.workspace_path = workspace
+
         from ..services import git_service
         git_service.init_repo(workspace)
-    except Exception:
-        pass
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if workspace_created and os.path.isdir(workspace):
+            shutil.rmtree(workspace, ignore_errors=True)
+        logger.exception("Project initialization failed")
+        raise HTTPException(status_code=500, detail="Project workspace initialization failed") from exc
 
     # Reload with owner relationship to get owner_name
     db.refresh(project)
     response = ProjectResponse(
         id=project.id,
+        project_id=project.project_id,
         name=project.name,
         description=project.description or "",
         owner_id=project.owner_id,
         owner_name=project.owner.username if project.owner else "",
         workspace_path=project.workspace_path or "",
+        is_member=True,
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
@@ -444,6 +450,11 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     db.query(JoinRequest).filter(JoinRequest.project_id == project_id).delete()
     db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete()
     db.query(ChatMessage).filter(ChatMessage.project_id == project_id).delete()
+    message_ids = [
+        row[0] for row in db.query(Message.id).filter(Message.project_id == project_id).all()
+    ]
+    if message_ids:
+        db.query(MessageRead).filter(MessageRead.message_id.in_(message_ids)).delete(synchronize_session=False)
     db.query(Message).filter(Message.project_id == project_id).delete()
 
     # Reset agents that were working on this project's tasks back to IDLE
@@ -452,23 +463,35 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
             {Agent.status: AgentStatus.IDLE}, synchronize_session=False
         )
 
-    # Remove task worktrees before deleting the base repository.  Worktrees
-    # are sibling directories and would otherwise be left behind on Windows.
-    for worktree_path in task_worktrees:
-        git.remove_task_worktree(project.workspace_path, worktree_path)
-
-    # Remove workspace directory
-    if project.workspace_path and os.path.isdir(project.workspace_path):
-        def _on_rm_error(func, path, exc_info):
-            """Handle read-only files on Windows — clear flag and retry."""
-            import stat
-            os.chmod(path, stat.S_IWRITE)
-            func(path)
-
-        shutil.rmtree(project.workspace_path, onerror=_on_rm_error)
-
+    project_name = project.name
+    project_workspace = project.workspace_path
     db.delete(project)
-    db.commit()
+    try:
+        # Commit metadata first. If this fails, the workspace is untouched and
+        # the project remains recoverable instead of pointing at deleted files.
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    cleanup_warning = ""
+    try:
+        # Remove task worktrees before deleting the base repository. Worktrees
+        # are sibling directories and would otherwise be left behind.
+        for worktree_path in task_worktrees:
+            git.remove_task_worktree(project_workspace, worktree_path)
+
+        if project_workspace and os.path.isdir(project_workspace):
+            def _on_rm_error(func, path, exc_info):
+                """Handle read-only files on Windows — clear flag and retry."""
+                import stat
+                os.chmod(path, stat.S_IWRITE)
+                func(path)
+
+            shutil.rmtree(project_workspace, onerror=_on_rm_error)
+    except OSError:
+        cleanup_warning = "项目记录已删除，但工作目录清理失败，请管理员手动清理"
+        logger.exception("Workspace cleanup failed for deleted project %s", project_id)
 
     # Notify clients: stuck agents have been reset
     if stuck_agent_ids:
@@ -478,7 +501,10 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
 
     _broadcast_project_update("deleted", project_id)
 
-    return {"message": f"项目「{project.name}」已删除"}
+    result = {"message": f"项目「{project_name}」已删除"}
+    if cleanup_warning:
+        result["warning"] = cleanup_warning
+    return result
 
 
 # ── Join requests ────────────────────────────────────────────────────

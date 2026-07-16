@@ -53,6 +53,7 @@ class OpenCodeRunner(BaseRunner):
         model_name: str,
         task_id: int,
         project_id: int,
+        agent_id: int = 0,
         *,
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,

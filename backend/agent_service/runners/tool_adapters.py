@@ -27,10 +27,10 @@ def get_diff(workspace: str) -> str:
     return diff if diff else "No changes detected."
 
 
-def search_memory(task_id: int, project_id: int, query: str) -> str:
-    """Search across task, project, and global ChromaDB memory layers."""
+def search_memory(task_id: int, project_id: int, query: str, agent_id: int = 0) -> str:
+    """Search across task, agent, project, and global memory layers."""
     try:
-        results = mem.search_all(task_id, project_id, query, n_results=5)
+        results = mem.search_all(task_id, project_id, query, n_results=5, agent_id=agent_id)
         if not results:
             return "No relevant memories found."
         lines = []
@@ -44,15 +44,21 @@ def search_memory(task_id: int, project_id: int, query: str) -> str:
         return f"Memory search failed: {e}"
 
 
-def record_memory(task_id: int, project_id: int, scope: str, content: str) -> str:
-    """Record an insight to project or global memory."""
+def record_memory(task_id: int, project_id: int, scope: str, content: str, agent_id: int = 0) -> str:
+    """Record an insight to task, agent, project, or global memory."""
     try:
-        if scope == "project":
-            mem.add_project_memory(project_id, content, {"task_id": str(task_id)})
+        metadata = {"task_id": str(task_id), "project_id": str(project_id), "agent_id": str(agent_id)}
+        if scope == "task":
+            mem.add_task_memory(task_id, content, metadata)
+        elif scope == "agent":
+            if not mem.add_agent_memory(agent_id, content, metadata):
+                return "Agent memory unavailable."
+        elif scope == "project":
+            mem.add_project_memory(project_id, content, metadata)
         elif scope == "global":
-            mem.add_global_memory(content, {"task_id": str(task_id)})
+            mem.add_global_memory(content, metadata)
         else:
-            return f"Unknown scope: {scope}. Use 'project' or 'global'."
+            return f"Unknown scope: {scope}. Use 'task', 'agent', 'project', or 'global'."
         return f"Recorded to {scope} memory."
     except Exception as e:
         return f"Memory record failed: {e}"

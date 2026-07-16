@@ -87,6 +87,7 @@ class CrewAIRunner(BaseRunner):
         model_name: str,
         task_id: int,
         project_id: int,
+        agent_id: int = 0,
         *,
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
@@ -97,8 +98,8 @@ class CrewAIRunner(BaseRunner):
         heartbeat_thread: threading.Thread | None = None
         started_at = time.monotonic()
         try:
-            crew = self._build_crew(workspace, model_name, task_id, project_id,
-                                    on_progress, on_stage, stage_state)
+            crew = self._build_crew(workspace, model_name, task_id, project_id, agent_id,
+                                     on_progress, on_stage, stage_state)
             if on_progress:
                 on_progress("⚙️  第 1/4 步：代码工程师正在生成代码...", "step_1_codegen")
                 on_progress("🔍 Agent 正在查看现有代码结构，分析需求...", "step_1_detail")
@@ -143,7 +144,7 @@ class CrewAIRunner(BaseRunner):
                 heartbeat_thread.join(timeout=1)
 
     def _build_crew(self, workspace: str, model_name: str,
-                    task_id: int, project_id: int,
+                    task_id: int, project_id: int, agent_id: int,
                     on_progress: ProgressCallback | None,
                     on_stage: StageCallback | None,
                     stage_state: dict[str, str]) -> Crew:
@@ -154,10 +155,12 @@ class CrewAIRunner(BaseRunner):
         write_tool = FileWriteTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
         diff_tool = GitDiffTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
         mem_search = MemorySearchTool(
-            task_id=task_id, project_id=project_id, max_usage_count=MAX_TOOL_CALLS_PER_AGENT
+            task_id=task_id, agent_id=agent_id, project_id=project_id,
+            max_usage_count=MAX_TOOL_CALLS_PER_AGENT,
         )
         mem_record = MemoryRecordTool(
-            task_id=task_id, project_id=project_id, max_usage_count=MAX_TOOL_CALLS_PER_AGENT
+            task_id=task_id, agent_id=agent_id, project_id=project_id,
+            max_usage_count=MAX_TOOL_CALLS_PER_AGENT,
         )
 
         # LLM config

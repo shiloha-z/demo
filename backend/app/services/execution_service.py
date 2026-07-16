@@ -11,7 +11,7 @@ from threading import RLock
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.models import Task, TaskStatus
+from app.models.models import Agent, AgentStatus, Task, TaskStatus
 
 
 _agent_executor = ThreadPoolExecutor(max_workers=max(1, settings.AGENT_MAX_CONCURRENCY))
@@ -32,8 +32,46 @@ def enqueue_agent_run(
         if task_id in _active_agent_tasks:
             return False
         _active_agent_tasks.add(task_id)
-    _agent_executor.submit(_run_agent, task_id, feedback, resume, conflict_resolution)
+    try:
+        _agent_executor.submit(_run_agent, task_id, feedback, resume, conflict_resolution)
+    except RuntimeError:
+        # The executor may be shutting down while a request is being handled.
+        # Do not leave a phantom active task behind in that case.
+        with _lock:
+            _active_agent_tasks.discard(task_id)
+        return False
     return True
+
+
+def is_agent_run_active(task_id: int) -> bool:
+    """Return whether the in-process executor still owns this task."""
+    with _lock:
+        return task_id in _active_agent_tasks
+
+
+def _release_paused_agent(task_id: int) -> None:
+    """Mark the agent idle only after a soft-paused execution has returned."""
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task or task.status != TaskStatus.PAUSED:
+            return
+        agent = db.get(Agent, task.agent_id)
+        other_active = db.query(Task.id).filter(
+            Task.agent_id == task.agent_id,
+            Task.id != task.id,
+            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION]),
+        ).first()
+        if agent and not other_active and agent.status == AgentStatus.WORKING:
+            agent.status = AgentStatus.IDLE
+            db.commit()
+            try:
+                from app.api.ws import broadcast_sync
+                broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+            except Exception:
+                pass
+    finally:
+        db.close()
 
 
 def _run_agent(task_id: int, feedback: str, resume: bool, conflict_resolution: bool) -> None:
@@ -41,8 +79,14 @@ def _run_agent(task_id: int, feedback: str, resume: bool, conflict_resolution: b
         from app.services.agent_runner import run_agent_pipeline
         run_agent_pipeline(task_id, feedback, resume, conflict_resolution)
     finally:
-        with _lock:
-            _active_agent_tasks.discard(task_id)
+        # Keep the task registered as active until its agent state has been
+        # reconciled. A resume request during this window must wait instead
+        # of queueing a duplicate run.
+        try:
+            _release_paused_agent(task_id)
+        finally:
+            with _lock:
+                _active_agent_tasks.discard(task_id)
 
 
 def enqueue_merge(task_id: int) -> bool:
