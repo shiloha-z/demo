@@ -1,3 +1,19 @@
+import sys
+
+# ── Windows UTF-8 safeguard ──────────────────────────────────────────────
+# On Windows the default console encoding is GBK, which cannot encode many
+# Unicode characters (e.g. the emojis CrewAI prints during execution). That
+# raises UnicodeEncodeError and aborts the whole agent pipeline. Force UTF-8
+# for stdout/stderr so third-party output (CrewAI, rich, etc.) never crashes,
+# regardless of how uvicorn is launched.
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
