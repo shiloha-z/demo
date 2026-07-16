@@ -50,6 +50,10 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(128), nullable=False)
     display_name = Column(String(100), default="")
+    email = Column(String(200), default="")
+    phone = Column(String(30), default="")
+    bio = Column(Text, default="")
+    avatar_url = Column(String(500), default="")
 
     agents = relationship("Agent", back_populates="creator")
 
