@@ -35,3 +35,17 @@ Thumbs.db
 
 # Local scripts
 start.ps1
+
+# Walkthrough / runtime logs (test artifacts, never commit)
+*.log.txt
+*_err.txt
+*_log.txt
+backend/backend_err.txt
+backend/backend_log.txt
+backend/bimp.txt
+backend/imp.txt
+backend/server_err.txt
+backend/server_log.txt
+frontend/frontend_err.txt
+frontend/frontend_log.txt
+frontend/ftsc.txt
