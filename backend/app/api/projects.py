@@ -9,7 +9,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus
+from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -420,10 +420,13 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
         ).distinct().all()
     ]
 
-    # Delete associated records
+    # Delete associated records (cascade all related data)
     db.query(Review).filter(Review.project_id == project_id).delete()
     db.query(Version).filter(Version.project_id == project_id).delete()
     db.query(Task).filter(Task.project_id == project_id).delete()
+    db.query(JoinRequest).filter(JoinRequest.project_id == project_id).delete()
+    db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete()
+    db.query(ChatMessage).filter(ChatMessage.project_id == project_id).delete()
 
     # Reset agents that were working on this project's tasks back to IDLE
     if stuck_agent_ids:
