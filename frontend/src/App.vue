@@ -124,7 +124,8 @@ function handleLogout() {
       <!-- Footer — always clickable, user info fades on collapse -->
       <div class="sidebar-footer">
         <div class="sidebar-user" @click="toggleUserMenu">
-          <span class="user-avatar">{{ auth.displayName?.charAt(0) || '?' }}</span>
+          <img v-if="auth.avatarUrl" :src="auth.avatarUrl" class="user-avatar-img" />
+          <span v-else class="user-avatar">{{ auth.displayName?.charAt(0) || '?' }}</span>
           <div class="user-info">
             <div class="user-name">{{ auth.displayName }}</div>
             <div class="user-role">开发者</div>
@@ -338,6 +339,14 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
+}
+
+.user-avatar-img {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  object-fit: cover;
   flex-shrink: 0;
 }
 

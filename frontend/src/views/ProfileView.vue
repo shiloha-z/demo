@@ -67,19 +67,30 @@ async function handleAvatarUpload(e: Event) {
     input.value = ''
     return
   }
+  if (!['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(file.type)) {
+    alert('请选择 PNG、JPG、GIF 或 WebP 图片')
+    input.value = ''
+    return
+  }
 
   avatarUploading.value = true
   try {
     const form = new FormData()
     form.append('file', file)
     const { data } = await api.post('/auth/profile/avatar', form)
-    profile.value.avatar_url = data.avatar_url + '?t=' + Date.now()
+    const url = data.avatar_url + '?t=' + Date.now()
+    profile.value.avatar_url = url
+    auth.setAvatarUrl(url)
   } catch (e: any) {
     alert(e?.response?.data?.detail || '头像上传失败，请重试')
   } finally {
     avatarUploading.value = false
     input.value = ''
   }
+}
+
+function handleAvatarLoadError() {
+  profile.value.avatar_url = ''
 }
 </script>
 
@@ -93,6 +104,7 @@ async function handleAvatarUpload(e: Event) {
             v-if="profile.avatar_url"
             :src="profile.avatar_url"
             class="profile-avatar-img"
+            @error="handleAvatarLoadError"
           />
           <div v-else class="profile-avatar-text">{{ auth.displayName?.charAt(0) || '?' }}</div>
           <div class="avatar-overlay">
