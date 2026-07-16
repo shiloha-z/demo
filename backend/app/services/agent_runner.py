@@ -88,7 +88,7 @@ def _make_stage_cb(task_id: int, project_id: int):
 
 # ── Main entry point ────────────────────────────────────────────────────
 
-def run_agent_pipeline(task_id: int, feedback: str = ""):
+def run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
     """Execute the full agent pipeline for a given task.
 
     Dispatches to the correct runner based on agent.runner_type.
@@ -97,6 +97,9 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
     If `feedback` is provided, the pipeline runs in "revision" mode:
     - Reuses the existing task branch (does not create a new one from master)
     - Prepends the human feedback to the task description so the agent can address it
+
+    If `resume` is True, the pipeline resumes from the existing task branch
+    without recreating it (preserves partial work from paused state).
     """
     from app.api.ws import broadcast_sync
     from agent_service.runners.factory import get_runner
@@ -154,7 +157,8 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
 
         # ── Step 2: Create or reuse task branch ────────────────────
         branch_name = f"task/{task.id}"
-        if is_revision:
+        branch_exists = git.branch_exists(workspace, branch_name)
+        if is_revision or resume or branch_exists:
             _progress(task_id, project_id, f"🌿 切换到已有工作分支：{branch_name}", "branch")
             git.switch_branch(workspace, branch_name)
         else:
@@ -276,6 +280,14 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
             "status": "pending",
         })
 
+        # Check if task was paused while pipeline was running
+        db.refresh(task)
+        if task.status == TaskStatus.PAUSED:
+            _progress(task_id, project_id, "⏸️ 任务已被暂停，保留工作分支", "paused")
+            logger.info(f"Task {task_id} paused by user, keeping branch {branch_name}")
+            db.close()
+            return
+
         # Update task & agent status → reviewing
         task.status = TaskStatus.REVIEWING
         task.completed_at = datetime.now(timezone.utc)
@@ -327,6 +339,12 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
     from app.api.ws import broadcast_sync
 
     if task is None:
+        return
+
+    # Don't overwrite if task was paused by user
+    db.refresh(task)
+    if task.status == TaskStatus.PAUSED:
+        logger.info(f"Task {task.id} was paused, not marking as failed")
         return
 
     project_id = task.project_id

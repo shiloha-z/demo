@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -123,6 +123,7 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
 def reject_review(
     review_id: int,
     body: RejectRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -179,14 +180,9 @@ def reject_review(
     except Exception:
         pass
 
-    # Trigger agent re-run with feedback
+    # Trigger agent re-run with feedback via BackgroundTasks for safe shutdown
     from app.services.agent_runner import run_agent_pipeline
-    from fastapi import BackgroundTasks
-    # Fire-and-forget: the reject endpoint doesn't have BackgroundTasks injected,
-    # so we launch in a thread via the agent_runner's existing mechanism
-    import threading
-    t = threading.Thread(target=run_agent_pipeline, args=(task.id, feedback), daemon=True)
-    t.start()
+    background_tasks.add_task(run_agent_pipeline, task.id, feedback)
 
     return {"message": "Rejected — agent will re-run with feedback", "new_review_id": new_review.id}
 

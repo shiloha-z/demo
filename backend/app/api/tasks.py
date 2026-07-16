@@ -259,10 +259,7 @@ def start_task(
     agent.status = AgentStatus.WORKING
     db.commit()
 
-    from app.api.ws import broadcast_sync
-    broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
-
-    # Run agent pipeline in background
+    # Run agent pipeline in background (pipeline broadcasts agent_update with full detail)
     from app.services.agent_runner import run_agent_pipeline
     background_tasks.add_task(run_agent_pipeline, task.id)
 
@@ -286,7 +283,6 @@ def stop_task(
         raise HTTPException(status_code=400, detail=f"只有等待中或执行中的任务才能暂停，当前状态：{task.status.value}")
 
     task.status = TaskStatus.PAUSED
-    task.completed_at = datetime.now(timezone.utc)
 
     # Restore agent to idle
     agent = db.query(Agent).get(task.agent_id)
@@ -328,12 +324,9 @@ def resume_task(
     agent.status = AgentStatus.WORKING
     db.commit()
 
-    from app.api.ws import broadcast_sync
-    broadcast_sync("agent_update", {"id": agent.id, "status": "working"})
-
-    # Run agent pipeline in background
+    # Run agent pipeline in background — resume preserves existing task branch
     from app.services.agent_runner import run_agent_pipeline
-    background_tasks.add_task(run_agent_pipeline, task.id)
+    background_tasks.add_task(run_agent_pipeline, task.id, "", resume=True)
 
     return _task_to_response(task)
 

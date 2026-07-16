@@ -190,6 +190,18 @@ def rollback(workspace: str, commit_hash: str, message: str | None = None) -> st
 
 # ── Branch operations (for per-task isolation) ────────────────────────
 
+def branch_exists(workspace: str, branch_name: str) -> bool:
+    """Check whether a Git branch exists in the workspace."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        repo.git.rev_parse("--verify", branch_name)
+        return True
+    except GitCommandError:
+        return False
+
+
 def create_branch(workspace: str, branch_name: str) -> bool:
     """Create and switch to a new branch from master. Creates master if needed."""
     repo = get_repo(workspace)
