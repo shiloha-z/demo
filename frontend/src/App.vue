@@ -240,14 +240,15 @@ function handleLogout() {
   justify-content: center;
   flex-shrink: 0;
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
-  opacity: 0;
+  opacity: 0.45;
 }
 
 .app-sidebar:not(.collapsed) .sidebar-collapse-btn {
   margin-left: auto;
 }
 
-.app-sidebar:hover .sidebar-collapse-btn,
+.sidebar-collapse-btn:hover,
+.app-sidebar:not(.collapsed):hover .sidebar-collapse-btn,
 .app-sidebar.collapsed .sidebar-collapse-btn {
   opacity: 1;
 }
