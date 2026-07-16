@@ -341,23 +341,26 @@ def _get_base_branch(repo: Repo) -> str:
 
 
 def list_files(workspace: str, subpath: str = "") -> list[dict[str, Any]]:
-    """List files from the project workspace.
+    """List files from the project workspace (filesystem-first).
 
-    Prefer the git base-branch snapshot so Agent task-branch work stays
-    isolated, but fall back to the real filesystem whenever the git
-    repository has no usable branch/commit (e.g. a freshly `git init`-ed
-    project with no initial commit) — otherwise the file tree shows empty
-    even though files exist on disk.
+    Reads the actual working tree so the file manager reflects the current
+    state including uncommitted changes and task-branch work.
+    Falls back to git ls-tree if the filesystem path doesn't exist.
     """
+    target_dir = _verify_safe_path(workspace, subpath)
+    if os.path.isdir(target_dir):
+        return _list_from_fs(workspace, subpath)
+
+    # Fallback to git for paths that only exist in committed history
     repo = get_repo(workspace)
     if repo:
         try:
             base = _get_base_branch(repo)
             return _list_from_git(repo, base, subpath)
         except Exception:
-            pass  # no usable branch yet → fall back to filesystem
+            pass
 
-    return _list_from_fs(workspace, subpath)
+    return []
 
 
 def _list_from_git(repo: Repo, base: str, subpath: str) -> list[dict[str, Any]]:
