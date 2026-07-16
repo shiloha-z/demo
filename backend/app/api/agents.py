@@ -159,11 +159,26 @@ def delete_agent(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.creator_id == user.id).first()
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     if agent.creator_id != user.id:
         raise HTTPException(status_code=403, detail="只有 Agent 创建者才能删除")
+
+    # Clean up associated records: reviews first (FK to tasks), then tasks
+    task_ids = [
+        row[0] for row in
+        db.query(Task.id).filter(Task.agent_id == agent_id).all()
+    ]
+    if task_ids:
+        db.query(Review).filter(Review.task_id.in_(task_ids)).delete(synchronize_session=False)
+        db.query(Task).filter(Task.agent_id == agent_id).delete(synchronize_session=False)
+
     db.delete(agent)
     db.commit()
+
+    # Notify clients about agent removal
+    from app.api.ws import broadcast_sync
+    broadcast_sync("agent_update", {"id": agent_id, "status": "deleted"})
+
     return {"message": "Deleted"}
