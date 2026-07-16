@@ -30,7 +30,12 @@ onMounted(async () => {
 })
 
 watch(() => store.sortBy, () => { store.fetchProjects(); loadStats() })
-watch(() => store.filterBy, () => { store.fetchProjects(); loadStats() })
+
+function setFilter(key: string) {
+  store.filterBy = key
+  store.fetchProjects()
+  loadStats()
+}
 
 const filterTabs = [
   { key: 'all', label: '全部项目' },
@@ -126,7 +131,6 @@ function goProject(p: any) {
           v-model="store.sortBy"
           size="medium"
           style="width: 140px"
-          @change="store.fetchProjects()"
         >
           <t-option value="created_desc" label="最新创建" />
           <t-option value="created_asc" label="最早创建" />
@@ -190,7 +194,7 @@ function goProject(p: any) {
         :key="tab.key"
         class="filter-tab"
         :class="{ active: store.filterBy === tab.key }"
-        @click="store.filterBy = tab.key"
+        @click="setFilter(tab.key)"
       >{{ tab.label }}</button>
     </div>
 
