@@ -103,11 +103,11 @@ const icons: Record<string, string> = {
 
 <template>
   <!-- Global project selector -->
-  <div class="project-picker" :class="{ 'fade-out': collapsed }">
+  <div class="project-picker" :class="{ collapsed: collapsed }">
     <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     <select v-model="selectedProjectId" class="project-select">
-      <option :value="null" disabled>选择项目…</option>
-      <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+      <option :value="null" disabled>{{ collapsed ? '' : '选择项目…' }}</option>
+      <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ collapsed ? p.name.charAt(0) : p.name }}</option>
     </select>
   </div>
 
@@ -150,16 +150,27 @@ const icons: Record<string, string> = {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   overflow: hidden;
-  transition: border-color var(--transition-fast), opacity 0.2s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: border-color var(--transition-fast), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.project-picker.fade-out {
-  max-height: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  margin-top: 0;
-  margin-bottom: 0;
-  border-width: 0;
+.project-picker.collapsed {
+  padding: 8px 6px;
+  margin: 4px 6px 0;
+  justify-content: center;
+  gap: 0;
+  position: relative;
+}
+
+.project-picker.collapsed .picker-icon {
+  opacity: 0.7;
+}
+
+.project-picker.collapsed .project-select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
 }
 .project-picker:hover { border-color: var(--ring); }
 .picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
