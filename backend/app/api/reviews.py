@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Review, ReviewStatus, Task, TaskStatus, Version
+from app.models.models import User, Review, ReviewStatus, Task, TaskStatus, Version, Agent, AgentStatus
 from app.services import git_service as git
 
 # Lazy import — memory_service may fail if chromadb not installed
@@ -139,29 +139,42 @@ def reject_review(
     review.status = ReviewStatus.REJECTED
     review.human_feedback = feedback
 
-    # Update task → running so agent can re-run
+    # Update task → running, agent → working for re-run
     task = db.query(Task).get(review.task_id)
     if task:
         task.status = TaskStatus.RUNNING
+        task.completed_at = None
 
-    # Create a new pending review for the next round
-    new_review = Review(
-        task_id=review.task_id,
-        project_id=review.project_id,
-        diff_content="",
-        agent_review_summary="",
-        status=ReviewStatus.PENDING,
-    )
-    db.add(new_review)
+    # Set agent to WORKING to prevent concurrent task creation during the gap
+    agent = db.query(Agent).get(task.agent_id) if task else None
+    if agent:
+        agent.status = AgentStatus.WORKING
+
     db.commit()
-    db.refresh(new_review)
+
+    # Broadcast state changes to all clients
+    from app.api.ws import broadcast_sync
+    broadcast_sync("review_update", {
+        "id": review.id,
+        "task_id": review.task_id,
+        "project_id": review.project_id,
+        "status": "rejected",
+    })
+    if task:
+        broadcast_sync("task_update", {
+            "id": task.id, "project_id": task.project_id, "status": "running",
+        })
+    if agent:
+        broadcast_sync("agent_update", {
+            "id": agent.id, "status": "working",
+            "current_task_id": task.id if task else None,
+        })
 
     # Record to project memory
     try:
         mem.add_project_memory(review.project_id,
             f"Review #{review_id} (task #{review.task_id}) REJECTED. Feedback: {feedback}",
-            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected",
-             "new_review_id": str(new_review.id)})
+            {"type": "review_decision", "review_id": str(review_id), "decision": "rejected"})
     except Exception:
         pass
 
@@ -181,10 +194,11 @@ def reject_review(
         pass
 
     # Trigger agent re-run with feedback via BackgroundTasks for safe shutdown
+    # The pipeline will create the real Review with actual diff and summary
     from app.services.agent_runner import run_agent_pipeline
     background_tasks.add_task(run_agent_pipeline, task.id, feedback)
 
-    return {"message": "Rejected — agent will re-run with feedback", "new_review_id": new_review.id}
+    return {"message": "Rejected — agent will re-run with feedback"}
 
 
 @router.post("/reviews/{review_id}/close")

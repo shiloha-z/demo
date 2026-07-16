@@ -357,13 +357,6 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
     agent = db.query(Agent).get(task.agent_id)
     if agent:
         agent.status = AgentStatus.IDLE
-    review = Review(
-        task_id=task.id,
-        project_id=project_id,
-        diff_content="",
-        agent_review_summary=f"Execution failed [{runner_type}]:\n{error}",
-    )
-    db.add(review)
     db.commit()
 
     # Record failure in memory

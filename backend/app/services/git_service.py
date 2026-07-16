@@ -431,28 +431,29 @@ def _list_from_fs(workspace: str, subpath: str) -> list[dict[str, Any]]:
 
 
 def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024) -> str:
-    """Read file content from the master branch (not working tree)."""
-    repo = get_repo(workspace)
-    base = _get_base_branch(repo) if repo else "master"
+    """Read file content from the working tree (filesystem), with git fallback."""
+    # Try filesystem first — always reflects current working-tree state
+    target = _verify_safe_path(workspace, filepath)
+    if os.path.isfile(target):
+        size = os.path.getsize(target)
+        if size > max_size * 2:
+            return f"// File too large ({size} bytes, max {max_size * 2})"
+        with open(target, "r", encoding="utf-8", errors="replace") as f:
+            return f.read(max_size)
 
+    # Fallback to git (for committed files that may have been deleted from working tree)
+    repo = get_repo(workspace)
     if repo:
+        base = _get_base_branch(repo)
         try:
             content = repo.git.show(f"{base}:{filepath}")
             if len(content) > max_size * 2:
                 return f"// File too large ({len(content)} chars, max {max_size * 2})"
             return content[:max_size]
         except GitCommandError:
-            pass  # fallback to filesystem
+            pass
 
-    # Filesystem fallback
-    target = _verify_safe_path(workspace, filepath)
-    if not os.path.isfile(target):
-        raise FileNotFoundError(f"File not found: {filepath}")
-    size = os.path.getsize(target)
-    if size > max_size * 2:
-        return f"// File too large ({size} bytes, max {max_size * 2})"
-    with open(target, "r", encoding="utf-8", errors="replace") as f:
-        return f.read(max_size)
+    raise FileNotFoundError(f"File not found: {filepath}")
 
 
 def write_file(workspace: str, filepath: str, content: str) -> str:

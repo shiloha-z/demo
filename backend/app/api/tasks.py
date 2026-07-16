@@ -204,6 +204,15 @@ def create_task(
     # Agent must be idle — one agent can only run one task at a time
     if agent.status == AgentStatus.WORKING:
         raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+    # Block if agent has a task currently running (covers gap when status hasn't synced)
+    existing_running = (
+        db.query(Task)
+        .filter(Task.agent_id == req.agent_id, Task.status == TaskStatus.RUNNING)
+        .first()
+    )
+    if existing_running:
+        raise HTTPException(status_code=409,
+            detail=f"Agent「{agent.name}」有任务 #${existing_running.id} 正在执行，请等待完成")
     # Also block if agent has a task awaiting review (must approve/reject first)
     existing_reviewing = (
         db.query(Task)
