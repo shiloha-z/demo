@@ -56,6 +56,7 @@ class User(Base):
     avatar_url = Column(String(500), default="")
 
     agents = relationship("Agent", back_populates="creator")
+    skills = relationship("Skill", back_populates="creator")
 
 
 class Project(Base):
@@ -124,6 +125,20 @@ class Agent(Base):
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
 
     creator = relationship("User", back_populates="agents")
+
+
+class Skill(Base):
+    __tablename__ = "skills"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    creator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    name = Column(String(100), nullable=False)
+    description = Column(Text, default="")
+    prompt_content = Column(Text, default="")
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+    creator = relationship("User", back_populates="skills")
 
 
 class Task(Base):
