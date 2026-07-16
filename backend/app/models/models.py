@@ -62,6 +62,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(String(30), unique=True, nullable=True, index=True)  # 规范 ID: PROJ-20260716-abc123
     name = Column(String(100), nullable=False)
     description = Column(Text, default="")
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)

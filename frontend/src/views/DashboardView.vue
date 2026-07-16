@@ -20,6 +20,25 @@ function openMembers(p: any) {
   memberDialogVisible.value = true
 }
 
+const joinDialogVisible = ref(false)
+const joinProjectId = ref('')
+const joining = ref(false)
+
+async function handleJoin() {
+  if (!joinProjectId.value.trim()) return
+  joining.value = true
+  try {
+    await api.post('/projects/join', { project_id: joinProjectId.value.trim() })
+    MessagePlugin.success('申请已提交，请等待项目负责人审批')
+    joinDialogVisible.value = false
+    joinProjectId.value = ''
+  } catch (e: any) {
+    MessagePlugin.error(e?.response?.data?.detail || '申请失败')
+  } finally {
+    joining.value = false
+  }
+}
+
 const activeAgentCount = ref(0)
 const pendingReviewCount = ref(0)
 const approvalRate = ref<string | null>(null)
@@ -116,6 +135,15 @@ function goProject(p: any) {
   store.setCurrentProject(p)
   router.push('/files')
 }
+
+function copyProjectId(id: string, event: Event) {
+  event.stopPropagation()
+  navigator.clipboard.writeText(id).then(() => {
+    MessagePlugin.success('项目 ID 已复制')
+  }).catch(() => {
+    MessagePlugin.warning('复制失败，请手动复制')
+  })
+}
 </script>
 
 <template>
@@ -143,6 +171,12 @@ function goProject(p: any) {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           </template>
           创建项目
+        </t-button>
+        <t-button theme="default" variant="outline" @click="joinDialogVisible = true">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+          </template>
+          加入项目
         </t-button>
       </div>
     </div>
@@ -217,6 +251,10 @@ function goProject(p: any) {
             <span>·</span>
             <span>{{ formatTime(p.created_at) }}</span>
           </div>
+          <div class="project-card-id" v-if="p.project_id" @click.stop="copyProjectId(p.project_id, $event)">
+            {{ p.project_id }}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </div>
         </div>
         <button class="btn-members" @click.stop="openMembers(p)" title="成员管理">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -272,6 +310,21 @@ function goProject(p: any) {
         :project-name="memberDialogProject.name"
         @close="memberDialogVisible = false"
       />
+    </t-dialog>
+
+    <!-- Join project dialog -->
+    <t-dialog v-model:visible="joinDialogVisible" header="加入项目" width="440px">
+      <div class="dialog-form">
+        <label class="field-label">项目 ID</label>
+        <t-input v-model="joinProjectId" placeholder="例如：PROJ-20260716-abc123" />
+        <p class="field-hint">请输入项目负责人提供的项目 ID，提交后将等待审批</p>
+      </div>
+      <template #footer>
+        <t-button theme="default" variant="text" @click="joinDialogVisible = false">取消</t-button>
+        <t-button theme="primary" :disabled="!joinProjectId.trim() || joining" @click="handleJoin">
+          {{ joining ? '提交中...' : '申请加入' }}
+        </t-button>
+      </template>
     </t-dialog>
   </div>
 </template>
@@ -358,6 +411,21 @@ function goProject(p: any) {
 .project-card-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--foreground); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
+.project-card-id {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-top: 4px; padding: 2px 8px;
+  font-size: 10.5px; color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  background: var(--surface-hover);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+.project-card-id:hover {
+  color: var(--primary);
+  background: var(--primary-light);
+}
 .project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all var(--transition-base); flex-shrink: 0; }
 .project-card:hover .project-card-arrow { opacity: 1; color: var(--primary); }
 

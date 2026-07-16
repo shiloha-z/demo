@@ -72,16 +72,27 @@ async function loadAll() {
     const { data } = await api.get(`/projects/${props.projectId}/members`)
     members.value = Array.isArray(data) ? data : []
     const me = members.value.find(m => m.user_id === auth.userId)
-    isMember.value = !!me
-    myRole.value = me?.role || ''
+    if (me) {
+      isMember.value = true
+      myRole.value = me.role
+    }
   } catch (e: any) {
     // Not a member or no access
-    isMember.value = false
-    myRole.value = ''
     members.value = []
   }
 
-  // Load my join request
+  // Owner is always a member even if /members API fails
+  if (!isMember.value) {
+    try {
+      const { data } = await api.get(`/projects/${props.projectId}`)
+      if (data.owner_id === auth.userId) {
+        isMember.value = true
+        myRole.value = 'owner'
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Load my join request (only if not a member)
   if (!isMember.value) {
     try {
       const { data } = await api.get(`/projects/${props.projectId}/my-request`)

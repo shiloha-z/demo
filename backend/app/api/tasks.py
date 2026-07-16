@@ -7,13 +7,30 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Agent, Task, TaskStatus, AgentStatus, Review
-from app.services import git_service as git
+from app.models.models import User, Project, Agent, Task, TaskStatus, AgentStatus, Review, ProjectMember
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
 
 # Separate router for global task listing (no project_id in path)
 global_router = APIRouter(prefix="/api/tasks", tags=["Tasks Global"])
+
+
+# ── Permission helper ─────────────────────────────────────────────────
+
+def _check_task_access(project_id: int, user: User, db: Session) -> Project:
+    """Verify user is a member of the project. Raises 404/403."""
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if project.owner_id == user.id:
+        return project
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user.id,
+    ).first()
+    if not member:
+        raise HTTPException(status_code=403, detail="只有项目成员才能进行此操作")
+    return project
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -103,6 +120,7 @@ def list_tasks(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """List tasks for a project. Set ?archived=true to show only archived tasks."""
     sort_map = {
         "created_desc": desc(Task.created_at),
@@ -145,6 +163,7 @@ def get_task_detail(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     task = (
         db.query(Task)
         .filter(Task.id == task_id, Task.project_id == project_id)
@@ -191,6 +210,7 @@ def create_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     # Validate project exists
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -252,6 +272,7 @@ def start_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Manually start a pending task. Agent must be idle."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -285,6 +306,7 @@ def stop_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Stop a running or pending task, set status to paused."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -317,6 +339,7 @@ def resume_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Resume a paused task."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -350,6 +373,7 @@ def archive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Archive a completed or failed task. Pending/running tasks cannot be archived."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -370,6 +394,7 @@ def unarchive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Restore an archived task back to the active list."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -388,6 +413,7 @@ def delete_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Permanently delete a task. Only archived tasks can be deleted."""
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -406,6 +432,7 @@ def batch_delete_tasks(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    _check_task_access(project_id, user, db)
     """Batch delete archived tasks."""
     tasks = db.query(Task).filter(
         Task.id.in_(req.task_ids),
