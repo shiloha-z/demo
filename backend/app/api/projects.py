@@ -42,6 +42,7 @@ class ProjectResponse(BaseModel):
     owner_id: int
     owner_name: str = ""
     workspace_path: str
+    is_member: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -163,7 +164,19 @@ def list_projects(
             q = q.filter(Project.id.notin_(all_my_project_ids))
 
     projects = q.order_by(order).all()
-    return ProjectListResponse(projects=[ProjectResponse.model_validate(p) for p in projects])
+
+    # Collect member project IDs for is_member flag
+    member_project_ids = set(
+        row[0] for row in
+        db.query(ProjectMember.project_id).filter(ProjectMember.user_id == user.id).all()
+    )
+
+    result = []
+    for p in projects:
+        resp = ProjectResponse.model_validate(p)
+        resp.is_member = (p.owner_id == user.id) or (p.id in member_project_ids)
+        result.append(resp)
+    return ProjectListResponse(projects=result)
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
