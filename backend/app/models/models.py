@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SAEnum
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, ForeignKey, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from enum import Enum
 
@@ -78,6 +78,7 @@ class Project(Base):
 
 class ProjectMember(Base):
     __tablename__ = "project_members"
+    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_member"),)
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
@@ -154,6 +155,42 @@ class Review(Base):
     status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING)
     human_feedback = Column(Text, default="")
     created_at = Column(DateTime, default=_now)
+
+
+class ReviewRound(Base):
+    """Voting configuration for one immutable agent review result."""
+    __tablename__ = "review_rounds"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=False, unique=True)
+    required_approvals = Column(Integer, default=2, nullable=False)
+    veto_on_reject = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+class ReviewReviewer(Base):
+    """A project member invited to vote in a review round."""
+    __tablename__ = "review_reviewers"
+    __table_args__ = (UniqueConstraint("review_id", "user_id", name="uq_review_reviewer"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    assigned_at = Column(DateTime, default=_now)
+
+
+class ReviewVote(Base):
+    """The latest vote from an assigned reviewer; updates overwrite that vote."""
+    __tablename__ = "review_votes"
+    __table_args__ = (UniqueConstraint("review_id", "user_id", name="uq_review_vote"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    decision = Column(String(20), nullable=False)  # approve / reject
+    comment = Column(Text, default="")
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
 class Version(Base):

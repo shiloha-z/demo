@@ -3,17 +3,21 @@ import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
+import { useAuthStore } from '../stores/auth'
 import DiffViewer from '../components/DiffViewer.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
+const auth = useAuthStore()
 
 const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const reviews = ref<any[]>([])
 const selectedReview = ref<any>(null)
 const loading = ref(false)
+const voteSummary = ref<any>(null)
+const voteComment = ref('')
 
 const statusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
@@ -31,6 +35,9 @@ onMounted(() => {
       loadReviews()
     }
   })
+  wsStore.on('review_vote_update', (data: any) => {
+    if (selectedReview.value?.id === data.review_id) voteSummary.value = data
+  })
 })
 
 onUnmounted(() => {
@@ -41,6 +48,16 @@ watch(() => store.currentProject?.id, async (pid) => {
   if (!pid) return
   await loadReviews()
 }, { immediate: true })
+
+watch(() => selectedReview.value?.id, async (reviewId) => {
+  voteSummary.value = null
+  voteComment.value = ''
+  if (!reviewId) return
+  try {
+    const { data } = await api.get(`/reviews/${reviewId}/votes`)
+    voteSummary.value = data
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '加载投票信息失败')) }
+})
 
 async function loadReviews() {
   if (!selectedProjectId.value) { reviews.value = []; return }
@@ -61,6 +78,24 @@ async function approve(review: any) {
     await loadReviews()
     if (selectedReview.value?.id === review.id) selectedReview.value = null
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+  finally { loading.value = false }
+}
+
+const canVote = computed(() => voteSummary.value?.reviewers?.some((r: any) => r.user_id === auth.userId))
+
+async function castVote(decision: 'approve' | 'reject') {
+  if (!selectedReview.value) return
+  loading.value = true
+  try {
+    await api.post(`/reviews/${selectedReview.value.id}/vote`, {
+      decision,
+      comment: voteComment.value.trim(),
+    })
+    voteComment.value = ''
+    const { data } = await api.get(`/reviews/${selectedReview.value.id}/votes`)
+    voteSummary.value = data
+    MessagePlugin.success(decision === 'approve' ? '已投通过票' : '已投驳回票')
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '投票失败')) }
   finally { loading.value = false }
 }
 
@@ -169,6 +204,31 @@ function formatDate(d: string) {
             </div>
           </div>
 
+          <section v-if="voteSummary" class="vote-panel">
+            <div class="vote-panel-header">
+              <strong>多人投票</strong>
+              <span>{{ voteSummary.approve_count }}/{{ voteSummary.required_approvals }} 通过</span>
+              <span v-if="voteSummary.reject_count" class="vote-reject-count">{{ voteSummary.reject_count }} 驳回</span>
+            </div>
+            <div class="vote-reviewers">
+              <div v-for="reviewer in voteSummary.reviewers" :key="reviewer.user_id" class="vote-reviewer">
+                <span>{{ reviewer.display_name }}</span>
+                <span :class="['vote-status', reviewer.vote || 'pending']">
+                  {{ reviewer.vote === 'approve' ? '通过' : reviewer.vote === 'reject' ? '驳回' : '未投票' }}
+                </span>
+                <small v-if="reviewer.comment">{{ reviewer.comment }}</small>
+              </div>
+            </div>
+            <div v-if="selectedReview.status === 'pending' && canVote" class="vote-actions">
+              <t-textarea v-model="voteComment" placeholder="投票意见；驳回时必填" :autosize="{ minRows: 2, maxRows: 4 }" />
+              <div class="vote-buttons">
+                <t-button size="small" theme="success" variant="outline" :disabled="loading" @click="castVote('approve')">投通过票</t-button>
+                <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="castVote('reject')">投驳回票</t-button>
+              </div>
+            </div>
+            <p v-else-if="selectedReview.status === 'pending'" class="vote-hint">你不在本轮审查人名单中。</p>
+          </section>
+
           <div class="detail-section">
             <h4 class="detail-label">代码变更 (Diff)</h4>
             <div class="diff-container">
@@ -241,6 +301,24 @@ function formatDate(d: string) {
 
 .diff-container { border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; max-height: 500px; overflow-y: auto; }
 .no-diff { font-size: 13px; color: var(--muted-foreground); padding: 20px; text-align: center; }
+
+.vote-panel {
+  margin: 0 0 16px; padding: 12px;
+  border: 1px solid var(--surface-border); border-radius: var(--radius-md);
+  background: var(--surface);
+}
+.vote-panel-header { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.vote-panel-header strong { margin-right: auto; }
+.vote-reject-count { color: var(--danger); }
+.vote-reviewers { margin-top: 10px; display: grid; gap: 6px; }
+.vote-reviewer { display: grid; grid-template-columns: 1fr auto; gap: 8px; font-size: 12px; align-items: center; }
+.vote-reviewer small { grid-column: 1 / -1; color: var(--muted-foreground); white-space: pre-wrap; }
+.vote-status { padding: 1px 7px; border-radius: 99px; background: var(--surface-hover); color: var(--muted-foreground); }
+.vote-status.approve { color: var(--success); background: var(--success-light); }
+.vote-status.reject { color: var(--danger); background: var(--danger-light); }
+.vote-actions { margin-top: 10px; }
+.vote-buttons { display: flex; gap: 8px; margin-top: 8px; }
+.vote-hint { margin: 10px 0 0; color: var(--muted-foreground); font-size: 12px; }
 
 .review-summary {
   background: var(--surface); border: 1px solid var(--surface-border);

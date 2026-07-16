@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -12,7 +12,7 @@ const route = useRoute()
 
 const agents = ref<any[]>([])
 const availableModels = ref<{ id: string; name: string }[]>([])
-const runnerCheckResult = ref<{ available: boolean; checked: boolean; hint: string } | null>(null)
+const runnerCheckResult = ref<{ available: boolean; checked: boolean; hint?: string; cli_name?: string } | null>(null)
 const modelsLoading = ref(false)
 
 // Dialogs
@@ -216,7 +216,7 @@ function lastResultLabel(status: string | null): string {
         <div class="agent-body">
           <div class="agent-name-row">
             <span class="agent-name">{{ a.name }}</span>
-            <span class="status-dot" :class="statusDisplay[a.status]?.cls || 'dot-idle'" />
+            <span class="status-dot" :class="statusDisplay[a.status]?.cls || 'dot-idle'" :title="statusLabels[a.status] || a.status" />
           </div>
           <div class="agent-meta">
             <span class="role-badge" :style="{ background: (roleColors[a.role] || 'var(--muted-foreground)') + '18', color: roleColors[a.role] }">

@@ -9,10 +9,21 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole
+from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
+
+
+def _broadcast_project_update(action: str, project_id: int) -> None:
+    """Notify all connected users that the project list changed."""
+    from app.api.ws import broadcast_sync
+    broadcast_sync("project_update", {"action": action, "project_id": project_id})
+
+
+def _broadcast_file_change(project_id: int) -> None:
+    from app.api.ws import broadcast_sync
+    broadcast_sync("file_change", {"project_id": project_id})
 
 
 # ── Schemas ───────────────────────────────────────────────────────────
@@ -84,7 +95,7 @@ def _get_workspace(project_id: int, user: User, db: Session) -> str:
 @router.get("", response_model=ProjectListResponse)
 def list_projects(
     sort: str = Query(default="created_desc", description="created_desc | created_asc | updated_desc | name_asc | name_desc"),
-    filter: str = Query(default="all", description="all | owner | admin | member | other"),
+    filter: str = Query(default="all", description="all | joined | owner | admin | member | other"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -99,7 +110,19 @@ def list_projects(
     q = db.query(Project).options(joinedload(Project.owner))
 
     # Filter by user's relationship to the project
-    if filter == "owner":
+    if filter == "joined":
+        # Used by the global project switcher. A user may only enter projects
+        # where they are the owner or have an explicit membership.
+        joined_project_ids = [
+            row[0] for row in
+            db.query(ProjectMember.project_id).filter(
+                ProjectMember.user_id == user.id,
+            ).all()
+        ]
+        q = q.filter(
+            (Project.owner_id == user.id) | Project.id.in_(joined_project_ids)
+        )
+    elif filter == "owner":
         q = q.filter(Project.owner_id == user.id)
     elif filter == "admin":
         admin_project_ids = [
@@ -164,7 +187,7 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
 
     # Reload with owner relationship to get owner_name
     db.refresh(project)
-    return ProjectResponse(
+    response = ProjectResponse(
         id=project.id,
         name=project.name,
         description=project.description or "",
@@ -174,6 +197,8 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
         created_at=project.created_at,
         updated_at=project.updated_at,
     )
+    _broadcast_project_update("created", project.id)
+    return response
 
 
 # ── File management (MUST be before /{project_id}) ────────────────────
@@ -233,6 +258,7 @@ def create_file(
         raise HTTPException(status_code=400, detail=str(e))
     git.commit(workspace, f"Create/update {path}")
     _touch_project(db, project_id)
+    _broadcast_file_change(project_id)
     return {"path": path, "message": "File created"}
 
 
@@ -250,6 +276,7 @@ def create_folder(
         raise HTTPException(status_code=400, detail=str(e))
     git.commit(workspace, f"Create folder {path}")
     _touch_project(db, project_id)
+    _broadcast_file_change(project_id)
     return {"path": path, "message": "Folder created"}
 
 
@@ -270,6 +297,7 @@ def delete_file(
         raise HTTPException(status_code=404, detail="File or folder not found")
     git.commit(workspace, f"Delete {path}")
     _touch_project(db, project_id)
+    _broadcast_file_change(project_id)
     return {"path": path, "message": "Deleted"}
 
 
@@ -309,9 +337,7 @@ async def upload_files(
         try:
             decoded = content.decode("utf-8")
         except UnicodeDecodeError:
-            os.makedirs(os.path.dirname(full_path), exist_ok=True)
-            with open(full_path, "wb") as f:
-                f.write(content)
+            git.upload_file(workspace, target_path, content)
         else:
             git.write_file(workspace, target_path, decoded)
 
@@ -319,6 +345,7 @@ async def upload_files(
 
     _touch_project(db, project_id)
     git.commit(workspace, f"Upload {len(uploaded)} file(s)")
+    _broadcast_file_change(project_id)
     return {"files": uploaded, "message": f"{len(uploaded)} file(s) uploaded"}
 
 
@@ -345,6 +372,13 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
         ).first()
         if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
             raise HTTPException(status_code=403, detail="只有项目主管或管理员才能删除项目")
+
+    running_task = db.query(Task.id).filter(
+        Task.project_id == project_id,
+        Task.status == TaskStatus.RUNNING,
+    ).first()
+    if running_task:
+        raise HTTPException(status_code=409, detail="Cannot delete a project while an agent task is running")
 
     # Find agents that are currently working on tasks in this project
     stuck_agent_ids = [
@@ -384,5 +418,7 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
         from app.api.ws import broadcast_sync
         for agent_id in stuck_agent_ids:
             broadcast_sync("agent_update", {"id": agent_id, "status": "idle"})
+
+    _broadcast_project_update("deleted", project_id)
 
     return {"message": f"项目「{project.name}」已删除"}

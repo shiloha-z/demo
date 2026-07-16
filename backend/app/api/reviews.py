@@ -1,11 +1,12 @@
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Review, ReviewStatus, Task, TaskStatus, Version, Agent, AgentStatus
+from app.core.permissions import require_project_admin, require_project_member
+from app.models.models import User, Review, ReviewStatus, ReviewRound, ReviewReviewer, ReviewVote, ProjectMember, Task, TaskStatus, Version, Agent, AgentStatus
 from app.services import git_service as git
 
 # Lazy import — memory_service may fail if chromadb not installed
@@ -37,10 +38,62 @@ class RejectRequest(BaseModel):
     feedback: str
 
 
+class ReviewersRequest(BaseModel):
+    reviewer_ids: list[int] = Field(..., min_length=1)
+    required_approvals: int = Field(..., ge=1)
+    veto_on_reject: bool = True
+
+
+class VoteRequest(BaseModel):
+    decision: str
+    comment: str = ""
+
+
+def _ensure_vote_round(review: Review, db: Session) -> ReviewRound:
+    """Create a usable default voting round for reviews created before voting."""
+    round_ = db.query(ReviewRound).filter(ReviewRound.review_id == review.id).first()
+    if round_:
+        return round_
+    member_ids = [row[0] for row in db.query(ProjectMember.user_id).filter(
+        ProjectMember.project_id == review.project_id
+    ).all()]
+    round_ = ReviewRound(
+        review_id=review.id,
+        required_approvals=max(1, min(2, len(member_ids))),
+    )
+    db.add(round_)
+    db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in member_ids])
+    db.commit()
+    return round_
+
+
+def _vote_summary(review: Review, db: Session) -> dict:
+    round_ = _ensure_vote_round(review, db)
+    reviewers = db.query(ReviewReviewer, User).join(
+        User, ReviewReviewer.user_id == User.id
+    ).filter(ReviewReviewer.review_id == review.id).all()
+    votes = db.query(ReviewVote).filter(ReviewVote.review_id == review.id).all()
+    vote_by_user = {vote.user_id: vote for vote in votes}
+    return {
+        "required_approvals": round_.required_approvals,
+        "veto_on_reject": round_.veto_on_reject,
+        "approve_count": sum(v.decision == "approve" for v in votes),
+        "reject_count": sum(v.decision == "reject" for v in votes),
+        "reviewers": [{
+            "user_id": reviewer.user_id,
+            "username": user.username,
+            "display_name": user.display_name or user.username,
+            "vote": vote_by_user[reviewer.user_id].decision if reviewer.user_id in vote_by_user else None,
+            "comment": vote_by_user[reviewer.user_id].comment if reviewer.user_id in vote_by_user else "",
+        } for reviewer, user in reviewers],
+    }
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/projects/{project_id}/reviews", response_model=list[ReviewResponse])
 def list_reviews(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    require_project_member(project_id, user, db)
     reviews = db.query(Review).filter(Review.project_id == project_id).order_by(Review.id.desc()).all()
     return [ReviewResponse.model_validate(r) for r in reviews]
 
@@ -50,7 +103,127 @@ def get_review(review_id: int, db: Session = Depends(get_db), user: User = Depen
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
+    require_project_member(review.project_id, user, db)
     return ReviewResponse.model_validate(review)
+
+
+@router.get("/reviews/{review_id}/votes")
+def get_review_votes(review_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_member(review.project_id, user, db)
+    return _vote_summary(review, db)
+
+
+@router.post("/reviews/{review_id}/reviewers")
+def configure_reviewers(
+    review_id: int,
+    body: ReviewersRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be configured")
+    reviewer_ids = list(set(body.reviewer_ids))
+    if body.required_approvals > len(reviewer_ids):
+        raise HTTPException(status_code=400, detail="Required approvals cannot exceed reviewer count")
+    member_ids = {row[0] for row in db.query(ProjectMember.user_id).filter(
+        ProjectMember.project_id == review.project_id
+    ).all()}
+    if not set(reviewer_ids).issubset(member_ids):
+        raise HTTPException(status_code=400, detail="All reviewers must be project members")
+    if db.query(ReviewVote).filter(ReviewVote.review_id == review.id).first():
+        raise HTTPException(status_code=409, detail="Reviewers cannot change after voting begins")
+    round_ = _ensure_vote_round(review, db)
+    round_.required_approvals = body.required_approvals
+    round_.veto_on_reject = body.veto_on_reject
+    db.query(ReviewReviewer).filter(ReviewReviewer.review_id == review.id).delete()
+    db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in reviewer_ids])
+    db.commit()
+    return _vote_summary(review, db)
+
+
+@router.post("/reviews/{review_id}/vote")
+def cast_review_vote(
+    review_id: int,
+    body: VoteRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if body.decision not in {"approve", "reject"}:
+        raise HTTPException(status_code=400, detail="Decision must be approve or reject")
+    if body.decision == "reject" and not body.comment.strip():
+        raise HTTPException(status_code=400, detail="A rejection comment is required")
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_member(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Voting is closed")
+    _ensure_vote_round(review, db)
+    assignment = db.query(ReviewReviewer).filter(
+        ReviewReviewer.review_id == review.id,
+        ReviewReviewer.user_id == user.id,
+    ).first()
+    if not assignment:
+        raise HTTPException(status_code=403, detail="You are not assigned to this review")
+    vote = db.query(ReviewVote).filter(
+        ReviewVote.review_id == review.id,
+        ReviewVote.user_id == user.id,
+    ).first()
+    if vote:
+        vote.decision = body.decision
+        vote.comment = body.comment.strip()
+    else:
+        db.add(ReviewVote(
+            review_id=review.id,
+            user_id=user.id,
+            decision=body.decision,
+            comment=body.comment.strip(),
+        ))
+    db.commit()
+    summary = _vote_summary(review, db)
+    round_ = _ensure_vote_round(review, db)
+    if body.decision == "reject" and round_.veto_on_reject:
+        task = db.query(Task).get(review.task_id)
+        if task and task.status == TaskStatus.REVIEWING:
+            rejected_votes = db.query(ReviewVote).filter(
+                ReviewVote.review_id == review.id,
+                ReviewVote.decision == "reject",
+            ).all()
+            feedback = "\n\n".join(
+                f"Reviewer #{vote.user_id}: {vote.comment}" for vote in rejected_votes
+            )
+            review.status = ReviewStatus.REJECTED
+            review.human_feedback = feedback
+            task.status = TaskStatus.RUNNING
+            task.completed_at = None
+            agent = db.query(Agent).get(task.agent_id)
+            if agent:
+                agent.status = AgentStatus.WORKING
+            db.commit()
+            from app.services.agent_runner import run_agent_pipeline
+            background_tasks.add_task(run_agent_pipeline, task.id, feedback)
+    from app.api.ws import broadcast_sync_to_project
+    broadcast_sync_to_project(review.project_id, "review_vote_update", {
+        "review_id": review.id,
+        "project_id": review.project_id,
+        **summary,
+    })
+    if review.status == ReviewStatus.REJECTED:
+        broadcast_sync_to_project(review.project_id, "review_update", {
+            "id": review.id,
+            "task_id": review.task_id,
+            "project_id": review.project_id,
+            "status": "rejected",
+        })
+    return summary
 
 
 @router.post("/reviews/{review_id}/approve")
@@ -58,14 +231,24 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
-    review.status = ReviewStatus.APPROVED
+    authorized_project = require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be approved")
+    if not authorized_project.workspace_path:
+        raise HTTPException(status_code=400, detail="Project workspace not initialized")
 
     # Update linked task status → approved
     task = db.query(Task).get(review.task_id)
-    if task:
-        task.status = TaskStatus.APPROVED
-
-    db.commit()
+    if not task or task.status != TaskStatus.REVIEWING:
+        raise HTTPException(status_code=409, detail="Task is not awaiting review")
+    votes = _vote_summary(review, db)
+    if votes["reject_count"]:
+        raise HTTPException(status_code=409, detail="This review has rejection votes and cannot be approved")
+    if votes["approve_count"] < votes["required_approvals"]:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Approval quorum not met ({votes['approve_count']}/{votes['required_approvals']})",
+        )
 
     # Merge task branch → master, then commit
     from app.models.models import Project
@@ -74,6 +257,8 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         branch_name = f"task/{review.task_id}"
         # 1. Merge task branch into master (agent already committed on the branch)
         merged = git.merge_branch(proj.workspace_path, branch_name)
+        if not merged:
+            raise HTTPException(status_code=409, detail="Could not merge task branch")
         if merged:
             # A fast-forward merge leaves no uncommitted changes, so the
             # normal `commit()` returns None. Fall back to an empty auditable
@@ -90,6 +275,21 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
                 db.commit()
         # 2. Clean up the task branch
         git.delete_branch(proj.workspace_path, branch_name)
+
+    review.status = ReviewStatus.APPROVED
+    task.status = TaskStatus.APPROVED
+    db.commit()
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("review_update", {
+        "id": review.id, "task_id": review.task_id,
+        "project_id": review.project_id, "status": "approved",
+    })
+    broadcast_sync("task_update", {
+        "id": task.id, "project_id": task.project_id, "status": "approved",
+    })
+    broadcast_sync("version_update", {"project_id": review.project_id})
+    broadcast_sync("file_change", {"project_id": review.project_id})
 
     # Record to project memory
     if mem:
@@ -132,6 +332,9 @@ def reject_review(
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
+    require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be rejected")
 
     if not feedback.strip():
         raise HTTPException(status_code=400, detail="Feedback is required for rejection")
@@ -141,9 +344,10 @@ def reject_review(
 
     # Update task → running, agent → working for re-run
     task = db.query(Task).get(review.task_id)
-    if task:
-        task.status = TaskStatus.RUNNING
-        task.completed_at = None
+    if not task or task.status != TaskStatus.REVIEWING:
+        raise HTTPException(status_code=409, detail="Task is not awaiting review")
+    task.status = TaskStatus.RUNNING
+    task.completed_at = None
 
     # Set agent to WORKING to prevent concurrent task creation during the gap
     agent = db.query(Agent).get(task.agent_id) if task else None
@@ -211,13 +415,17 @@ def close_review(
     review = db.query(Review).filter(Review.id == review_id).first()
     if not review:
         raise HTTPException(status_code=404, detail="Review not found")
+    require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be closed")
 
     review.status = ReviewStatus.REJECTED
 
     # Update linked task status → rejected (terminal)
     task = db.query(Task).get(review.task_id)
-    if task:
-        task.status = TaskStatus.REJECTED
+    if not task or task.status != TaskStatus.REVIEWING:
+        raise HTTPException(status_code=409, detail="Task is not awaiting review")
+    task.status = TaskStatus.REJECTED
 
     db.commit()
 

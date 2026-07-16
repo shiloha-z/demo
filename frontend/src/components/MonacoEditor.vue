@@ -26,10 +26,6 @@ function getLanguage(path: string): string {
   return map[ext] || 'plaintext'
 }
 
-function getMonacoTheme(): string {
-  return themeStore.isDark ? 'vs-dark' : 'vs'
-}
-
 onMounted(() => {
   if (!container.value) return
   const lang = getLanguage(props.language || 'plaintext')

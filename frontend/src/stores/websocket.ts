@@ -19,6 +19,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
   function connect() {
     const token = localStorage.getItem('token')
     if (!token) return
+    if (ws?.readyState === WebSocket.OPEN || ws?.readyState === WebSocket.CONNECTING) return
 
     // Determine ws:// or wss:// from current page protocol
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'

@@ -52,3 +52,55 @@ def _migrate_schema():
                 conn.execute(
                     text(f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" {col_type}')
                 )
+
+        _repair_project_memberships(conn, existing_tables)
+
+
+def _repair_project_memberships(conn, existing_tables: set[str]) -> None:
+    """Repair legacy membership data and enforce one owner per project.
+
+    Older databases allowed duplicate memberships and multiple OWNER rows.
+    The project.owner_id is the canonical source of truth during cleanup.
+    """
+    if not {"projects", "project_members"}.issubset(existing_tables):
+        return
+
+    owner_role = "OWNER"
+    member_role = "MEMBER"
+    # Keep the oldest membership row for each (project, user) pair.
+    conn.execute(text("""
+        DELETE FROM project_members
+        WHERE id NOT IN (
+            SELECT MIN(id) FROM project_members GROUP BY project_id, user_id
+        )
+    """))
+
+    projects = conn.execute(text("SELECT id, owner_id FROM projects")).mappings().all()
+    for project in projects:
+        project_id = project["id"]
+        owner_id = project["owner_id"]
+        conn.execute(text("""
+            UPDATE project_members SET role = :member_role
+            WHERE project_id = :project_id AND role = :owner_role
+        """), {"member_role": member_role, "owner_role": owner_role, "project_id": project_id})
+        owner_member = conn.execute(text("""
+            SELECT id FROM project_members WHERE project_id = :project_id AND user_id = :user_id
+        """), {"project_id": project_id, "user_id": owner_id}).first()
+        if owner_member:
+            conn.execute(text("UPDATE project_members SET role = :owner_role WHERE id = :id"), {
+                "owner_role": owner_role, "id": owner_member[0]
+            })
+        else:
+            conn.execute(text("""
+                INSERT INTO project_members (project_id, user_id, role)
+                VALUES (:project_id, :user_id, :owner_role)
+            """), {"project_id": project_id, "user_id": owner_id, "owner_role": owner_role})
+
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_project_members_project_user_idx
+        ON project_members(project_id, user_id)
+    """))
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_project_members_single_owner_idx
+        ON project_members(project_id) WHERE role = 'OWNER'
+    """))

@@ -14,7 +14,7 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.models import User
+from app.models.models import User, Project, ProjectMember
 
 logger = logging.getLogger(__name__)
 
@@ -244,11 +244,22 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
                     if msg_type == "join_project":
                         project_id = msg.get("project_id")
                         if project_id is not None:
-                            manager.set_user_project(user_id, int(project_id))
-                            broadcast_sync_to_project(int(project_id), "user_online", {
-                                "user_id": user_id, "username": username, "display_name": display_name,
-                                "online_users": manager.get_online_users_in_project(int(project_id)),
-                            })
+                            project_id = int(project_id)
+                            db = SessionLocal()
+                            try:
+                                project = db.query(Project).filter(Project.id == project_id).first()
+                                member = db.query(ProjectMember).filter(
+                                    ProjectMember.project_id == project_id,
+                                    ProjectMember.user_id == user_id,
+                                ).first()
+                                if project and (project.owner_id == user_id or member):
+                                    manager.set_user_project(user_id, project_id)
+                                    broadcast_sync_to_project(project_id, "user_online", {
+                                        "user_id": user_id, "username": username, "display_name": display_name,
+                                        "online_users": manager.get_online_users_in_project(project_id),
+                                    })
+                            finally:
+                                db.close()
 
                     elif msg_type == "typing":
                         project_id = manager.get_user_project(user_id)

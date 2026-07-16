@@ -1,8 +1,33 @@
 import os
+from contextlib import contextmanager
+from functools import wraps
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from git import Repo, GitCommandError, InvalidGitRepositoryError
+
+
+_WORKSPACE_LOCKS: dict[str, RLock] = {}
+_WORKSPACE_LOCKS_GUARD = RLock()
+
+
+@contextmanager
+def workspace_lock(workspace: str):
+    """Serialize all Git and filesystem operations for one workspace."""
+    key = os.path.normcase(os.path.realpath(workspace))
+    with _WORKSPACE_LOCKS_GUARD:
+        lock = _WORKSPACE_LOCKS.setdefault(key, RLock())
+    with lock:
+        yield
+
+
+def _workspace_locked(func):
+    @wraps(func)
+    def wrapped(workspace: str, *args, **kwargs):
+        with workspace_lock(workspace):
+            return func(workspace, *args, **kwargs)
+    return wrapped
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -11,7 +36,11 @@ def _verify_safe_path(workspace: str, target: str) -> str:
     """Resolve and verify the target path is inside workspace."""
     full = os.path.realpath(os.path.join(workspace, target))
     ws = os.path.realpath(workspace)
-    if not full.startswith(ws):
+    try:
+        is_inside_workspace = os.path.commonpath([ws, full]) == ws
+    except ValueError:
+        is_inside_workspace = False
+    if not is_inside_workspace:
         raise ValueError(f"Path escapes workspace: {target}")
     return full
 
@@ -55,6 +84,7 @@ def get_repo(workspace: str) -> Repo | None:
         return None
 
 
+@_workspace_locked
 def commit(workspace: str, message: str) -> str | None:
     """Stage all, commit, return commit hash. None if nothing to commit."""
     repo = get_repo(workspace)
@@ -67,6 +97,7 @@ def commit(workspace: str, message: str) -> str | None:
     return c.hexsha
 
 
+@_workspace_locked
 def commit_allow_empty(workspace: str, message: str) -> str | None:
     """Create an empty commit (used as an auditable marker, e.g. an approval).
 
@@ -84,6 +115,7 @@ def commit_allow_empty(workspace: str, message: str) -> str | None:
         return None
 
 
+@_workspace_locked
 def get_diff(workspace: str) -> str:
     """Return git diff of unstaged + staged changes."""
     repo = get_repo(workspace)
@@ -118,6 +150,7 @@ def commit_history(workspace: str, max_count: int = 50) -> list[dict[str, Any]]:
     return commits
 
 
+@_workspace_locked
 def rollback(workspace: str, commit_hash: str, message: str | None = None) -> str | None:
     """Revert the workspace to a past commit in an *auditable* way.
 
@@ -190,6 +223,7 @@ def rollback(workspace: str, commit_hash: str, message: str | None = None) -> st
 
 # ── Branch operations (for per-task isolation) ────────────────────────
 
+@_workspace_locked
 def branch_exists(workspace: str, branch_name: str) -> bool:
     """Check whether a Git branch exists in the workspace."""
     repo = get_repo(workspace)
@@ -202,6 +236,7 @@ def branch_exists(workspace: str, branch_name: str) -> bool:
         return False
 
 
+@_workspace_locked
 def create_branch(workspace: str, branch_name: str) -> bool:
     """Create and switch to a new branch from master. Creates master if needed."""
     repo = get_repo(workspace)
@@ -237,6 +272,7 @@ def create_branch(workspace: str, branch_name: str) -> bool:
         return False
 
 
+@_workspace_locked
 def switch_branch(workspace: str, branch_name: str) -> bool:
     """Switch to an existing branch (force — discards uncommitted changes)."""
     repo = get_repo(workspace)
@@ -249,6 +285,7 @@ def switch_branch(workspace: str, branch_name: str) -> bool:
         return False
 
 
+@_workspace_locked
 def merge_branch(workspace: str, source_branch: str, target_branch: str = "master") -> bool:
     """Merge source_branch into target_branch. Force-switches to target first."""
     repo = get_repo(workspace)
@@ -276,6 +313,7 @@ def merge_branch(workspace: str, source_branch: str, target_branch: str = "maste
         return False
 
 
+@_workspace_locked
 def delete_branch(workspace: str, branch_name: str) -> bool:
     """Force-delete a branch."""
     repo = get_repo(workspace)
@@ -288,6 +326,7 @@ def delete_branch(workspace: str, branch_name: str) -> bool:
         return False
 
 
+@_workspace_locked
 def diff_vs_master(workspace: str) -> str:
     """Get diff of all changes on current branch vs master.
 
@@ -340,6 +379,7 @@ def _get_base_branch(repo: Repo) -> str:
     return _BASE_BRANCH[path]
 
 
+@_workspace_locked
 def list_files(workspace: str, subpath: str = "", ref: str = "") -> list[dict[str, Any]]:
     """List files from the project workspace.
 
@@ -445,6 +485,7 @@ def _list_from_fs(workspace: str, subpath: str) -> list[dict[str, Any]]:
     return nodes
 
 
+@_workspace_locked
 def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024, ref: str = "") -> str:
     """Read file content from the project workspace.
 
@@ -477,6 +518,7 @@ def read_file(workspace: str, filepath: str, max_size: int = 256 * 1024, ref: st
         return f.read(max_size)
 
 
+@_workspace_locked
 def write_file(workspace: str, filepath: str, content: str) -> str:
     """Write content to a file, creating parent dirs as needed."""
     target = _verify_safe_path(workspace, filepath)
@@ -486,6 +528,7 @@ def write_file(workspace: str, filepath: str, content: str) -> str:
     return target
 
 
+@_workspace_locked
 def create_folder(workspace: str, folder_path: str) -> str:
     """Create a folder inside workspace. Adds .gitkeep so git tracks it."""
     target = _verify_safe_path(workspace, folder_path)
@@ -498,6 +541,7 @@ def create_folder(workspace: str, folder_path: str) -> str:
     return target
 
 
+@_workspace_locked
 def delete_path(workspace: str, target_path: str) -> str:
     """Delete a file or folder inside workspace. Returns the deleted path."""
     import shutil
@@ -517,6 +561,7 @@ def delete_path(workspace: str, target_path: str) -> str:
     return target
 
 
+@_workspace_locked
 def upload_file(workspace: str, filepath: str, content: bytes) -> str:
     """Write binary content to a file."""
     target = _verify_safe_path(workspace, filepath)

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
+import { useWebSocketStore } from '../stores/websocket'
 import api from '../api'
 
 const store = useProjectStore()
+const wsStore = useWebSocketStore()
 
 const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const versions = ref<any[]>([])
@@ -15,6 +17,14 @@ watch(() => store.currentProject?.id, async (pid) => {
   if (!pid) return
   await loadVersions()
 }, { immediate: true })
+
+let unsubVersion: (() => void) | null = null
+onMounted(() => {
+  unsubVersion = wsStore.on('version_update', (data: any) => {
+    if (data.project_id === selectedProjectId.value) loadVersions()
+  })
+})
+onUnmounted(() => { unsubVersion?.() })
 
 async function loadVersions() {
   if (!selectedProjectId.value) return

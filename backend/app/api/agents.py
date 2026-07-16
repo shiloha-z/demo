@@ -45,7 +45,7 @@ class AgentResponse(BaseModel):
 
 @router.get("", response_model=list[AgentResponse])
 def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    agents = db.query(Agent).all()
+    agents = db.query(Agent).filter(Agent.creator_id == user.id).all()
     result = []
     for a in agents:
         # Task stats
@@ -159,7 +159,7 @@ def delete_agent(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    agent = db.query(Agent).filter(Agent.id == agent_id, Agent.creator_id == user.id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     db.delete(agent)

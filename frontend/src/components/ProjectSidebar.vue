@@ -26,7 +26,7 @@ async function fetchPendingCount() {
 
 onMounted(async () => {
   try {
-    if (store.projects.length === 0) await store.fetchProjects()
+    if (store.switchableProjects.length === 0) await store.fetchSwitchableProjects()
   } catch { /* backend may not be ready yet */ }
   fetchPendingCount()
   msgStore.refresh()
@@ -50,7 +50,7 @@ onUnmounted(() => { unsubReview?.(); unsubMessage?.() })
 const selectedProjectId = computed({
   get: () => store.currentProject?.id ?? null,
   set: (id: number | null) => {
-    const p = store.projects.find(p => p.id === id) || null
+    const p = store.switchableProjects.find(p => p.id === id) || null
     store.setCurrentProject(p)
   },
 })
@@ -105,7 +105,7 @@ const icons: Record<string, string> = {
     <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     <select v-model="selectedProjectId" class="project-select">
       <option :value="null" disabled>选择项目…</option>
-      <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
+      <option v-for="p in store.switchableProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
     </select>
   </div>
 

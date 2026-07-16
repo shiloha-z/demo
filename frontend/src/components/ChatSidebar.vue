@@ -74,7 +74,7 @@ const groupedMessages = computed<MessageGroup[]>(() => {
       groups.push({ date: msgDate, items: [] })
     }
     const group = groups[groups.length - 1]
-    const showMeta = msg.user_id !== lastUserId || msg.system
+    const showMeta = msg.user_id !== lastUserId || Boolean(msg.system)
     group.items.push({ ...msg, showAvatar: showMeta, showMeta })
     lastUserId = msg.user_id
   }
@@ -547,7 +547,7 @@ watch(() => props.visible, (v) => {
                   <span class="msg-file-icon">{{ fileIcon((msg.file_name || '').split('.').pop() || '') }}</span>
                   <div class="msg-file-info">
                     <span class="msg-file-name">{{ msg.file_name }}</span>
-                    <span class="msg-file-size">{{ formatSize(msg.file_size) }}</span>
+                    <span class="msg-file-size">{{ formatSize(msg.file_size ?? 0) }}</span>
                   </div>
                   <svg class="msg-file-dl" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </a>

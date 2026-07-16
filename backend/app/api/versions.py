@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.permissions import require_project_admin, require_project_member
 from app.models.models import User, Project, Version
 from app.services import git_service as git
 
@@ -53,9 +54,7 @@ def list_versions(
     user: User = Depends(get_current_user),
 ):
     """List all versions (commits) for a project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project_member(project_id, user, db)
 
     versions = (
         db.query(Version)
@@ -74,9 +73,7 @@ def rollback_version(
     user: User = Depends(get_current_user),
 ):
     """Rollback project to a specific version."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = require_project_admin(project_id, user, db)
     if not project.workspace_path:
         raise HTTPException(status_code=400, detail="Project has no workspace")
 
@@ -108,6 +105,7 @@ def rollback_version(
     try:
         from app.api.ws import broadcast_sync
         broadcast_sync("file_change", {"project_id": project_id})
+        broadcast_sync("version_update", {"project_id": project_id})
     except Exception:
         pass
 

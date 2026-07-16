@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 
 export interface TimelineTask {
   id: number
@@ -84,7 +83,7 @@ function barColor(status: string): string {
         <div class="timeline-row-mid">
           <span class="timeline-agent">
             <span class="role-dot" :style="{ background: roleColors[t.agentRole] || 'var(--muted-foreground)' }" />
-            {{ t.agentName }}
+            {{ t.agentName }} · {{ roleLabels[t.agentRole] || t.agentRole }}
           </span>
           <span class="timeline-duration">{{ formatDuration(t.startedAt, t.completedAt) }}</span>
           <span class="timeline-time">{{ formatTime(t.startedAt) }} → {{ formatTime(t.completedAt) }}</span>

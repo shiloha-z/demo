@@ -2,12 +2,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, asc
+from sqlalchemy import desc, asc, and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Agent, Task, TaskStatus, AgentStatus, Review
+from app.core.permissions import require_project_member
+from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
@@ -104,6 +105,7 @@ def list_tasks(
     user: User = Depends(get_current_user),
 ):
     """List tasks for a project. Set ?archived=true to show only archived tasks."""
+    require_project_member(project_id, user, db)
     sort_map = {
         "created_desc": desc(Task.created_at),
         "created_asc": asc(Task.created_at),
@@ -145,6 +147,7 @@ def get_task_detail(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    require_project_member(project_id, user, db)
     task = (
         db.query(Task)
         .filter(Task.id == task_id, Task.project_id == project_id)
@@ -191,13 +194,10 @@ def create_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    # Validate project exists
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    require_project_member(project_id, user, db)
 
     # Validate agent exists (globally)
-    agent = db.query(Agent).filter(Agent.id == req.agent_id).first()
+    agent = db.query(Agent).filter(Agent.id == req.agent_id, Agent.creator_id == user.id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -253,6 +253,7 @@ def start_task(
     user: User = Depends(get_current_user),
 ):
     """Manually start a pending task. Agent must be idle."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -286,6 +287,7 @@ def stop_task(
     user: User = Depends(get_current_user),
 ):
     """Stop a running or pending task, set status to paused."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -318,6 +320,7 @@ def resume_task(
     user: User = Depends(get_current_user),
 ):
     """Resume a paused task."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -351,6 +354,7 @@ def archive_task(
     user: User = Depends(get_current_user),
 ):
     """Archive a completed or failed task. Pending/running tasks cannot be archived."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -371,6 +375,7 @@ def unarchive_task(
     user: User = Depends(get_current_user),
 ):
     """Restore an archived task back to the active list."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -389,6 +394,7 @@ def delete_task(
     user: User = Depends(get_current_user),
 ):
     """Permanently delete a task. Only archived tasks can be deleted."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -407,6 +413,7 @@ def batch_delete_tasks(
     user: User = Depends(get_current_user),
 ):
     """Batch delete archived tasks."""
+    require_project_member(project_id, user, db)
     tasks = db.query(Task).filter(
         Task.id.in_(req.task_ids),
         Task.project_id == project_id,
@@ -428,7 +435,13 @@ def batch_delete_tasks(
 def list_all_tasks(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     tasks = (
         db.query(Task)
+        .join(Project, Task.project_id == Project.id)
+        .outerjoin(ProjectMember, and_(
+            ProjectMember.project_id == Project.id,
+            ProjectMember.user_id == user.id,
+        ))
         .filter(Task.archived == False)
+        .filter(or_(Project.owner_id == user.id, ProjectMember.user_id == user.id))
         .options(joinedload(Task.agent), joinedload(Task.project))
         .order_by(Task.id.desc())
         .limit(100)
@@ -448,6 +461,7 @@ def task_file_tree(
     user: User = Depends(get_current_user),
 ):
     """List files from the task's working branch (task/{task_id})."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -470,6 +484,7 @@ def task_read_file(
     user: User = Depends(get_current_user),
 ):
     """Read a file from the task's working branch (task/{task_id})."""
+    require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

@@ -14,7 +14,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from app.core.database import SessionLocal
-from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, Project
+from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, ReviewRound, ReviewReviewer, Project, ProjectMember
 from app.services import git_service as git
 
 # Lazy import — memory_service may fail if chromadb not installed
@@ -89,6 +89,31 @@ def _make_stage_cb(task_id: int, project_id: int):
 # ── Main entry point ────────────────────────────────────────────────────
 
 def run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
+    """Run a task while exclusively holding its project's workspace lock.
+
+    A project has one checked-out Git working tree. Serializing the complete
+    pipeline prevents two different agents from switching branches or staging
+    each other's changes in that tree.
+    """
+    db = SessionLocal()
+    try:
+        task = db.get(Task, task_id)
+        if not task:
+            logger.error("Task %s not found", task_id)
+            return
+        project = db.get(Project, task.project_id)
+        if not project or not project.workspace_path:
+            logger.error("Project workspace for task %s not found", task_id)
+            return
+        workspace = project.workspace_path
+    finally:
+        db.close()
+
+    with git.workspace_lock(workspace):
+        _run_agent_pipeline(task_id, feedback, resume)
+
+
+def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
     """Execute the full agent pipeline for a given task.
 
     Dispatches to the correct runner based on agent.runner_type.
@@ -256,6 +281,17 @@ def run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
         db.add(review)
         db.commit()
         db.refresh(review)
+
+        # Start a vote round for every generated review. All project members
+        # are invited by default; an owner/admin may refine the list before
+        # anyone votes.
+        reviewer_ids = [row[0] for row in db.query(ProjectMember.user_id).filter(
+            ProjectMember.project_id == project_id
+        ).all()]
+        required_approvals = max(1, min(2, len(reviewer_ids)))
+        db.add(ReviewRound(review_id=review.id, required_approvals=required_approvals))
+        db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in reviewer_ids])
+        db.commit()
 
         # ── Save to project memory ──────────────────────────────────
         if mem:

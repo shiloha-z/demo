@@ -19,6 +19,13 @@ from app.models.models import User, Project, ProjectMember, ProjectRole, JoinReq
 router = APIRouter(prefix="/api", tags=["Members"])
 
 
+def _broadcast_member_update(project_id: int) -> None:
+    from app.api.ws import broadcast_sync
+    payload = {"project_id": project_id}
+    broadcast_sync("member_update", payload)
+    broadcast_sync("project_update", {"action": "members_changed", **payload})
+
+
 # ── Schemas ───────────────────────────────────────────────────────────
 
 class MemberResponse(BaseModel):
@@ -123,9 +130,8 @@ def add_member(
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(status_code=400, detail="Invalid role")
 
-    # Only owner can promote to owner
     if body.role == "owner":
-        require_role(project_id, user, db, "owner")
+        raise HTTPException(status_code=400, detail="Use ownership transfer to assign the project owner")
 
     target = db.query(User).filter(User.username == body.username).first()
     if not target:
@@ -144,6 +150,8 @@ def add_member(
     db.add(pm)
     db.commit()
     db.refresh(pm)
+
+    _broadcast_member_update(project_id)
 
     return {
         "message": f"Added {target.username} as {body.role}",
@@ -171,9 +179,8 @@ def update_member_role(
     if body.role not in ("owner", "admin", "member"):
         raise HTTPException(status_code=400, detail="Invalid role")
 
-    # Only owner can promote to owner
     if body.role == "owner":
-        require_role(project_id, user, db, "owner")
+        raise HTTPException(status_code=400, detail="Use ownership transfer to assign the project owner")
 
     # Cannot change owner's role (use transfer instead)
     target_pm = get_member(project_id, member_user_id, db)
@@ -187,6 +194,7 @@ def update_member_role(
 
     target_pm.role = ProjectRole(body.role)
     db.commit()
+    _broadcast_member_update(project_id)
 
     return {"message": f"Role updated to {body.role}"}
 
@@ -211,6 +219,7 @@ def remove_member(
     if member_user_id == user.id:
         db.delete(target_pm)
         db.commit()
+        _broadcast_member_update(project_id)
         return {"message": "You have left the project"}
 
     # Removing others: requires owner or admin
@@ -224,6 +233,7 @@ def remove_member(
 
     db.delete(target_pm)
     db.commit()
+    _broadcast_member_update(project_id)
 
     return {"message": "Member removed"}
 
@@ -246,8 +256,12 @@ def transfer_ownership(
     if not target_pm:
         raise HTTPException(status_code=404, detail="Target user is not a member of this project")
 
-    # Swap roles
-    owner_pm.role = ProjectRole.MEMBER
+    # Demote any legacy duplicate owners, then promote the transfer target.
+    db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.role == ProjectRole.OWNER,
+        ProjectMember.user_id != target_user.id,
+    ).update({ProjectMember.role: ProjectRole.MEMBER}, synchronize_session=False)
     target_pm.role = ProjectRole.OWNER
 
     # Update project owner_id shortcut
@@ -257,6 +271,7 @@ def transfer_ownership(
 
     db.commit()
 
+    _broadcast_member_update(project_id)
     return {"message": f"Ownership transferred to {target_user.username}"}
 
 
@@ -401,6 +416,7 @@ def approve_join(
         ))
 
     db.commit()
+    _broadcast_member_update(project_id)
 
     return {"message": f"Request approved — {req.username} is now a member"}
 

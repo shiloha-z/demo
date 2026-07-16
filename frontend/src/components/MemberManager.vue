@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '../stores/auth'
+import { useWebSocketStore } from '../stores/websocket'
 import api, { getErrorMessage } from '../api'
 
 const props = defineProps<{ projectId: number; projectName: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 const auth = useAuthStore()
+const wsStore = useWebSocketStore()
 
 interface Member {
   id: number
@@ -48,7 +50,6 @@ const roleColors: Record<string, string> = {
   member: 'var(--success)',
 }
 
-const myMember = computed(() => members.value.find(m => m.user_id === auth.userId))
 const isOwner = computed(() => myRole.value === 'owner')
 const isOwnerOrAdmin = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
 const canManage = computed(() => isOwnerOrAdmin.value)
@@ -61,9 +62,16 @@ const processedRequests = computed(() =>
   joinRequests.value.filter(r => r.status !== 'pending')
 )
 
+let unsubMember: (() => void) | null = null
+
 onMounted(async () => {
   await loadAll()
+  unsubMember = wsStore.on('member_update', (data: any) => {
+    if (data.project_id === props.projectId) loadAll()
+  })
 })
+
+onUnmounted(() => { unsubMember?.() })
 
 async function loadAll() {
   loading.value = true
@@ -138,6 +146,11 @@ async function changeRole(member: Member, newRole: string) {
     MessagePlugin.success(`已将 ${member.display_name || member.username} 设为 ${roleLabels[newRole]}`)
     await loadMembers()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+}
+
+function startTransfer(member: Member) {
+  transferUsername.value = member.username
+  showTransfer.value = true
 }
 
 async function removeMember(member: Member) {
@@ -325,7 +338,7 @@ function formatDate(iso: string | null) {
             <t-dropdown-menu>
               <t-dropdown-item v-if="m.role !== 'admin'" @click="changeRole(m, 'admin')">设为管理员</t-dropdown-item>
               <t-dropdown-item v-if="m.role !== 'member'" @click="changeRole(m, 'member')">设为一般成员</t-dropdown-item>
-              <t-dropdown-item v-if="isOwner && m.role !== 'owner'" @click="changeRole(m, 'owner')">转让为主管</t-dropdown-item>
+              <t-dropdown-item v-if="isOwner" @click="startTransfer(m)">转让项目给此成员</t-dropdown-item>
               <t-dropdown-item theme="error" @click="removeMember(m)">移出项目</t-dropdown-item>
             </t-dropdown-menu>
           </t-dropdown>

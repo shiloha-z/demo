@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -113,7 +113,11 @@ function deleteProject(p: any, event: Event) {
 }
 
 function goProject(p: any) {
-  store.setCurrentProject(p)
+  if (!store.setCurrentProject(p)) {
+    MessagePlugin.warning('请先加入该项目，才能切换到其工作区')
+    openMembers(p)
+    return
+  }
   router.push('/files')
 }
 </script>

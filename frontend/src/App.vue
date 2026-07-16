@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useWebSocketStore } from './stores/websocket'
 import { useThemeStore } from './stores/theme'
+import { useProjectStore } from './stores/project'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
 
@@ -12,6 +13,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const ws = useWebSocketStore()
 const theme = useThemeStore()
+const projectStore = useProjectStore()
 
 const isLoginPage = computed(() => route.meta.guest === true)
 const chatVisible = ref(false)
@@ -39,11 +41,40 @@ const pageTitles: Record<string, string> = {
 
 const currentPageTitle = computed(() => pageTitles[route.path] || '')
 
+let unsubProject: (() => void) | null = null
+
+async function refreshProjects() {
+  const currentId = projectStore.currentProject?.id
+  try {
+    await Promise.all([projectStore.fetchProjects(), projectStore.fetchSwitchableProjects()])
+    if (currentId) {
+      projectStore.setCurrentProject(projectStore.switchableProjects.find(p => p.id === currentId) || null)
+    }
+  } catch { /* backend may be restarting */ }
+}
+
+function joinCurrentProject() {
+  if (ws.connected && projectStore.currentProject?.id) {
+    ws.send(JSON.stringify({ type: 'join_project', project_id: projectStore.currentProject.id }))
+  }
+}
+
 onMounted(() => {
   if (!isLoginPage.value) ws.connect()
+  unsubProject = ws.on('project_update', refreshProjects)
 })
 
+// App stays mounted across login/logout, so connect after navigation instead
+// of relying solely on the initial mount state.
+watch(isLoginPage, (isLogin) => {
+  if (isLogin) ws.disconnect()
+  else ws.connect()
+})
+
+watch([() => ws.connected, () => projectStore.currentProject?.id], joinCurrentProject, { immediate: true })
+
 onUnmounted(() => {
+  unsubProject?.()
   ws.disconnect()
 })
 
