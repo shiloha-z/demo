@@ -84,6 +84,7 @@ def _get_workspace(project_id: int, user: User, db: Session) -> str:
 @router.get("", response_model=ProjectListResponse)
 def list_projects(
     sort: str = Query(default="created_desc", description="created_desc | created_asc | updated_desc | name_asc | name_desc"),
+    filter: str = Query(default="all", description="all | owner | admin | member | other"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -95,7 +96,42 @@ def list_projects(
         "name_desc": desc(Project.name),
     }
     order = sort_map.get(sort, desc(Project.created_at))
-    projects = db.query(Project).options(joinedload(Project.owner)).order_by(order).all()
+    q = db.query(Project).options(joinedload(Project.owner))
+
+    # Filter by user's relationship to the project
+    if filter == "owner":
+        q = q.filter(Project.owner_id == user.id)
+    elif filter == "admin":
+        admin_project_ids = [
+            row[0] for row in
+            db.query(ProjectMember.project_id).filter(
+                ProjectMember.user_id == user.id,
+                ProjectMember.role == ProjectRole.ADMIN,
+            ).all()
+        ]
+        q = q.filter(Project.id.in_(admin_project_ids)) if admin_project_ids else q.filter(Project.id == -1)
+    elif filter == "member":
+        member_project_ids = [
+            row[0] for row in
+            db.query(ProjectMember.project_id).filter(
+                ProjectMember.user_id == user.id,
+                ProjectMember.role == ProjectRole.MEMBER,
+            ).all()
+        ]
+        q = q.filter(Project.id.in_(member_project_ids)) if member_project_ids else q.filter(Project.id == -1)
+    elif filter == "other":
+        # Projects where user is NOT the owner and NOT a member
+        all_my_project_ids = [
+            row[0] for row in
+            db.query(ProjectMember.project_id).filter(
+                ProjectMember.user_id == user.id,
+            ).all()
+        ]
+        q = q.filter(Project.owner_id != user.id)
+        if all_my_project_ids:
+            q = q.filter(Project.id.notin_(all_my_project_ids))
+
+    projects = q.order_by(order).all()
     return ProjectListResponse(projects=[ProjectResponse.model_validate(p) for p in projects])
 
 

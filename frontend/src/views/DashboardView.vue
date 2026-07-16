@@ -30,6 +30,15 @@ onMounted(async () => {
 })
 
 watch(() => store.sortBy, () => { store.fetchProjects(); loadStats() })
+watch(() => store.filterBy, () => { store.fetchProjects(); loadStats() })
+
+const filterTabs = [
+  { key: 'all', label: '全部项目' },
+  { key: 'owner', label: '我主管的' },
+  { key: 'admin', label: '我管理的' },
+  { key: 'member', label: '我参与的' },
+  { key: 'other', label: '其他项目' },
+]
 
 async function loadStats() {
   try {
@@ -174,6 +183,17 @@ function goProject(p: any) {
       </div>
     </div>
 
+    <!-- Filter tabs -->
+    <div class="filter-tabs">
+      <button
+        v-for="tab in filterTabs"
+        :key="tab.key"
+        class="filter-tab"
+        :class="{ active: store.filterBy === tab.key }"
+        @click="store.filterBy = tab.key"
+      >{{ tab.label }}</button>
+    </div>
+
     <!-- Project Grid -->
     <div v-if="store.projects.length > 0" class="project-grid">
       <article
@@ -209,9 +229,16 @@ function goProject(p: any) {
       <div class="empty-icon">
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       </div>
-      <h3>还没有项目</h3>
-      <p>创建你的第一个项目，开始使用 Agent 协作审查</p>
-      <t-button theme="primary" variant="outline" @click="dialogVisible = true">创建第一个项目</t-button>
+      <template v-if="store.filterBy !== 'all'">
+        <h3>没有匹配的项目</h3>
+        <p>当前筛选条件下没有找到项目</p>
+        <t-button theme="primary" variant="outline" @click="store.filterBy = 'all'">查看全部项目</t-button>
+      </template>
+      <template v-else>
+        <h3>还没有项目</h3>
+        <p>创建你的第一个项目，开始使用 Agent 协作审查</p>
+        <t-button theme="primary" variant="outline" @click="dialogVisible = true">创建第一个项目</t-button>
+      </template>
     </div>
 
     <!-- Dialog -->
@@ -272,6 +299,37 @@ function goProject(p: any) {
 
 .stat-value { font-size: 24px; font-weight: 700; color: var(--foreground); letter-spacing: -0.5px; line-height: 1.2; }
 .stat-label { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
+
+/* ── Filter tabs ────────────────────────────────────────────────── */
+.filter-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 18px;
+}
+
+.filter-tab {
+  padding: 6px 16px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted-foreground);
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filter-tab:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+
+.filter-tab.active {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  border-color: var(--primary);
+}
 
 /* ── Project grid ───────────────────────────────────────────────── */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }

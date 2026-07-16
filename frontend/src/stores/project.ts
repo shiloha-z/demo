@@ -17,10 +17,12 @@ export const useProjectStore = defineStore('project', () => {
   const currentProject = ref<Project | null>(null)
   const projects = ref<Project[]>([])
   const sortBy = ref<string>('created_desc')
+  const filterBy = ref<string>('all')
 
-  async function fetchProjects(sort?: string) {
+  async function fetchProjects(sort?: string, filter?: string) {
     const s = sort || sortBy.value
-    const { data } = await api.get<{ projects: Project[] }>('/projects', { params: { sort: s } })
+    const f = filter ?? filterBy.value
+    const { data } = await api.get<{ projects: Project[] }>('/projects', { params: { sort: s, filter: f } })
     projects.value = data.projects
   }
 
@@ -34,5 +36,5 @@ export const useProjectStore = defineStore('project', () => {
     currentProject.value = project
   }
 
-  return { currentProject, projects, sortBy, fetchProjects, createProject, setCurrentProject }
+  return { currentProject, projects, sortBy, filterBy, fetchProjects, createProject, setCurrentProject }
 })
