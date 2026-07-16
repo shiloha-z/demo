@@ -7,7 +7,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Agent, AgentStatus, Task, TaskStatus, Review, ReviewStatus
+from app.models.models import User, Agent, AgentStatus, Task, TaskStatus, Review, ReviewStatus, ReviewVote, ReviewReviewer, ReviewRound, Version
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
@@ -165,13 +165,24 @@ def delete_agent(
     if agent.creator_id != user.id:
         raise HTTPException(status_code=403, detail="只有 Agent 创建者才能删除")
 
-    # Clean up associated records: reviews first (FK to tasks), then tasks
+    # Clean up associated records: review dependents → reviews → tasks
     task_ids = [
         row[0] for row in
         db.query(Task.id).filter(Task.agent_id == agent_id).all()
     ]
     if task_ids:
-        db.query(Review).filter(Review.task_id.in_(task_ids)).delete(synchronize_session=False)
+        review_ids = [
+            row[0] for row in
+            db.query(Review.id).filter(Review.task_id.in_(task_ids)).all()
+        ]
+        if review_ids:
+            db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
+            db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
+            db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
+            db.query(Version).filter(Version.review_id.in_(review_ids)).update(
+                {Version.review_id: None}, synchronize_session=False
+            )
+            db.query(Review).filter(Review.id.in_(review_ids)).delete(synchronize_session=False)
         db.query(Task).filter(Task.agent_id == agent_id).delete(synchronize_session=False)
 
     db.delete(agent)

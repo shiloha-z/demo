@@ -9,7 +9,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage
+from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, ReviewVote, ReviewReviewer, ReviewRound
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -421,12 +421,22 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     ]
 
     # Delete associated records (cascade all related data)
+    # Order: review dependents → reviews → versions → tasks → misc → project
+    review_ids = [
+        row[0] for row in
+        db.query(Review.id).filter(Review.project_id == project_id).all()
+    ]
+    if review_ids:
+        db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
     db.query(Review).filter(Review.project_id == project_id).delete()
     db.query(Version).filter(Version.project_id == project_id).delete()
     db.query(Task).filter(Task.project_id == project_id).delete()
     db.query(JoinRequest).filter(JoinRequest.project_id == project_id).delete()
     db.query(ProjectMember).filter(ProjectMember.project_id == project_id).delete()
     db.query(ChatMessage).filter(ChatMessage.project_id == project_id).delete()
+    db.query(Message).filter(Message.project_id == project_id).delete()
 
     # Reset agents that were working on this project's tasks back to IDLE
     if stuck_agent_ids:

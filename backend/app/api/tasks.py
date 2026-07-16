@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review
+from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
@@ -415,14 +415,28 @@ def delete_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Permanently delete a task. Only archived tasks can be deleted."""
-    require_project_member(project_id, user, db)
+    _check_task_access(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if not task.archived:
         raise HTTPException(status_code=400, detail="请先归档任务再删除")
+
+    # Clean up review dependents first
+    review_ids = [
+        row[0] for row in
+        db.query(Review.id).filter(Review.task_id == task_id).all()
+    ]
+    if review_ids:
+        db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(Version).filter(Version.review_id.in_(review_ids)).update(
+            {Version.review_id: None}, synchronize_session=False
+        )
+        db.query(Review).filter(Review.id.in_(review_ids)).delete(synchronize_session=False)
+
     db.delete(task)
     db.commit()
     return {"message": "已删除"}
@@ -435,9 +449,8 @@ def batch_delete_tasks(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Batch delete archived tasks."""
-    require_project_member(project_id, user, db)
+    _check_task_access(project_id, user, db)
     tasks = db.query(Task).filter(
         Task.id.in_(req.task_ids),
         Task.project_id == project_id,
@@ -445,6 +458,21 @@ def batch_delete_tasks(
     ).all()
     if not tasks:
         raise HTTPException(status_code=404, detail="No matching archived tasks found")
+
+    task_ids = [t.id for t in tasks]
+    review_ids = [
+        row[0] for row in
+        db.query(Review.id).filter(Review.task_id.in_(task_ids)).all()
+    ]
+    if review_ids:
+        db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
+        db.query(Version).filter(Version.review_id.in_(review_ids)).update(
+            {Version.review_id: None}, synchronize_session=False
+        )
+        db.query(Review).filter(Review.id.in_(review_ids)).delete(synchronize_session=False)
+
     deleted_count = 0
     for t in tasks:
         db.delete(t)

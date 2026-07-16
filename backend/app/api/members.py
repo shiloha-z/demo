@@ -14,7 +14,7 @@ from typing import Optional
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from datetime import datetime, timezone
-from app.models.models import User, Project, ProjectMember, ProjectRole, JoinRequest, JoinStatus
+from app.models.models import User, Project, ProjectMember, ProjectRole, JoinRequest, JoinStatus, Review, ReviewVote, ReviewReviewer
 
 router = APIRouter(prefix="/api", tags=["Members"])
 # Kept only so old function bodies remain available for migration reference.
@@ -229,8 +229,25 @@ def remove_member(
     if target_pm.role == ProjectRole.OWNER:
         raise HTTPException(status_code=400, detail="Cannot remove project owner")
 
+    # Clean up stale reviewer/voter assignments for this member in this project
+    def _cleanup_member_review_data(uid: int, pid: int):
+        review_ids = [
+            row[0] for row in
+            db.query(Review.id).filter(Review.project_id == pid).all()
+        ]
+        if review_ids:
+            db.query(ReviewVote).filter(
+                ReviewVote.review_id.in_(review_ids),
+                ReviewVote.user_id == uid,
+            ).delete(synchronize_session=False)
+            db.query(ReviewReviewer).filter(
+                ReviewReviewer.review_id.in_(review_ids),
+                ReviewReviewer.user_id == uid,
+            ).delete(synchronize_session=False)
+
     # Self-leave: any member can leave
     if member_user_id == user.id:
+        _cleanup_member_review_data(member_user_id, project_id)
         db.delete(target_pm)
         db.commit()
         _broadcast_member_update(project_id)
@@ -245,6 +262,7 @@ def remove_member(
         if target_pm.role in (ProjectRole.OWNER, ProjectRole.ADMIN):
             raise HTTPException(status_code=403, detail="Admins cannot remove other admins or owners")
 
+    _cleanup_member_review_data(member_user_id, project_id)
     db.delete(target_pm)
     db.commit()
     _broadcast_member_update(project_id)
