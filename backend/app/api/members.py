@@ -262,15 +262,34 @@ def transfer_ownership(
     """Transfer project ownership to another member. Only the current owner can do this."""
     owner_pm = require_role(project_id, user, db, "owner")
 
+    # Prevent accidentally transferring to self
     target_user = db.query(User).filter(User.username == body.new_owner_username).first()
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
+    if target_user.id == user.id:
+        raise HTTPException(status_code=400, detail="Cannot transfer ownership to yourself")
 
     target_pm = get_member(project_id, target_user.id, db)
     if not target_pm:
         raise HTTPException(status_code=404, detail="Target user is not a member of this project")
 
-    # Demote any legacy duplicate owners, then promote the transfer target.
+    # Ensure there is exactly one owner before transfer (safety check)
+    owner_count = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.role == ProjectRole.OWNER,
+    ).count()
+    if owner_count > 1:
+        # Clean up duplicate owners — keep only the current user as owner
+        db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.role == ProjectRole.OWNER,
+            ProjectMember.user_id != user.id,
+        ).update({ProjectMember.role: ProjectRole.MEMBER}, synchronize_session=False)
+
+    # Demote current owner, promote target
+    owner_pm.role = ProjectRole.MEMBER
+
+    # Demote any other legacy duplicate owners
     db.query(ProjectMember).filter(
         ProjectMember.project_id == project_id,
         ProjectMember.role == ProjectRole.OWNER,
@@ -280,12 +299,29 @@ def transfer_ownership(
 
     # Update project owner_id shortcut
     project = db.query(Project).get(project_id)
+    old_owner_name = ""
     if project:
+        old_owner_name = project.owner_name
         project.owner_id = target_user.id
 
     db.commit()
 
     _broadcast_member_update(project_id)
+
+    # Push system message about ownership change
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="项目主管已变更",
+            body=f"项目主管已由 {old_owner_name} 变更为 {target_user.username}",
+            category=MessageCategory.MEMBER,
+            level=MessageLevel.WARNING,
+            project_id=project_id,
+        )
+    except Exception:
+        pass
+
     return {"message": f"Ownership transferred to {target_user.username}"}
 
 
