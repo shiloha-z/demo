@@ -33,6 +33,8 @@ class ConnectionManager:
     def __init__(self):
         # user_id -> {"ws": WebSocket, "username": str, "display_name": str}
         self._clients: dict[int, dict] = {}
+        # user_id -> project_id (which project the user is currently viewing)
+        self._user_project: dict[int, int] = {}
         self._main_loop: asyncio.AbstractEventLoop | None = None
 
     def set_main_loop(self, loop: asyncio.AbstractEventLoop) -> None:
@@ -59,6 +61,46 @@ class ConnectionManager:
 
     def is_user_online(self, user_id: int) -> bool:
         return user_id in self._clients
+
+    def set_user_project(self, user_id: int, project_id: int) -> None:
+        """Record which project a user is currently viewing."""
+        self._user_project[user_id] = project_id
+
+    def get_user_project(self, user_id: int) -> int | None:
+        """Get the project a user is currently viewing."""
+        return self._user_project.get(user_id)
+
+    def get_online_users_in_project(self, project_id: int) -> list[dict]:
+        """Return list of online users currently viewing the given project."""
+        return [
+            {"user_id": uid, "username": info["username"], "display_name": info["display_name"]}
+            for uid, info in self._clients.items()
+            if self._user_project.get(uid) == project_id
+        ]
+
+    async def _broadcast_to_project_async(self, project_id: int, event_type: str, data: dict) -> None:
+        """Send a typed event to all clients currently viewing the given project."""
+        message = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
+        dead: list[int] = []
+        for uid, info in self._clients.items():
+            if self._user_project.get(uid) != project_id:
+                continue
+            try:
+                await info["ws"].send_text(message)
+            except Exception:
+                dead.append(uid)
+        for uid in dead:
+            self.disconnect(uid)
+
+    def broadcast_to_project(self, project_id: int, event_type: str, data: dict) -> Future | None:
+        """Thread-safe project-scoped broadcast."""
+        if self._main_loop is None or self._main_loop.is_closed():
+            logger.warning("WS broadcast skipped — no main loop")
+            return None
+        return asyncio.run_coroutine_threadsafe(
+            self._broadcast_to_project_async(project_id, event_type, data),
+            self._main_loop,
+        )
 
     @property
     def client_count(self) -> int:
@@ -120,6 +162,22 @@ def broadcast_sync(event_type: str, data: dict) -> None:
         logger.exception(f"WS broadcast failed: {event_type}")
 
 
+def broadcast_sync_to_project(project_id: int, event_type: str, data: dict) -> None:
+    """Thread-safe project-scoped broadcast. Works from both main thread and background threads."""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(manager._broadcast_to_project_async(project_id, event_type, data))
+    except RuntimeError:
+        fut = manager.broadcast_to_project(project_id, event_type, data)
+        if fut:
+            try:
+                fut.result(timeout=10)
+            except Exception:
+                pass
+    except Exception:
+        logger.exception(f"WS project broadcast failed: {event_type}")
+
+
 # ── Helpers ────────────────────────────────────────────────────────────
 
 def _decode_token(token: str) -> dict | None:
@@ -167,15 +225,11 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
 
     await manager.connect(ws, user_id, username, display_name)
 
-    # Broadcast join notification
+    # Send connected confirmation to the user (no global broadcast until they join a project)
     await ws.send_text(json.dumps({
         "type": "connected",
         "data": {"user_id": user_id, "online_users": manager.get_online_users()}
     }))
-    broadcast_sync("user_online", {
-        "user_id": user_id, "username": username, "display_name": display_name,
-        "online_users": manager.get_online_users(),
-    })
     try:
         while True:
             data = await ws.receive_text()
@@ -185,13 +239,28 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
                 # Handle incoming client messages
                 try:
                     msg = json.loads(data)
-                    if msg.get("type") == "typing":
-                        broadcast_sync("user_typing", {
-                            "user_id": user_id,
-                            "username": username,
-                            "display_name": display_name,
-                            "typing": msg.get("typing", True),
-                        })
+                    msg_type = msg.get("type")
+
+                    if msg_type == "join_project":
+                        project_id = msg.get("project_id")
+                        if project_id is not None:
+                            manager.set_user_project(user_id, int(project_id))
+                            broadcast_sync_to_project(int(project_id), "user_online", {
+                                "user_id": user_id, "username": username, "display_name": display_name,
+                                "online_users": manager.get_online_users_in_project(int(project_id)),
+                            })
+
+                    elif msg_type == "typing":
+                        project_id = manager.get_user_project(user_id)
+                        if project_id is not None:
+                            broadcast_sync_to_project(project_id, "user_typing", {
+                                "user_id": user_id,
+                                "username": username,
+                                "display_name": display_name,
+                                "project_id": project_id,
+                                "typing": msg.get("typing", True),
+                            })
+
                 except (json.JSONDecodeError, KeyError):
                     pass
     except WebSocketDisconnect:
@@ -199,8 +268,11 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
     except Exception:
         logger.exception("WebSocket error")
     finally:
+        # Broadcast offline to the project the user was in
+        user_project = manager.get_user_project(user_id)
         manager.disconnect(user_id)
-        broadcast_sync("user_offline", {
-            "user_id": user_id, "username": username, "display_name": display_name,
-            "online_users": manager.get_online_users(),
-        })
+        if user_project is not None:
+            broadcast_sync_to_project(user_project, "user_offline", {
+                "user_id": user_id, "username": username, "display_name": display_name,
+                "online_users": manager.get_online_users_in_project(user_project),
+            })

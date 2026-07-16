@@ -169,6 +169,7 @@ class ChatMessage(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     username = Column(String(50), nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
     message = Column(Text, nullable=False, default="")
     file_url = Column(String(500), default="")
     file_name = Column(String(200), default="")

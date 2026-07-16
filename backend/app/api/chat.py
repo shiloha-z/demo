@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.models.models import User, ChatMessage
-from app.api.ws import broadcast_sync
+from app.api.ws import broadcast_sync, broadcast_sync_to_project
 
 router = APIRouter(prefix="/api", tags=["Chat"])
 
@@ -35,6 +35,7 @@ class ChatMessageResponse(BaseModel):
     user_id: int
     username: str
     message: str
+    project_id: int | None = None
     created_at: datetime | None = None
     system: bool = False
     file_url: str = ""
@@ -52,6 +53,7 @@ class ChatMessageResponse(BaseModel):
             user_id=msg.user_id,
             username=msg.username,
             message=msg.message or "",
+            project_id=msg.project_id,
             created_at=msg.created_at,
             system=msg.user_id == 0,
             file_url=msg.file_url or "",
@@ -65,13 +67,16 @@ class ChatMessageResponse(BaseModel):
 
 @router.get("/chat/messages", response_model=list[ChatMessageResponse])
 def get_messages(
+    project_id: int,
     limit: int = 50,
     before_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get recent chat messages. Pass `before_id` to load older messages."""
-    q = db.query(ChatMessage).order_by(ChatMessage.id.desc())
+    """Get recent chat messages for a project. Pass `before_id` to load older messages."""
+    q = db.query(ChatMessage).filter(
+        ChatMessage.project_id == project_id
+    ).order_by(ChatMessage.id.desc())
     if before_id is not None:
         q = q.filter(ChatMessage.id < before_id)
     messages = q.limit(limit).all()
@@ -120,13 +125,14 @@ def upload_chat_file(
 def send_message(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    project_id: int = Form(...),
     message: str = Form(""),
     file_url: str = Form(""),
     file_name: str = Form(""),
     file_type: str = Form(""),
     file_size: int = Form(0),
 ):
-    """Send a chat message (optionally with file attachment) and broadcast."""
+    """Send a chat message (optionally with file attachment) to a project and broadcast."""
     message_text = message.strip()
     file_url_str = file_url.strip()
     file_name_str = file_name.strip()
@@ -140,6 +146,7 @@ def send_message(
     msg = ChatMessage(
         user_id=user.id,
         username=user.username,
+        project_id=project_id,
         message=message_text,
         file_url=file_url_str,
         file_name=file_name_str,
@@ -151,14 +158,19 @@ def send_message(
     db.refresh(msg)
 
     resp = ChatMessageResponse.from_orm_obj(msg)
-    broadcast_sync("chat_message", resp.model_dump(mode="json"))
+    broadcast_sync_to_project(project_id, "chat_message", resp.model_dump(mode="json"))
     return resp
 
 
 @router.get("/chat/online")
-def get_online_users(user: User = Depends(get_current_user)):
-    """Get list of currently online users."""
+def get_online_users(
+    project_id: int | None = None,
+    user: User = Depends(get_current_user),
+):
+    """Get list of currently online users. Optionally filter by project."""
     from app.api.ws import manager
+    if project_id is not None:
+        return {"online_users": manager.get_online_users_in_project(project_id)}
     return {"online_users": manager.get_online_users()}
 
 

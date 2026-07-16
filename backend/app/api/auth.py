@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.auth import hash_password, verify_password, create_access_token
+from app.core.auth import hash_password, verify_password, create_access_token, get_current_user
 from app.models.models import User
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
@@ -57,3 +57,20 @@ def login(req: LoginRequest, db: Session = Depends(get_db)):
 
     token = create_access_token(user.id, user.username, user.display_name)
     return AuthResponse(token=token, username=user.username, display_name=user.display_name, user_id=user.id)
+
+
+class UpdateProfileRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=100)
+
+
+@router.put("/profile")
+def update_profile(
+    req: UpdateProfileRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Update current user's display name."""
+    user.display_name = req.display_name
+    db.commit()
+    db.refresh(user)
+    return {"display_name": user.display_name, "username": user.username}

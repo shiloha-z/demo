@@ -16,6 +16,16 @@ const theme = useThemeStore()
 const isLoginPage = computed(() => route.meta.guest === true)
 const chatVisible = ref(false)
 const chatUnread = ref(0)
+const sidebarCollapsed = ref(false)
+const showUserMenu = ref(false)
+
+function toggleUserMenu() {
+  showUserMenu.value = !showUserMenu.value
+}
+
+function closeUserMenu() {
+  showUserMenu.value = false
+}
 
 const pageTitles: Record<string, string> = {
   '/dashboard': '项目看板',
@@ -50,7 +60,7 @@ function handleLogout() {
 
   <!-- Main app: sidebar + top bar + content -->
   <div v-else class="app-root">
-    <aside class="app-sidebar">
+    <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
       <div class="sidebar-header">
         <div class="sidebar-logo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
@@ -65,19 +75,50 @@ function handleLogout() {
           </svg>
         </div>
         <span class="sidebar-title">AgentCollab</span>
+        <button
+          class="sidebar-collapse-btn"
+          :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
+          @click="sidebarCollapsed = !sidebarCollapsed"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
+        </button>
       </div>
-      <ProjectSidebar />
+
+      <!-- Content wrapper — fades smoothly during collapse -->
+      <div class="sidebar-body">
+        <ProjectSidebar :collapsed="sidebarCollapsed" />
+      </div>
+
+      <!-- Footer — always clickable, user info fades on collapse -->
       <div class="sidebar-footer">
-        <div class="sidebar-user">
+        <div class="sidebar-user" @click="toggleUserMenu">
           <span class="user-avatar">{{ auth.displayName?.charAt(0) || '?' }}</span>
           <div class="user-info">
             <div class="user-name">{{ auth.displayName }}</div>
             <div class="user-role">开发者</div>
           </div>
+          <svg class="user-menu-arrow" :class="{ open: showUserMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
-        <button class="logout-btn" title="退出登录" @click="handleLogout">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-        </button>
+
+        <!-- Dropdown menu -->
+        <Teleport to="body">
+          <div v-if="showUserMenu" class="user-menu-backdrop" @click="closeUserMenu" />
+        </Teleport>
+        <div v-if="showUserMenu" class="user-dropdown">
+          <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/profile')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            <span>个人资料设置</span>
+          </button>
+          <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/settings')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span>系统设置</span>
+          </button>
+          <div class="user-dropdown-divider"></div>
+          <button class="user-dropdown-item danger" @click="handleLogout">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            <span>退出登录</span>
+          </button>
+        </div>
       </div>
     </aside>
 
@@ -135,14 +176,23 @@ function handleLogout() {
   background: var(--app-shell);
   border-right: 1px solid var(--surface-border);
   user-select: none;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
 }
 
+.app-sidebar.collapsed {
+  width: 56px;
+}
+
+/* ── Sidebar header ────────────────────────────────────────────── */
 .sidebar-header {
   display: flex;
   align-items: center;
   gap: 10px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--surface-border);
+  flex-shrink: 0;
+  min-height: 57px;
 }
 
 .sidebar-logo {
@@ -152,6 +202,7 @@ function handleLogout() {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
+  transition: opacity 0.2s ease;
 }
 
 .sidebar-title {
@@ -159,16 +210,68 @@ function handleLogout() {
   font-weight: 700;
   color: var(--foreground);
   letter-spacing: -0.3px;
+  white-space: nowrap;
+  transition: opacity 0.2s ease;
+}
+
+.app-sidebar.collapsed .sidebar-header {
+  padding: 12px 0;
+  justify-content: center;
+  gap: 0;
+}
+
+.app-sidebar.collapsed .sidebar-logo,
+.app-sidebar.collapsed .sidebar-title {
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+.sidebar-collapse-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
+  opacity: 0;
+}
+
+.app-sidebar:not(.collapsed) .sidebar-collapse-btn {
+  margin-left: auto;
+}
+
+.app-sidebar:hover .sidebar-collapse-btn,
+.app-sidebar.collapsed .sidebar-collapse-btn {
+  opacity: 1;
+}
+
+.sidebar-collapse-btn:hover {
+  background: var(--surface-hover);
+  color: var(--foreground);
+}
+
+/* ── Sidebar body ──────────────────────────────────────────────── */
+.sidebar-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
 }
 
 .sidebar-footer {
   margin-top: auto;
   border-top: 1px solid var(--surface-border);
-  padding: 12px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  position: relative;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .sidebar-user {
@@ -176,7 +279,19 @@ function handleLogout() {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex: 1;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background var(--transition-fast), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), gap 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-user:hover {
+  background: var(--surface-hover);
+}
+
+.app-sidebar.collapsed .sidebar-user {
+  justify-content: center;
+  padding: 12px 0;
+  gap: 0;
 }
 
 .user-avatar {
@@ -195,6 +310,16 @@ function handleLogout() {
 
 .user-info {
   min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.2s ease, flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.app-sidebar.collapsed .user-info {
+  opacity: 0;
+  pointer-events: none;
+  flex: 0;
 }
 
 .user-name {
@@ -213,24 +338,75 @@ function handleLogout() {
   line-height: 1.3;
 }
 
-.logout-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-md);
-  border: none;
-  background: transparent;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.user-menu-arrow {
   flex-shrink: 0;
-  transition: all var(--transition-fast);
+  color: var(--muted-foreground);
+  transition: transform var(--transition-fast), opacity 0.2s ease;
 }
 
-.logout-btn:hover {
-  background: var(--danger-light);
+.user-menu-arrow.open {
+  transform: rotate(180deg);
+}
+
+.app-sidebar.collapsed .user-menu-arrow {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── User dropdown ─────────────────────────────────────────────── */
+.user-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+}
+
+.user-dropdown {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 10px;
+  right: 10px;
+  background: var(--surface);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  z-index: 100;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: none;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+
+.user-dropdown-item:hover {
+  background: var(--surface-hover);
+}
+
+.user-dropdown-item.danger {
   color: var(--danger);
+}
+
+.user-dropdown-item.danger:hover {
+  background: var(--danger-light);
+}
+
+.user-dropdown-divider {
+  height: 1px;
+  background: var(--surface-border);
+  margin: 4px 0;
 }
 
 /* ── App body ───────────────────────────────────────────────────── */

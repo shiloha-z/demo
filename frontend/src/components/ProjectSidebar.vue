@@ -5,6 +5,8 @@ import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import api from '../api'
 
+const props = defineProps<{ collapsed: boolean }>()
+
 const route = useRoute()
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
@@ -70,12 +72,6 @@ const sections = [
       { path: '/versions', icon: 'clock', label: '版本历史' },
     ],
   },
-  {
-    label: '系统',
-    items: [
-      { path: '/settings', icon: 'settings', label: '系统设置' },
-    ],
-  },
 ]
 
 const activePath = computed(() => route.path)
@@ -94,7 +90,7 @@ const icons: Record<string, string> = {
 
 <template>
   <!-- Global project selector -->
-  <div class="project-picker">
+  <div class="project-picker" :class="{ 'fade-out': collapsed }">
     <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     <select v-model="selectedProjectId" class="project-select">
       <option :value="null" disabled>选择项目…</option>
@@ -102,32 +98,53 @@ const icons: Record<string, string> = {
     </select>
   </div>
 
-  <nav class="sidebar-nav">
+  <nav class="sidebar-nav" :class="{ collapsed: collapsed }">
     <div v-for="section in sections" :key="section.label" class="nav-section">
-      <div class="nav-section-label">{{ section.label }}</div>
+      <div class="nav-section-label" :class="{ 'fade-out': collapsed }">{{ section.label }}</div>
       <router-link
         v-for="item in section.items"
         :key="item.path"
         :to="item.path"
         class="nav-item"
         :class="{ active: activePath === item.path }"
+        :title="collapsed ? item.label : ''"
       >
-        <span class="nav-icon" v-html="icons[item.icon]"></span>
-        <span class="nav-label">{{ item.label }}</span>
-        <span v-if="item.badge && pendingCount > 0" class="nav-badge">{{ pendingCount }}</span>
+        <span class="nav-icon-wrap">
+          <span class="nav-icon" v-html="icons[item.icon]"></span>
+          <span v-if="item.badge && pendingCount > 0 && collapsed" class="nav-badge-dot"></span>
+        </span>
+        <span class="nav-label" :class="{ 'fade-out': collapsed }">{{ item.label }}</span>
+        <span v-if="item.badge && pendingCount > 0" class="nav-badge" :class="{ 'fade-out': collapsed }">{{ pendingCount }}</span>
       </router-link>
     </div>
   </nav>
 </template>
 
 <style scoped>
+/* ── Fade-out utility ──────────────────────────────────────────── */
+.fade-out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
 /* ── Global project picker ─────────────────────────────────────── */
 .project-picker {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px; margin: 4px 10px 0;
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
-  transition: border-color var(--transition-fast);
+  overflow: hidden;
+  transition: border-color var(--transition-fast), opacity 0.2s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.project-picker.fade-out {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-top: 0;
+  margin-bottom: 0;
+  border-width: 0;
 }
 .project-picker:hover { border-color: var(--ring); }
 .picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
@@ -155,6 +172,15 @@ const icons: Record<string, string> = {
   text-transform: uppercase;
   letter-spacing: 0.8px;
   padding: 6px 10px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.2s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-nav.collapsed .nav-section-label {
+  max-height: 0;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .nav-item {
@@ -167,7 +193,10 @@ const icons: Record<string, string> = {
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition: padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              gap 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              background var(--transition-fast),
+              color var(--transition-fast);
   cursor: pointer;
   position: relative;
 }
@@ -183,6 +212,14 @@ const icons: Record<string, string> = {
   font-weight: 600;
 }
 
+.nav-icon-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
 .nav-icon {
   width: 18px;
   height: 18px;
@@ -191,6 +228,7 @@ const icons: Record<string, string> = {
   justify-content: center;
   flex-shrink: 0;
   opacity: 0.7;
+  transition: opacity 0.2s ease;
 }
 
 .nav-item.active .nav-icon {
@@ -199,6 +237,14 @@ const icons: Record<string, string> = {
 
 .nav-label {
   line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  max-width: 200px;
+  transition: opacity 0.2s ease, max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar-nav.collapsed .nav-label {
+  max-width: 0;
 }
 
 /* ── Badge ─────────────────────────────────────────────────────── */
@@ -210,5 +256,48 @@ const icons: Record<string, string> = {
   color: #fff;
   font-size: 10px; font-weight: 700; line-height: 1;
   border-radius: 9px; padding: 0 5px;
+  transition: opacity 0.2s ease, max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.sidebar-nav.collapsed .nav-badge {
+  max-width: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Collapsed badge dot ────────────────────────────────────────── */
+.nav-badge-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--danger);
+  border: 2px solid var(--app-shell);
+}
+
+/* ── Collapsed nav ──────────────────────────────────────────────── */
+.sidebar-nav.collapsed {
+  padding: 8px 6px;
+}
+
+.sidebar-nav.collapsed .nav-section {
+  margin-bottom: 8px;
+}
+
+.sidebar-nav.collapsed .nav-item {
+  justify-content: center;
+  padding: 10px 0;
+  gap: 0;
+}
+
+.sidebar-nav.collapsed .nav-icon {
+  opacity: 0.65;
+}
+
+.sidebar-nav.collapsed .nav-item.active .nav-icon {
+  opacity: 1;
 }
 </style>

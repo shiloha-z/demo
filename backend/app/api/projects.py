@@ -9,7 +9,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, Review, Version, Agent, AgentStatus
+from app.models.models import User, Project, Task, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -54,10 +54,26 @@ def _sanitize_dirname(name: str) -> str:
     return safe or 'project'
 
 
-def _get_workspace(project_id: int, user: User, db: Session) -> str:
+def _require_membership(project_id: int, user: User, db: Session) -> Project:
+    """Get project and verify the user is a project member. Raises 404/403 otherwise."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    # Owner is always allowed
+    if project.owner_id == user.id:
+        return project
+    # Check ProjectMember table
+    member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == user.id,
+    ).first()
+    if not member:
+        raise HTTPException(status_code=403, detail="只有项目成员才能进行此操作")
+    return project
+
+
+def _get_workspace(project_id: int, user: User, db: Session) -> str:
+    project = _require_membership(project_id, user, db)
     if not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
     return project.workspace_path
@@ -91,7 +107,6 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
     db.refresh(project)
 
     # Auto-add creator as project owner
-    from app.models.models import ProjectMember, ProjectRole
     db.add(ProjectMember(project_id=project.id, user_id=user.id, role=ProjectRole.OWNER))
     db.commit()
 
@@ -273,20 +288,25 @@ async def upload_files(
 
 @router.get("/{project_id}", response_model=ProjectResponse)
 def get_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    project = db.query(Project).options(joinedload(Project.owner)).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    project = _require_membership(project_id, user, db)
+    # Eager load owner for serialization
+    db.refresh(project, attribute_names=["owner"])
     return ProjectResponse.model_validate(project)
 
 
 @router.delete("/{project_id}")
 def delete_project(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Delete a project. Only the owner can delete it."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    """Delete a project. Only the owner or admin can delete it."""
+    project = _require_membership(project_id, user, db)
+
+    # Check delete permission: owner or admin
     if project.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="只有项目创建者才能删除项目")
+        membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user.id,
+        ).first()
+        if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
+            raise HTTPException(status_code=403, detail="只有项目主管或管理员才能删除项目")
 
     # Find agents that are currently working on tasks in this project
     stuck_agent_ids = [
@@ -310,7 +330,13 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
 
     # Remove workspace directory
     if project.workspace_path and os.path.isdir(project.workspace_path):
-        shutil.rmtree(project.workspace_path, ignore_errors=True)
+        def _on_rm_error(func, path, exc_info):
+            """Handle read-only files on Windows — clear flag and retry."""
+            import stat
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
+
+        shutil.rmtree(project.workspace_path, onerror=_on_rm_error)
 
     db.delete(project)
     db.commit()

@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useWebSocketStore } from '../stores/websocket'
 import { useAuthStore } from '../stores/auth'
+import { useProjectStore } from '../stores/project'
 import api from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -13,12 +14,14 @@ const emit = defineEmits<{
 
 const ws = useWebSocketStore()
 const auth = useAuthStore()
+const projectStore = useProjectStore()
 
 interface ChatMsg {
   id: number
   user_id: number
   username: string
   message: string
+  project_id?: number
   created_at: string
   system?: boolean
   file_url?: string
@@ -88,9 +91,10 @@ const typingText = computed(() => {
 
 // ── Lifecycle ──────────────────────────────────────────────────
 onMounted(async () => {
-  await loadMessages()
-  await loadOnlineUsers()
   setupWS()
+  if (projectStore.currentProject) {
+    joinProjectRoom(projectStore.currentProject.id)
+  }
   document.addEventListener('paste', onGlobalPaste)
 })
 
@@ -102,8 +106,32 @@ onUnmounted(() => {
   document.removeEventListener('paste', onGlobalPaste)
 })
 
+// Watch for project changes — switch chat room when user selects a different project
+watch(() => projectStore.currentProject?.id, (newId, oldId) => {
+  if (newId && newId !== oldId) {
+    joinProjectRoom(newId)
+  } else if (!newId) {
+    // No project selected — clear chat
+    messages.value = []
+    onlineUsers.value = []
+  }
+})
+
+async function joinProjectRoom(projectId: number) {
+  // Tell the server which project we're viewing
+  try {
+    ws.send(JSON.stringify({ type: 'join_project', project_id: projectId }))
+  } catch { /* ignore */ }
+  messages.value = []
+  await loadMessages()
+  await loadOnlineUsers()
+}
+
 function setupWS() {
   unsubChat = ws.on('chat_message', (data: ChatMsg & { system?: boolean }) => {
+    // Only process messages for the current project
+    const currentPid = projectStore.currentProject?.id
+    if (currentPid == null || data.project_id !== currentPid) return
     // Dedup: message may already be in the list from optimistic send
     if (!messages.value.some(m => m.id === data.id)) {
       messages.value.push(data)
@@ -120,7 +148,10 @@ function setupWS() {
     onlineUsers.value = data.online_users || []
     typingUsers.value.delete(data.user_id)
   })
-  unsubTyping = ws.on('user_typing', (data: { user_id: number; username: string; display_name: string; typing: boolean }) => {
+  unsubTyping = ws.on('user_typing', (data: { user_id: number; username: string; display_name: string; project_id?: number; typing: boolean }) => {
+    // Only process typing for the current project
+    const currentPid = projectStore.currentProject?.id
+    if (currentPid == null || data.project_id !== currentPid) return
     if (data.user_id === auth.userId) return
     if (data.typing) {
       const existing = typingUsers.value.get(data.user_id)
@@ -137,9 +168,11 @@ function setupWS() {
 
 // ── Load ───────────────────────────────────────────────────────
 async function loadMessages(beforeId?: number) {
+  const pid = projectStore.currentProject?.id
+  if (pid == null) return
   loading.value = true
   try {
-    const params: Record<string, any> = { limit: 50 }
+    const params: Record<string, any> = { project_id: pid, limit: 50 }
     if (beforeId) params.before_id = beforeId
     const { data } = await api.get('/chat/messages', { params })
     const arr: ChatMsg[] = Array.isArray(data) ? data : []
@@ -160,7 +193,10 @@ async function loadMessages(beforeId?: number) {
 
 async function loadOnlineUsers() {
   try {
-    const { data } = await api.get('/chat/online')
+    const pid = projectStore.currentProject?.id
+    const params: Record<string, any> = {}
+    if (pid != null) params.project_id = pid
+    const { data } = await api.get('/chat/online', { params })
     onlineUsers.value = data.online_users || []
   } catch { /* ignore */ }
 }
@@ -198,7 +234,10 @@ async function sendMessage() {
 
     // Send text message
     if (text) {
+      const pid = projectStore.currentProject?.id
+      if (pid == null) return
       const form = new FormData()
+      form.append('project_id', String(pid))
       form.append('message', text)
       const { data } = await api.post('/chat/messages', form)
       // Optimistically add message to local list so it appears immediately.
@@ -235,6 +274,9 @@ async function handleFileSelect(e: Event) {
 async function uploadAndSendFile(file: File) {
   uploading.value = true
   try {
+    const pid = projectStore.currentProject?.id
+    if (pid == null) return
+
     // Upload file
     const uploadForm = new FormData()
     uploadForm.append('file', file)
@@ -242,6 +284,7 @@ async function uploadAndSendFile(file: File) {
 
     // Send as chat message
     const msgForm = new FormData()
+    msgForm.append('project_id', String(pid))
     msgForm.append('message', inputText.value.trim())
     msgForm.append('file_url', data.file_url)
     msgForm.append('file_name', data.file_name)
@@ -397,6 +440,10 @@ watch(() => props.visible, (v) => {
       <div class="chat-header-left">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
         <span>团队聊天</span>
+        <template v-if="projectStore.currentProject">
+          <span class="chat-header-sep">·</span>
+          <span class="chat-header-project">{{ projectStore.currentProject.name }}</span>
+        </template>
         <span class="chat-badge" v-if="onlineUsers.length > 0">{{ onlineUsers.length }} 在线</span>
       </div>
       <div class="chat-header-actions">
@@ -429,11 +476,22 @@ watch(() => props.visible, (v) => {
 
       <template v-if="messages.length === 0 && !loading">
         <div class="chat-empty">
-          <div class="chat-empty-icon">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          </div>
-          <p class="chat-empty-title">欢迎来到团队聊天</p>
-          <p class="chat-empty-hint">发送消息、粘贴图片或拖拽文件开始交流</p>
+          <!-- No project selected -->
+          <template v-if="!projectStore.currentProject">
+            <div class="chat-empty-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+            </div>
+            <p class="chat-empty-title">请先选择一个项目</p>
+            <p class="chat-empty-hint">在左侧边栏选择一个项目后即可开始聊天</p>
+          </template>
+          <!-- Empty chat in current project -->
+          <template v-else>
+            <div class="chat-empty-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </div>
+            <p class="chat-empty-title">暂无消息</p>
+            <p class="chat-empty-hint">发送消息、粘贴图片或拖拽文件开始交流</p>
+          </template>
         </div>
       </template>
 
@@ -523,7 +581,7 @@ watch(() => props.visible, (v) => {
       <button
         class="chat-attach-btn"
         title="发送文件或图片"
-        :disabled="uploading"
+        :disabled="uploading || !projectStore.currentProject"
         @click="triggerFileInput"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
@@ -531,15 +589,16 @@ watch(() => props.visible, (v) => {
       <textarea
         v-model="inputText"
         class="chat-input"
-        placeholder="输入消息，Enter 发送，Shift+Enter 换行..."
+        :placeholder="projectStore.currentProject ? '输入消息，Enter 发送，Shift+Enter 换行...' : '请先在左侧边栏选择一个项目'"
         rows="2"
         maxlength="2000"
+        :disabled="!projectStore.currentProject"
         @keydown="handleKeydown"
         @input="onInput"
       />
       <button
         class="chat-send-btn"
-        :disabled="(!inputText.trim() && pendingFiles.length === 0) || sending"
+        :disabled="(!inputText.trim() && pendingFiles.length === 0) || sending || !projectStore.currentProject"
         @click="sendMessage"
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -586,6 +645,8 @@ watch(() => props.visible, (v) => {
   flex-shrink: 0;
 }
 .chat-header-left { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--foreground); }
+.chat-header-sep { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
+.chat-header-project { font-size: 12px; color: var(--primary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-badge { font-size: 10.5px; font-weight: 600; color: var(--success); background: var(--success-light); padding: 1px 7px; border-radius: 999px; }
 .chat-header-actions { display: flex; gap: 2px; }
 .chat-icon-btn {
