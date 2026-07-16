@@ -106,8 +106,8 @@ const icons: Record<string, string> = {
   <div class="project-picker" :class="{ collapsed: collapsed }">
     <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
     <select v-model="selectedProjectId" class="project-select">
-      <option :value="null" disabled>{{ collapsed ? '' : '选择项目…' }}</option>
-      <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ collapsed ? p.name.charAt(0) : p.name }}</option>
+      <option :value="null" disabled>选择项目…</option>
+      <option v-for="p in store.projects" :key="p.id" :value="p.id">{{ p.name }}</option>
     </select>
   </div>
 
