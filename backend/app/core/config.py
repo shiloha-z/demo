@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     ANTHROPIC_API_KEY: str = ""
     OPENCODE_SERVER_URL: str = "http://localhost:36000"
+    # Executor limits are intentionally bounded: tasks queue instead of
+    # exhausting the web server or the model provider's rate limit.
+    AGENT_MAX_CONCURRENCY: int = 4
+    MERGE_MAX_CONCURRENCY: int = 2
+    MERGE_TEST_COMMAND: str = ""
+    MERGE_TEST_TIMEOUT_SECONDS: int = 300
 
 
 settings = Settings()

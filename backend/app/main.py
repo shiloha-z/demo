@@ -37,6 +37,10 @@ from app.api.messages import router as messages_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Persisted merge-queued tasks survive a process restart and are resumed
+    # by the bounded, project-serial merge scheduler.
+    from app.services.execution_service import recover_merge_queue
+    recover_merge_queue()
     yield
 
 

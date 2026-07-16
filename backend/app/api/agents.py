@@ -22,6 +22,13 @@ class AgentCreate(BaseModel):
     system_prompt: str = Field(default="")
 
 
+class AgentImport(BaseModel):
+    """Portable Agent configuration exported by this application."""
+    format: str = Field(default="agent-pool-export")
+    version: int = Field(default=1)
+    agent: AgentCreate
+
+
 class AgentResponse(BaseModel):
     id: int
     name: str
@@ -124,6 +131,72 @@ def create_agent(
     db.add(agent)
     db.commit()
     db.refresh(agent)
+    from app.api.ws import broadcast_sync
+    broadcast_sync("agent_update", {"id": agent.id, "status": "created"})
+    return AgentResponse(
+        id=agent.id,
+        name=agent.name,
+        role=agent.role,
+        model=agent.model,
+        runner_type=agent.runner_type or "crewai",
+        system_prompt=agent.system_prompt,
+        status=agent.status.value,
+        creator_id=user.id,
+        creator_name=user.display_name or user.username,
+        is_creator=True,
+    )
+
+
+@router.get("/{agent_id}/export")
+def export_agent(
+    agent_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export an Agent's reusable configuration without runtime or task data."""
+    agent = db.query(Agent).filter(Agent.id == agent_id).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if agent.creator_id != user.id:
+        raise HTTPException(status_code=403, detail="Only the Agent creator can export its private configuration")
+
+    return {
+        "format": "agent-pool-export",
+        "version": 1,
+        "agent": {
+            "name": agent.name,
+            "role": agent.role,
+            "model": agent.model,
+            "runner_type": agent.runner_type or "crewai",
+            "system_prompt": agent.system_prompt or "",
+        },
+    }
+
+
+@router.post("/import", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
+def import_agent(
+    req: AgentImport,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a new Agent from a portable export owned by the importing user."""
+    if req.format != "agent-pool-export" or req.version != 1:
+        raise HTTPException(status_code=400, detail="Unsupported Agent export format or version")
+
+    source = req.agent
+    agent = Agent(
+        creator_id=user.id,
+        name=source.name,
+        role=source.role,
+        model=source.model,
+        runner_type=source.runner_type,
+        system_prompt=source.system_prompt,
+        status=AgentStatus.IDLE,
+    )
+    db.add(agent)
+    db.commit()
+    db.refresh(agent)
+
     from app.api.ws import broadcast_sync
     broadcast_sync("agent_update", {"id": agent.id, "status": "created"})
     return AgentResponse(

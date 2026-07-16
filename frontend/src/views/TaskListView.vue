@@ -59,6 +59,15 @@ const statusColors: Record<string, string> = {
   completed: 'var(--success)',
   failed: 'var(--danger)',
 }
+Object.assign(statusLabels, {
+  merge_queued: '等待合并', integrating: '正在合并',
+  conflict_resolution: '冲突处理中', merge_blocked: '合并受阻',
+})
+Object.assign(statusColors, {
+  merge_queued: '#8b5cf6', integrating: '#0ea5e9',
+  conflict_resolution: '#f97316', merge_blocked: 'var(--danger)',
+})
+
 const reviewStatusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
 }
@@ -103,12 +112,8 @@ function formatTimestamp(iso: string): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
-function appendProgress(entry: { message: string; step: string; timestamp?: string }) {
-  taskProgress.value.push({
-    message: entry.message,
-    step: entry.step,
-    timestamp: entry.timestamp || new Date().toISOString(),
-  })
+function syncTaskProgress(taskId: number) {
+  taskProgress.value = wsStore.getTaskProgress(taskId)
   // Keep the most recent output in view without forcing the user to scroll.
   nextTick(() => {
     if (progressLogEl.value) {
@@ -152,7 +157,7 @@ onMounted(() => {
   })
   unsubProgress = wsStore.on('task_progress', (data: any) => {
     if (selectedTask.value?.id === data.task_id) {
-      appendProgress(data)
+      syncTaskProgress(data.task_id)
     }
   })
   unsubStage = wsStore.on('pipeline_stage', (data: any) => {
@@ -208,7 +213,7 @@ const filteredTasks = computed(() => {
 
 async function selectTask(task: any) {
   if (selectedTask.value?.id !== task.id) {
-    taskProgress.value = []
+    taskProgress.value = wsStore.getTaskProgress(task.id)
     codePreviewDiff.value = null
     showWorkspace.value = false
     taskFiles.value = []
@@ -725,7 +730,7 @@ async function resumeTask(task: any, event: Event) {
             </div>
             <div class="detail-header-right">
               <button
-                v-if="['running','paused','reviewing'].includes(taskDetail.status)"
+                v-if="['running','paused','reviewing','conflict_resolution'].includes(taskDetail.status)"
                 class="workspace-btn"
                 :class="{ active: showWorkspace }"
                 @click="toggleWorkspace()"
@@ -742,6 +747,11 @@ async function resumeTask(task: any, event: Event) {
           <div v-if="taskDetail.description" class="detail-section">
             <h4 class="detail-label">任务描述</h4>
             <div class="desc-box">{{ taskDetail.description }}</div>
+          </div>
+
+          <div v-if="taskDetail.merge_error" class="detail-section">
+            <h4 class="detail-label">合并信息</h4>
+            <div class="desc-box">{{ taskDetail.merge_error }}</div>
           </div>
 
           <div v-if="loadingDetail" class="loading-box">
@@ -851,7 +861,9 @@ async function resumeTask(task: any, event: Event) {
           </div>
 
           <!-- Workspace file panel -->
-          <div v-if="showWorkspace" class="workspace-panel">
+          <Teleport to="body">
+            <div v-if="showWorkspace" class="workspace-backdrop" @click.self="showWorkspace = false">
+          <div class="workspace-panel" role="dialog" aria-modal="true" aria-label="任务工作空间">
             <div class="workspace-panel-header">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               <span>工作空间 · 任务 #{{ selectedTask.id }}</span>
@@ -889,6 +901,8 @@ async function resumeTask(task: any, event: Event) {
               <pre class="workspace-file-code">{{ selectedTaskFile.content }}</pre>
             </div>
           </div>
+            </div>
+          </Teleport>
         </div>
 
         <div v-else class="empty-detail">
@@ -1080,18 +1094,32 @@ async function resumeTask(task: any, event: Event) {
 }
 
 /* ── Workspace panel ─────────────────────────────── */
+.workspace-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; justify-content: flex-end;
+  background: rgb(15 23 42 / 0.25);
+}
 .workspace-panel {
-  border-top: 1px solid var(--surface-border);
-  margin-top: 4px;
-  display: flex;
-  flex-direction: column;
-  max-height: 320px;
+  width: min(760px, 92vw); height: 100%;
+  display: grid;
+  grid-template-columns: minmax(200px, 32%) minmax(0, 68%);
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--page-canvas);
+  border-left: 1px solid var(--surface-border);
+  box-shadow: -8px 0 28px rgb(15 23 42 / 0.18);
+  animation: workspace-slide-in 160ms ease-out;
+}
+@keyframes workspace-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
 }
 .workspace-panel-header {
+  grid-column: 1 / -1;
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
+  padding: 12px 16px;
   font-size: 12px; font-weight: 600; color: var(--foreground);
-  background: var(--surface-hover);
+  background: var(--surface);
+  border-bottom: 1px solid var(--surface-border);
   flex-shrink: 0;
 }
 .workspace-close-btn {
@@ -1103,7 +1131,8 @@ async function resumeTask(task: any, event: Event) {
 }
 .workspace-close-btn:hover { background: var(--surface-hover); color: var(--foreground); }
 .workspace-panel-body {
-  flex: 1; overflow-y: auto; padding: 6px 10px;
+  overflow-y: auto; padding: 8px 10px;
+  border-right: 1px solid var(--surface-border);
 }
 .workspace-loading, .workspace-empty {
   font-size: 12px; color: var(--muted-foreground); padding: 16px; text-align: center;
@@ -1120,18 +1149,24 @@ async function resumeTask(task: any, event: Event) {
 .workspace-file-icon { flex-shrink: 0; font-size: 13px; }
 .workspace-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.workspace-file-content { border-top: 1px solid var(--surface-border); flex-shrink: 0; }
+.workspace-file-content {
+  min-width: 0; min-height: 0; overflow: hidden;
+  display: flex; flex-direction: column;
+}
 .workspace-file-content-header {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 14px; font-size: 11px; color: var(--muted-foreground);
   background: var(--surface-hover);
 }
 .workspace-file-code {
-  margin: 0; padding: 8px 14px;
+  margin: 0; padding: 12px 14px; flex: 1;
   font-size: 11px; font-family: var(--font-mono);
-  line-height: 1.5; max-height: 200px; overflow: auto;
+  line-height: 1.5; overflow: auto;
   background: var(--page-canvas); color: var(--foreground);
   white-space: pre-wrap; word-break: break-all;
+}
+@media (max-width: 640px) {
+  .workspace-panel { width: 100vw; grid-template-columns: minmax(130px, 38%) minmax(0, 62%); }
 }
 
 /* ── Timeline slide panel ─────────────────────────── */

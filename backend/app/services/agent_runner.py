@@ -88,32 +88,26 @@ def _make_stage_cb(task_id: int, project_id: int):
 
 # ── Main entry point ────────────────────────────────────────────────────
 
-def run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
-    """Run a task while exclusively holding its project's workspace lock.
+def run_agent_pipeline(
+    task_id: int,
+    feedback: str = "",
+    resume: bool = False,
+    conflict_resolution: bool = False,
+):
+    """Run an Agent in an isolated task worktree.
 
-    A project has one checked-out Git working tree. Serializing the complete
-    pipeline prevents two different agents from switching branches or staging
-    each other's changes in that tree.
+    Different task worktrees have independent locks, so model runs can be
+    concurrent.  The base project workspace is locked only during merging.
     """
-    db = SessionLocal()
-    try:
-        task = db.get(Task, task_id)
-        if not task:
-            logger.error("Task %s not found", task_id)
-            return
-        project = db.get(Project, task.project_id)
-        if not project or not project.workspace_path:
-            logger.error("Project workspace for task %s not found", task_id)
-            return
-        workspace = project.workspace_path
-    finally:
-        db.close()
-
-    with git.workspace_lock(workspace):
-        _run_agent_pipeline(task_id, feedback, resume)
+    _run_agent_pipeline(task_id, feedback, resume, conflict_resolution)
 
 
-def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
+def _run_agent_pipeline(
+    task_id: int,
+    feedback: str = "",
+    resume: bool = False,
+    conflict_resolution: bool = False,
+):
     """Execute the full agent pipeline for a given task.
 
     Dispatches to the correct runner based on agent.runner_type.
@@ -178,17 +172,28 @@ def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
 
         # ── Step 1: Prepare workspace ──────────────────────────────
         _progress(task_id, project_id, "📂 正在准备项目工作空间...", "prepare")
-        workspace = project.workspace_path
+        workspace = task.worktree_path or git.default_task_worktree_path(project.workspace_path, task.id)
 
         # ── Step 2: Create or reuse task branch ────────────────────
-        branch_name = f"task/{task.id}"
-        branch_exists = git.branch_exists(workspace, branch_name)
-        if is_revision or resume or branch_exists:
+        branch_name = task.branch_name or f"task/{task.id}"
+        if conflict_resolution and not git.get_repo(workspace):
+            _fail_task(db, task, "Conflict worktree not found")
+            return
+        if not conflict_resolution and not task.worktree_path:
+            created, error = git.create_task_worktree(project.workspace_path, workspace, branch_name)
+            if not created:
+                _fail_task(db, task, f"Could not create task worktree: {error}")
+                return
+            task.worktree_path = workspace
+            task.branch_name = branch_name
+            task.base_commit = git.head_commit(project.workspace_path, git.get_base_branch(project.workspace_path))
+            db.commit()
+        if not conflict_resolution:
             _progress(task_id, project_id, f"🌿 切换到已有工作分支：{branch_name}", "branch")
             git.switch_branch(workspace, branch_name)
         else:
             _progress(task_id, project_id, f"🌿 创建 Git 工作分支：{branch_name}", "branch")
-            git.create_branch(workspace, branch_name)
+            pass
 
         # ── Step 3: Get runner and execute ─────────────────────────
         _progress(task_id, project_id, f"🤖 启动 Agent「{agent_name}」", "agent_start")
@@ -327,7 +332,7 @@ def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
 
         # Switch back to master
         _progress(task_id, project_id, "🔙 切换回主分支，清理工作区...", "cleanup")
-        git.switch_branch(workspace, "master")
+        # The task worktree remains on its task branch for review and merge.
 
         # Push review created
         broadcast_sync("review_update", {
@@ -434,11 +439,6 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
             )
         except Exception:
             pass
-
-    # Switch back to master
-    project = db.query(Project).get(project_id)
-    if project and project.workspace_path:
-        git.switch_branch(project.workspace_path, "master")
 
     broadcast_sync("task_update", {
         "id": task.id, "project_id": project_id, "status": "failed",

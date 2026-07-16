@@ -20,5 +20,10 @@ class GitDiffTool(BaseTool):
     workspace: str = ""
 
     def _run(self) -> str:
-        diff = git.get_diff(self.workspace)
+        # Agent-created files are usually untracked until the orchestration
+        # layer commits the task. `get_diff()` omits those files, which made
+        # a reviewer incorrectly conclude that a freshly generated file did
+        # not exist. This stages only the task worktree and diffs it against
+        # its base branch, so new files are visible to every review Agent.
+        diff = git.diff_vs_master(self.workspace)
         return diff if diff else "No changes detected."

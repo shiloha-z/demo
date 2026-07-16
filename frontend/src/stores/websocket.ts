@@ -2,6 +2,9 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 type WsCallback = (data: any) => void
+type TaskProgressEntry = { message: string; step: string; timestamp: string }
+
+const MAX_TASK_PROGRESS_ENTRIES = 500
 
 export const useWebSocketStore = defineStore('websocket', () => {
   const connected = ref(false)
@@ -15,6 +18,28 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
   // Subscribers: Map<eventType, Set<callback>>
   const subscribers = new Map<string, Set<WsCallback>>()
+  // Keep progress outside route components so navigating away does not lose it.
+  const taskProgressById = new Map<number, TaskProgressEntry[]>()
+
+  function recordTaskProgress(data: any) {
+    const taskId = Number(data?.task_id)
+    if (!Number.isInteger(taskId) || taskId <= 0 || !data?.message) return
+
+    const entries = taskProgressById.get(taskId) || []
+    entries.push({
+      message: String(data.message),
+      step: String(data.step || ''),
+      timestamp: data.timestamp || new Date().toISOString(),
+    })
+    if (entries.length > MAX_TASK_PROGRESS_ENTRIES) {
+      entries.splice(0, entries.length - MAX_TASK_PROGRESS_ENTRIES)
+    }
+    taskProgressById.set(taskId, entries)
+  }
+
+  function getTaskProgress(taskId: number): TaskProgressEntry[] {
+    return [...(taskProgressById.get(taskId) || [])]
+  }
 
   function connect() {
     const token = localStorage.getItem('token')
@@ -50,6 +75,10 @@ export const useWebSocketStore = defineStore('websocket', () => {
 
         // Skip internal messages (connected, pong)
         if (msg.type === 'connected' || msg.type === 'pong') return
+
+        if (msg.type === 'task_progress') {
+          recordTaskProgress(msg.data)
+        }
 
         // Notify subscribers
         const subs = subscribers.get(msg.type)
@@ -88,6 +117,7 @@ export const useWebSocketStore = defineStore('websocket', () => {
       ws = null
     }
     connected.value = false
+    taskProgressById.clear()
   }
 
   function scheduleReconnect() {
@@ -134,5 +164,5 @@ export const useWebSocketStore = defineStore('websocket', () => {
     }
   }
 
-  return { connected, lastMessage, connect, disconnect, on, send }
+  return { connected, lastMessage, connect, disconnect, on, send, getTaskProgress }
 })

@@ -406,7 +406,11 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
 
     running_task = db.query(Task.id).filter(
         Task.project_id == project_id,
-        Task.status == TaskStatus.RUNNING,
+        Task.status.in_([
+            TaskStatus.RUNNING,
+            TaskStatus.INTEGRATING,
+            TaskStatus.CONFLICT_RESOLUTION,
+        ]),
     ).first()
     if running_task:
         raise HTTPException(status_code=409, detail="Cannot delete a project while an agent task is running")
@@ -418,6 +422,10 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
             Task.project_id == project_id,
             Agent.status == AgentStatus.WORKING,
         ).distinct().all()
+    ]
+    task_worktrees = [
+        task.worktree_path for task in db.query(Task).filter(Task.project_id == project_id).all()
+        if task.worktree_path
     ]
 
     # Delete associated records (cascade all related data)
@@ -443,6 +451,11 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
         db.query(Agent).filter(Agent.id.in_(stuck_agent_ids)).update(
             {Agent.status: AgentStatus.IDLE}, synchronize_session=False
         )
+
+    # Remove task worktrees before deleting the base repository.  Worktrees
+    # are sibling directories and would otherwise be left behind on Windows.
+    for worktree_path in task_worktrees:
+        git.remove_task_worktree(project.workspace_path, worktree_path)
 
     # Remove workspace directory
     if project.workspace_path and os.path.isdir(project.workspace_path):

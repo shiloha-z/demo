@@ -54,6 +54,7 @@ class TaskResponse(BaseModel):
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    merge_error: str = ""
     agent_name: str | None = None
     agent_role: str | None = None
     project_name: str | None = None
@@ -76,6 +77,7 @@ class TaskDetailResponse(BaseModel):
     created_at: str | None = None
     started_at: str | None = None
     completed_at: str | None = None
+    merge_error: str = ""
     agent_name: str | None = None
     agent_role: str | None = None
     agent_model: str | None = None
@@ -108,6 +110,7 @@ def _task_to_response(t: Task) -> TaskResponse:
         created_at=t.created_at.isoformat() if t.created_at else None,
         started_at=t.started_at.isoformat() if t.started_at else None,
         completed_at=t.completed_at.isoformat() if t.completed_at else None,
+        merge_error=t.merge_error or "",
         agent_name=t.agent.name if t.agent else None,
         agent_role=t.agent.role if t.agent else None,
         project_name=t.project.name if t.project else None,
@@ -148,8 +151,10 @@ def list_tasks(
     # Client-side status sort (group pending/running/reviewing first, then approved/rejected/failed)
     if sort == "status":
         status_priority = {
-            "running": 0, "pending": 1, "reviewing": 2,
-            "failed": 3, "rejected": 4, "approved": 5, "completed": 6,
+            "running": 0, "conflict_resolution": 1, "integrating": 2,
+            "merge_queued": 3, "reviewing": 4, "pending": 5,
+            "merge_blocked": 6, "failed": 7, "rejected": 8,
+            "approved": 9, "completed": 10,
         }
         tasks.sort(key=lambda t: status_priority.get(
             t.status.value if hasattr(t.status, 'value') else str(t.status), 99
@@ -188,6 +193,7 @@ def get_task_detail(
         created_at=task.created_at.isoformat() if task.created_at else None,
         started_at=task.started_at.isoformat() if task.started_at else None,
         completed_at=task.completed_at.isoformat() if task.completed_at else None,
+        merge_error=task.merge_error or "",
         agent_name=task.agent.name if task.agent else None,
         agent_role=task.agent.role if task.agent else None,
         agent_model=task.agent.model if task.agent else None,
@@ -310,9 +316,10 @@ def start_task(
         "id": agent.id, "status": "working", "current_task_id": task.id,
     })
 
-    # Run agent pipeline in background (pipeline broadcasts agent_update with full detail)
-    from app.services.agent_runner import run_agent_pipeline
-    background_tasks.add_task(run_agent_pipeline, task.id)
+    # A bounded executor queues independent worktrees; requests never create
+    # unbounded concurrent model calls.
+    from app.services.execution_service import enqueue_agent_run
+    enqueue_agent_run(task.id)
 
     return _task_to_response(task)
 
@@ -379,9 +386,9 @@ def resume_task(
     agent.status = AgentStatus.WORKING
     db.commit()
 
-    # Run agent pipeline in background — resume preserves existing task branch
-    from app.services.agent_runner import run_agent_pipeline
-    background_tasks.add_task(run_agent_pipeline, task.id, "", resume=True)
+    # Resume in the task's existing isolated worktree.
+    from app.services.execution_service import enqueue_agent_run
+    enqueue_agent_run(task.id, resume=True)
 
     return _task_to_response(task)
 

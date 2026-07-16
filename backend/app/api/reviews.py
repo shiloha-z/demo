@@ -89,6 +89,27 @@ def _vote_summary(review: Review, db: Session) -> dict:
     }
 
 
+def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
+    """Persist approval first, then let the project merge worker serialize it."""
+    review.status = ReviewStatus.APPROVED
+    task.status = TaskStatus.MERGE_QUEUED
+    task.merge_queued_at = datetime.now(timezone.utc)
+    task.merge_error = ""
+    db.commit()
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("review_update", {
+        "id": review.id, "task_id": review.task_id,
+        "project_id": review.project_id, "status": "approved",
+    })
+    broadcast_sync("task_update", {
+        "id": task.id, "project_id": task.project_id, "status": "merge_queued",
+    })
+    from app.services.execution_service import enqueue_merge
+    enqueue_merge(task.id)
+    return {"message": "Approved and queued for merge"}
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/projects/{project_id}/reviews", response_model=list[ReviewResponse])
@@ -208,8 +229,8 @@ def cast_review_vote(
             if agent:
                 agent.status = AgentStatus.WORKING
             db.commit()
-            from app.services.agent_runner import run_agent_pipeline
-            background_tasks.add_task(run_agent_pipeline, task.id, feedback)
+            from app.services.execution_service import enqueue_agent_run
+            enqueue_agent_run(task.id, feedback=feedback)
     from app.api.ws import broadcast_sync_to_project
     broadcast_sync_to_project(review.project_id, "review_vote_update", {
         "review_id": review.id,
@@ -249,6 +270,7 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
             status_code=409,
             detail=f"Approval quorum not met ({votes['approve_count']}/{votes['required_approvals']})",
         )
+    return _queue_review_merge(review, task, db)
 
     # Merge task branch → master, then commit
     from app.models.models import Project
@@ -399,8 +421,8 @@ def reject_review(
 
     # Trigger agent re-run with feedback via BackgroundTasks for safe shutdown
     # The pipeline will create the real Review with actual diff and summary
-    from app.services.agent_runner import run_agent_pipeline
-    background_tasks.add_task(run_agent_pipeline, task.id, feedback)
+    from app.services.execution_service import enqueue_agent_run
+    enqueue_agent_run(task.id, feedback=feedback)
 
     return {"message": "Rejected — agent will re-run with feedback"}
 

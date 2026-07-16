@@ -1,11 +1,14 @@
-"""CrewAI runner — 4-agent sequential review pipeline.
+"""CrewAI runner — code generation followed by parallel reviews.
 
 Refactored from review_pipeline.py into the BaseRunner interface.
 """
 
-import os
 import logging
+import threading
+import time
 from crewai import Agent, Task, Crew, Process
+from app.core.config import settings
+from app.services import git_service as git
 from agent_service.tools.file_tools import FileReadTool, FileWriteTool
 from agent_service.tools.git_tools import GitDiffTool
 from agent_service.tools.memory_tools import MemorySearchTool, MemoryRecordTool
@@ -13,6 +16,18 @@ from agent_service.tools.memory_tools import MemorySearchTool, MemoryRecordTool
 from .base import BaseRunner, RunResult, ProgressCallback, StageCallback
 
 logger = logging.getLogger(__name__)
+
+# Keep interactive task execution responsive. These values bound each model
+# request and each individual CrewAI role without limiting a whole pipeline to
+# one model turn.
+LLM_REQUEST_TIMEOUT_SECONDS = 75
+LLM_MAX_OUTPUT_TOKENS = 8192
+AGENT_MAX_ITERATIONS = 12
+# CrewAI runs an all-unlimited batch of native tools in a thread pool. The
+# pipeline owns a workspace lock, so workspace tools must execute on that same
+# thread. This cap is deliberately well above the iteration limit and only
+# opts those tool calls out of CrewAI's parallel batch execution.
+MAX_TOOL_CALLS_PER_AGENT = 50
 
 # ── Stage definitions ─────────────────────────────────────────────────
 
@@ -31,8 +46,39 @@ STAGE_BY_TASK_PREFIX: dict[str, str] = {
 }
 
 
+def _review_workspace_snapshot(workspace: str) -> str:
+    """Capture one authoritative post-generation view for all reviewers."""
+    try:
+        nodes = git.list_files(workspace)
+        paths: list[str] = []
+
+        def collect(items: list[dict]) -> None:
+            for item in items:
+                if item.get("type") in ("dir", "tree"):
+                    collect(item.get("children") or [])
+                elif item.get("path"):
+                    paths.append(item["path"])
+
+        collect(nodes)
+        paths = sorted(paths)[:200]
+        diff = git.diff_vs_master(workspace)
+        changed = "No changed files detected." if not diff else diff[:12000]
+        files = "\n".join(f"- {path}" for path in paths) or "(no files)"
+        return (
+            "\n\n[AUTHORITATIVE WORKSPACE SNAPSHOT]\n"
+            "This snapshot was captured by the orchestrator immediately after code generation. "
+            "Both review roles receive the exact same snapshot. Do not claim the workspace is empty "
+            "or omit a listed file without first reading it.\n"
+            f"Files:\n{files}\n\nChanges versus base branch:\n{changed}\n"
+            "[/AUTHORITATIVE WORKSPACE SNAPSHOT]\n"
+        )
+    except Exception as exc:
+        logger.warning("Could not capture review workspace snapshot: %s", exc)
+        return "\n\n[AUTHORITATIVE WORKSPACE SNAPSHOT]\nSnapshot unavailable; use FileRead and GitDiff before reporting.\n"
+
+
 class CrewAIRunner(BaseRunner):
-    """Execute the 4-agent CrewAI review pipeline."""
+    """Execute code generation → parallel review/security → summary."""
 
     def run(
         self,
@@ -45,13 +91,33 @@ class CrewAIRunner(BaseRunner):
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
     ) -> RunResult:
-        """Build and execute the CrewAI pipeline."""
+        """Build and execute the CrewAI review DAG."""
+        stage_state = {"key": "code_gen", "label": "代码工程师"}
+        heartbeat_stop = threading.Event()
+        heartbeat_thread: threading.Thread | None = None
+        started_at = time.monotonic()
         try:
             crew = self._build_crew(workspace, model_name, task_id, project_id,
-                                    on_progress, on_stage)
+                                    on_progress, on_stage, stage_state)
             if on_progress:
                 on_progress("⚙️  第 1/4 步：代码工程师正在生成代码...", "step_1_codegen")
                 on_progress("🔍 Agent 正在查看现有代码结构，分析需求...", "step_1_detail")
+
+            if on_progress:
+                def _heartbeat() -> None:
+                    while not heartbeat_stop.wait(12):
+                        elapsed = int(time.monotonic() - started_at)
+                        on_progress(
+                            f"⏳ {stage_state['label']} 仍在执行中（已运行 {elapsed}s），正在等待模型或工具返回…",
+                            f"{stage_state['key']}_heartbeat",
+                        )
+
+                heartbeat_thread = threading.Thread(
+                    target=_heartbeat,
+                    name=f"crewai-progress-{task_id}",
+                    daemon=True,
+                )
+                heartbeat_thread.start()
 
             result = crew.kickoff(inputs={"task_description": task_description})
 
@@ -71,29 +137,54 @@ class CrewAIRunner(BaseRunner):
         except Exception as e:
             logger.exception("CrewAI pipeline failed")
             return RunResult(error=str(e))
+        finally:
+            heartbeat_stop.set()
+            if heartbeat_thread:
+                heartbeat_thread.join(timeout=1)
 
     def _build_crew(self, workspace: str, model_name: str,
                     task_id: int, project_id: int,
                     on_progress: ProgressCallback | None,
-                    on_stage: StageCallback | None) -> Crew:
-        """Build the 4-agent CrewAI pipeline."""
+                    on_stage: StageCallback | None,
+                    stage_state: dict[str, str]) -> Crew:
+        """Build code generation → parallel reviews → summary."""
 
         # Tools
-        read_tool = FileReadTool(workspace=workspace)
-        write_tool = FileWriteTool(workspace=workspace)
-        diff_tool = GitDiffTool(workspace=workspace)
-        mem_search = MemorySearchTool(task_id=task_id, project_id=project_id)
-        mem_record = MemoryRecordTool(task_id=task_id, project_id=project_id)
+        read_tool = FileReadTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
+        write_tool = FileWriteTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
+        diff_tool = GitDiffTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
+        mem_search = MemorySearchTool(
+            task_id=task_id, project_id=project_id, max_usage_count=MAX_TOOL_CALLS_PER_AGENT
+        )
+        mem_record = MemoryRecordTool(
+            task_id=task_id, project_id=project_id, max_usage_count=MAX_TOOL_CALLS_PER_AGENT
+        )
 
         # LLM config
-        api_key = os.getenv("DEEPSEEK_API_KEY", "")
-        base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-        llm_kwargs: dict = {}
-        if api_key:
-            llm_kwargs = {
-                "model": model_name,
-                "api_key": api_key,
-                "base_url": base_url,
+        # Use the application settings rather than os.getenv(): BaseSettings
+        # reads .env itself and does not populate the process environment.
+        api_key = settings.DEEPSEEK_API_KEY
+        base_url = settings.DEEPSEEK_BASE_URL
+        if not api_key:
+            raise RuntimeError("DEEPSEEK_API_KEY 未配置，无法启动 CrewAI Agent")
+
+        llm_kwargs: dict = {
+            "model": model_name,
+            "api_key": api_key,
+            "base_url": base_url,
+            "timeout": LLM_REQUEST_TIMEOUT_SECONDS,
+            "max_tokens": LLM_MAX_OUTPUT_TOKENS,
+        }
+        # DeepSeek V4 enables thinking by default. Non-thinking mode keeps
+        # ordinary coding tasks responsive while complex tasks can still use a
+        # dedicated reasoning Agent/model when needed.
+        if "api.deepseek.com" in base_url.lower() and model_name.startswith("deepseek-"):
+            # CrewAI's OpenAI-compatible provider passes additional params to
+            # `chat.completions.create()`. DeepSeek-only fields must therefore
+            # be nested in `extra_body`, which the OpenAI client forwards as
+            # raw JSON to the compatible API.
+            llm_kwargs["additional_params"] = {
+                "extra_body": {"thinking": {"type": "disabled"}},
             }
 
         # ── Agents ──────────────────────────────────────────────────
@@ -120,6 +211,7 @@ class CrewAIRunner(BaseRunner):
             tools=[read_tool, write_tool, diff_tool, mem_search, mem_record],
             verbose=True,
             allow_delegation=False,
+            max_iter=AGENT_MAX_ITERATIONS,
             **({"llm": llm_kwargs} if llm_kwargs else {}),
         )
 
@@ -135,6 +227,7 @@ class CrewAIRunner(BaseRunner):
             tools=[read_tool, mem_search],
             verbose=True,
             allow_delegation=False,
+            max_iter=AGENT_MAX_ITERATIONS,
             **({"llm": llm_kwargs} if llm_kwargs else {}),
         )
 
@@ -150,6 +243,7 @@ class CrewAIRunner(BaseRunner):
             tools=[read_tool, mem_search],
             verbose=True,
             allow_delegation=False,
+            max_iter=AGENT_MAX_ITERATIONS,
             **({"llm": llm_kwargs} if llm_kwargs else {}),
         )
 
@@ -165,6 +259,7 @@ class CrewAIRunner(BaseRunner):
             tools=[mem_search, mem_record],
             verbose=True,
             allow_delegation=False,
+            max_iter=AGENT_MAX_ITERATIONS,
             **({"llm": llm_kwargs} if llm_kwargs else {}),
         )
 
@@ -216,6 +311,9 @@ class CrewAIRunner(BaseRunner):
                 "必须在开头明确给出『核心文件落盘校验结论』（是否所有要求的文件都已完整落盘）。"
             ),
             agent=reviewer,
+            # These two reviews only depend on the generated files, not on
+            # each other. CrewAI schedules adjacent async tasks concurrently.
+            async_execution=True,
         )
 
         security_task = Task(
@@ -230,6 +328,7 @@ class CrewAIRunner(BaseRunner):
             ),
             expected_output="结构化的安全审查意见列表",
             agent=security,
+            async_execution=True,
         )
 
         summary_task = Task(
@@ -247,11 +346,33 @@ class CrewAIRunner(BaseRunner):
             ),
             expected_output="结构化的 Markdown 中文审查报告",
             agent=summarizer,
+            # A synchronous task after async tasks waits for both outputs and
+            # receives them as explicit context.
+            context=[review_task, security_task],
         )
 
         # ── Task callback factory ───────────────────────────────────
 
-        completed_stages: list[str] = []
+        stage_labels = {
+            "code_gen": "代码工程师",
+            "reviewer": "代码审查员",
+            "security": "安全审查员",
+            "summarizer": "审查汇总员",
+        }
+        completed_stages: set[str] = set()
+        callback_lock = threading.Lock()
+
+        def _step_callback(step) -> None:
+            """Forward CrewAI's ReAct steps (especially tool calls) to the UI."""
+            if not on_progress:
+                return
+            tool_name = str(getattr(step, "tool", "")).strip()
+            stage_key = stage_state["key"]
+            label = stage_state["label"]
+            if tool_name:
+                on_progress(f"🔧 {label} 正在调用工具：{tool_name}", f"{stage_key}_tool")
+            else:
+                on_progress(f"🧠 {label} 已完成一轮推理，正在继续处理…", f"{stage_key}_step")
 
         def _task_callback(task_output):
             desc = getattr(task_output, "description", "")
@@ -267,13 +388,44 @@ class CrewAIRunner(BaseRunner):
                     stage_key = keys[idx]
                 else:
                     return
-            completed_stages.append(stage_key)
+            # Async review callbacks are invoked from different worker
+            # threads.  Deduplicate and advance the DAG under one lock.
+            with callback_lock:
+                if stage_key in completed_stages:
+                    return
+                completed_stages.add(stage_key)
+            if stage_key == "code_gen":
+                snapshot = _review_workspace_snapshot(workspace)
+                # The two async review tasks start only after this callback.
+                # Give them identical, orchestration-produced evidence rather
+                # than letting each infer the workspace state independently.
+                review_task.description += snapshot
+                security_task.description += snapshot
             if on_stage:
                 on_stage(stage_key, "done")
             if on_progress:
                 stage_info = next((s for s in STAGES if s["key"] == stage_key), None)
                 label = stage_info["label"] if stage_info else stage_key
                 on_progress(f"✅ {label}完成", f"stage_{stage_key}_done")
+
+            if stage_key == "code_gen":
+                stage_state["key"] = "parallel_review"
+                stage_state["label"] = "代码审查员与安全审查员"
+                if on_stage:
+                    on_stage("reviewer", "running")
+                    on_stage("security", "running")
+                if on_progress:
+                    on_progress("▶️ 代码审查员与安全审查员开始并行执行", "parallel_review_start")
+            elif stage_key in {"reviewer", "security"}:
+                with callback_lock:
+                    reviews_finished = {"reviewer", "security"}.issubset(completed_stages)
+                if reviews_finished:
+                    stage_state["key"] = "summarizer"
+                    stage_state["label"] = stage_labels["summarizer"]
+                    if on_stage:
+                        on_stage("summarizer", "running")
+                    if on_progress:
+                        on_progress(f"▶️ {stage_state['label']} 开始执行", "stage_summarizer_start")
 
         # ── Crew ────────────────────────────────────────────────────
 
@@ -282,5 +434,6 @@ class CrewAIRunner(BaseRunner):
             tasks=[code_task, review_task, security_task, summary_task],
             process=Process.sequential,
             verbose=True,
+            step_callback=_step_callback,
             task_callback=_task_callback,
         )

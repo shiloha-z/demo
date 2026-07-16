@@ -24,6 +24,10 @@ class TaskStatus(str, Enum):
     RUNNING = "running"          # 执行中
     PAUSED = "paused"            # 已暂停
     REVIEWING = "reviewing"      # 待审核（Agent 执行完毕，等待人工审查）
+    MERGE_QUEUED = "merge_queued"  # 审核通过，等待项目级合并队列
+    INTEGRATING = "integrating"    # 正在把任务分支集成到主分支
+    CONFLICT_RESOLUTION = "conflict_resolution"  # Agent 正在处理合并冲突
+    MERGE_BLOCKED = "merge_blocked"  # 冲突无法处理或合并检查未通过
     APPROVED = "approved"        # 已通过（审查通过，已合并）
     REJECTED = "rejected"        # 已驳回（审查驳回）
     FAILED = "failed"            # 执行失败
@@ -152,6 +156,14 @@ class Task(Base):
     description = Column(Text, default="")
     status = Column(SAEnum(TaskStatus), default=TaskStatus.PENDING)
     archived = Column(Boolean, default=False)
+    # Every task executes in an isolated Git worktree.  The project workspace
+    # stays on the base branch and is used only by the integration worker.
+    branch_name = Column(String(200), default="")
+    worktree_path = Column(String(1000), default="")
+    base_commit = Column(String(40), default="")
+    merge_error = Column(Text, default="")
+    merge_attempts = Column(Integer, default=0, nullable=False)
+    merge_queued_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)

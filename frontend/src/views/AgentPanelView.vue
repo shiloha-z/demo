@@ -22,6 +22,8 @@ const modelsLoading = ref(false)
 // Dialogs
 const showCreateAgent = ref(false)
 const showCreateTask = ref(false)
+const importInput = ref<HTMLInputElement | null>(null)
+const importingAgent = ref(false)
 const selectedAgent = ref<any>(null)
 const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai', skill_id: null as number | null })
 const newTask = ref({ title: '', description: '', project_id: null as number | null })
@@ -137,6 +139,51 @@ async function deleteAgent(id: number, name: string) {
   })
 }
 
+function openImportPicker() {
+  importInput.value?.click()
+}
+
+async function importAgent(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  importingAgent.value = true
+  try {
+    const payload = JSON.parse(await file.text())
+    if (payload?.format !== 'agent-pool-export' || payload?.version !== 1 || !payload?.agent) {
+      throw new Error('请选择由本系统导出的 Agent JSON 文件')
+    }
+    await api.post('/agents/import', payload)
+    MessagePlugin.success('Agent 已导入到我的 Agent 池')
+    await loadAgents()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, 'Agent 导入失败'))
+  } finally {
+    importingAgent.value = false
+    input.value = ''
+  }
+}
+
+async function exportAgent(agent: any) {
+  try {
+    const { data } = await api.get(`/agents/${agent.id}/export`)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    const safeName = String(agent.name || `agent-${agent.id}`).replace(/[\\/:*?"<>|]/g, '_')
+    link.href = url
+    link.download = `${safeName}.agent.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    MessagePlugin.success('Agent 配置已导出')
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, 'Agent 导出失败'))
+  }
+}
+
 async function createTask() {
   if (!newTask.value.title || !newTask.value.project_id || !selectedAgent.value) return
   loading.value = true
@@ -229,12 +276,16 @@ function lastResultLabel(status: string | null): string {
         <h1 class="page-title">Agent 池</h1>
         <p class="page-desc">全局 Agent 管理，可在任意项目中复用</p>
       </div>
+      <div class="page-header-actions">
+        <input ref="importInput" class="import-file-input" type="file" accept="application/json,.json" @change="importAgent" />
+        <t-button variant="outline" :loading="importingAgent" @click="openImportPicker">导入 Agent</t-button>
       <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type); fetchSkills()">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </template>
         创建 Agent
       </t-button>
+      </div>
     </div>
 
     <!-- Agents -->
@@ -298,6 +349,7 @@ function lastResultLabel(status: string | null): string {
 
         <!-- Actions -->
         <div class="agent-actions">
+          <t-button v-if="a.is_creator" size="small" variant="text" @click="exportAgent(a)">导出</t-button>
           <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
           <t-button v-if="a.is_creator" size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
             <template #icon>
@@ -389,6 +441,8 @@ function lastResultLabel(status: string | null): string {
 
 <style scoped>
 .page-root { max-width: 1000px; }
+.page-header-actions { display: flex; align-items: center; gap: 8px; }
+.import-file-input { display: none; }
 
 /* ── Agent cards ─────────────────────────────────────────────────── */
 .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }

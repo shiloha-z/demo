@@ -1,4 +1,5 @@
 import os
+import subprocess
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
@@ -82,6 +83,199 @@ def get_repo(workspace: str) -> Repo | None:
         return Repo(workspace)
     except GitCommandError:
         return None
+
+
+def get_base_branch(workspace: str) -> str:
+    """Return the repository's stable integration branch."""
+    repo = get_repo(workspace)
+    if not repo:
+        return "master"
+    return _get_base_branch(repo)
+
+
+@_workspace_locked
+def head_commit(workspace: str, ref: str = "HEAD") -> str:
+    repo = get_repo(workspace)
+    if not repo:
+        return ""
+    try:
+        return repo.git.rev_parse(ref).strip()
+    except GitCommandError:
+        return ""
+
+
+def default_task_worktree_path(workspace: str, task_id: int) -> str:
+    """Keep task worktrees beside, never inside, the project worktree."""
+    root = Path(workspace).resolve()
+    return str(root.parent / f"{root.name}.worktrees" / f"task-{task_id}")
+
+
+def _is_managed_worktree(base_workspace: str, worktree_path: str) -> bool:
+    base = Path(base_workspace).resolve()
+    candidate = Path(worktree_path).resolve()
+    managed_root = base.parent / f"{base.name}.worktrees"
+    try:
+        return candidate.is_relative_to(managed_root) and candidate.name.startswith("task-")
+    except AttributeError:  # Python < 3.9 compatibility
+        return str(candidate).startswith(str(managed_root)) and candidate.name.startswith("task-")
+
+
+def create_task_worktree(base_workspace: str, worktree_path: str, branch_name: str) -> tuple[bool, str]:
+    """Create an isolated task worktree from the current base branch.
+
+    Git's common metadata is shared by all worktrees, so only creation is
+    locked on the project workspace.  Subsequent agent file operations lock
+    the task worktree independently and can run in parallel.
+    """
+    if not _is_managed_worktree(base_workspace, worktree_path):
+        return False, "Unsafe task worktree path"
+    with workspace_lock(base_workspace):
+        repo = get_repo(base_workspace)
+        if not repo:
+            return False, "Project repository not found"
+        path = Path(worktree_path)
+        if path.exists():
+            existing = get_repo(str(path))
+            if existing:
+                return True, ""
+            return False, "Task worktree path already exists and is not a Git worktree"
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            base_branch = _get_base_branch(repo)
+            try:
+                repo.git.rev_parse("--verify", branch_name)
+                repo.git.worktree("add", str(path), branch_name)
+            except GitCommandError:
+                repo.git.worktree("add", "-b", branch_name, str(path), base_branch)
+            return True, ""
+        except GitCommandError as exc:
+            return False, str(exc)
+
+
+def remove_task_worktree(base_workspace: str, worktree_path: str) -> bool:
+    """Remove only a managed, no-longer-running task worktree."""
+    if not worktree_path or not _is_managed_worktree(base_workspace, worktree_path):
+        return False
+    with workspace_lock(base_workspace):
+        repo = get_repo(base_workspace)
+        if not repo:
+            return False
+        try:
+            repo.git.worktree("remove", "--force", worktree_path)
+            parent = Path(worktree_path).parent
+            if parent.exists() and not any(parent.iterdir()):
+                parent.rmdir()
+            return True
+        except GitCommandError:
+            return False
+
+
+def begin_integration(workspace: str, source_branch: str) -> dict[str, Any]:
+    """Start a no-commit merge in the base workspace.
+
+    The caller owns the project merge lock while it validates and either
+    commits or aborts this integration attempt.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return {"status": "error", "error": "Project repository not found"}
+    try:
+        base_branch = _get_base_branch(repo)
+        repo.git.checkout(base_branch)
+        if repo.is_dirty(untracked_files=True):
+            return {"status": "error", "error": "Base workspace has uncommitted changes"}
+        repo.git.merge("--no-commit", "--no-ff", source_branch)
+        return {"status": "ready", "base_branch": base_branch}
+    except GitCommandError as exc:
+        try:
+            conflicts = repo.git.diff("--name-only", "--diff-filter=U").splitlines()
+        except GitCommandError:
+            conflicts = []
+        try:
+            repo.git.merge("--abort")
+        except GitCommandError:
+            pass
+        if conflicts:
+            return {"status": "conflict", "files": conflicts}
+        return {"status": "error", "error": str(exc)}
+
+
+def finish_integration(workspace: str, message: str) -> tuple[bool, str]:
+    repo = get_repo(workspace)
+    if not repo:
+        return False, "Project repository not found"
+    try:
+        commit_hash = repo.index.commit(message).hexsha
+        return True, commit_hash
+    except Exception as exc:
+        return False, str(exc)
+
+
+def abort_integration(workspace: str) -> None:
+    repo = get_repo(workspace)
+    if not repo:
+        return
+    try:
+        repo.git.merge("--abort")
+    except GitCommandError:
+        pass
+
+
+def run_integration_checks(workspace: str, command: str, timeout_seconds: int) -> tuple[bool, str]:
+    """Run mandatory whitespace validation and an optional project test command."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False, "Project repository not found"
+    try:
+        repo.git.diff("--check", "--cached")
+    except GitCommandError as exc:
+        return False, f"Git diff check failed: {exc}"
+    if not command.strip():
+        return True, "Git diff check passed (no MERGE_TEST_COMMAND configured)"
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=workspace,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=max(1, timeout_seconds),
+        )
+    except subprocess.TimeoutExpired:
+        return False, f"Test command timed out after {timeout_seconds}s"
+    output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    if completed.returncode:
+        return False, f"Test command failed (exit {completed.returncode}): {output[-2000:]}"
+    return True, output[-2000:] or "Test command passed"
+
+
+def prepare_conflict_resolution(task_workspace: str, base_workspace: str, branch_name: str) -> tuple[bool, list[str], str]:
+    """Merge the latest base branch into a task worktree and keep conflict markers.
+
+    A resolver agent can then edit the conflicting files.  A later normal
+    task commit completes this merge and starts a fresh human review round.
+    """
+    with workspace_lock(task_workspace):
+        repo = get_repo(task_workspace)
+        base_repo = get_repo(base_workspace)
+        if not repo or not base_repo:
+            return False, [], "Task or project repository not found"
+        try:
+            base_branch = _get_base_branch(base_repo)
+            repo.git.checkout(branch_name)
+            repo.git.merge(base_branch)
+            # The branch was updated cleanly while the integration worker was
+            # waiting.  It is safe to try integration again instead of using
+            # a resolver agent.
+            return True, [], ""
+        except GitCommandError as exc:
+            try:
+                files = repo.git.diff("--name-only", "--diff-filter=U").splitlines()
+            except GitCommandError:
+                files = []
+            if files:
+                return True, files, ""
+            return False, [], str(exc)
 
 
 @_workspace_locked

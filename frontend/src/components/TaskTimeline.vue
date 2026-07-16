@@ -31,6 +31,15 @@ const statusColors: Record<string, string> = {
   reviewing: '#f59e0b', running: 'var(--primary)', pending: 'var(--warning)',
 }
 
+Object.assign(statusLabels, {
+  merge_queued: '等待合并', integrating: '正在合并',
+  conflict_resolution: '冲突处理中', merge_blocked: '合并受阻',
+})
+Object.assign(statusColors, {
+  merge_queued: '#8b5cf6', integrating: '#0ea5e9',
+  conflict_resolution: '#f97316', merge_blocked: 'var(--danger)',
+})
+
 function formatTime(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
