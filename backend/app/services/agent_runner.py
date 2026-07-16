@@ -40,7 +40,12 @@ def _now_iso() -> str:
 
 
 def _progress(task_id: int, project_id: int, message: str, step: str = ""):
-    """Push a progress update via WebSocket + record in task memory."""
+    """Push a progress update via WebSocket.
+
+    Progress logs are streamed through WebSocket only (not persisted to the
+    task-memory collection) to avoid unbounded growth of per-task memory.
+    Failure context is recorded separately via `_record_task_error`.
+    """
     from app.api.ws import broadcast_sync
 
     payload = {
@@ -51,11 +56,6 @@ def _progress(task_id: int, project_id: int, message: str, step: str = ""):
         "timestamp": _now_iso(),
     }
     broadcast_sync("task_progress", payload)
-    if mem:
-        try:
-            mem.add_task_memory(task_id, message, {"type": "progress", "step": step, "timestamp": payload["timestamp"]})
-        except Exception:
-            pass
 
 
 def _pipeline_stage(task_id: int, project_id: int, stage_key: str, status: str):
@@ -219,6 +219,27 @@ def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
             "但审查报告、问题描述、建议等面向用户的内容必须全部使用中文。"
         )
 
+        # ── Step 0: Proactively inject historical memory ─────
+        # Pull relevant project + global memories and prepend them so the agent
+        # starts with prior context instead of having to search for it.
+        if mem:
+            try:
+                history = mem.build_memory_context(
+                    project_id,
+                    f"{task.title} {task.description or ''}",
+                    n_results=5,
+                )
+                if history:
+                    task_desc = (
+                        "【历史经验参考 — 解决类似任务时可借鉴以下经验】\n"
+                        f"{history}\n\n"
+                        "【当前任务】\n"
+                        f"{task_desc}"
+                    )
+                    _progress(task_id, project_id, "🧠 已载入历史经验参考", "memory")
+            except Exception:
+                logger.exception("Failed to build memory context")
+
         # Dispatch to runner
         runner = get_runner(runner_type)
         start_ts = time.time()
@@ -368,6 +389,13 @@ def _run_agent_pipeline(task_id: int, feedback: str = "", resume: bool = False):
         except Exception:
             pass
     finally:
+        # Clean up the per-task (ephemeral) memory collection so ChromaDB does
+        # not accumulate orphaned collections after every run.
+        if mem:
+            try:
+                mem.delete_task_memory(task_id)
+            except Exception:
+                pass
         db.close()
 
 
@@ -395,10 +423,15 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
         agent.status = AgentStatus.IDLE
     db.commit()
 
-    # Record failure in memory
+    # Record failure in project memory (persists across runs, so the next task
+    # can read "why this failed" via build_memory_context injection).
     if mem:
         try:
-            mem.add_task_memory(task.id, f"Task failed [{runner_type}]: {error}", {"type": "error"})
+            mem.add_project_memory(
+                project_id,
+                f"Task #{task_id} ({task.title}) [{runner_type}] 执行失败：{error[:300]}",
+                {"type": "error", "task_id": str(task_id), "runner_type": runner_type},
+            )
         except Exception:
             pass
 

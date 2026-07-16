@@ -13,6 +13,7 @@ Each entry stores:
 
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -64,6 +65,11 @@ def _project_collection(project_id: int) -> str:
 
 GLOBAL_COLLECTION = "global_memory"
 
+# Capacity caps — project/global collections keep only the most recent N entries;
+# older entries are evicted on write to bound retrieval noise and storage growth.
+PROJECT_MEMORY_CAP = 200
+GLOBAL_MEMORY_CAP = 200
+
 
 def _get_or_create(name: str):
     client = _get_client()
@@ -75,7 +81,45 @@ def _get_or_create(name: str):
         return client.create_collection(name)
 
 
+def _enforce_cap(col, cap: int) -> None:
+    """Evict the oldest entries (by metadata timestamp) when over `cap`.
+
+    Ids are uuid-based (order-free), so eviction is driven by the `timestamp`
+    metadata set on every write. We delete the first `total - cap` oldest.
+    """
+    if col is None or cap <= 0:
+        return
+    try:
+        all_data = col.get()
+        ids = all_data.get("ids", [])
+        metas = all_data.get("metadatas", [])
+        total = len(ids)
+        if total <= cap:
+            return
+        # Pair each id with its timestamp (fallback: id string) and keep newest.
+        def _ts(m):
+            if isinstance(m, dict) and m.get("timestamp"):
+                return m["timestamp"]
+            return ""
+        pairs = sorted(zip(ids, metas), key=lambda p: _ts(p[1]))
+        stale = [pid for pid, _ in pairs[: total - cap]]
+        col.delete(ids=stale)
+        logger.info(f"Evicted {len(stale)} old entries from {col.name} (cap={cap})")
+    except Exception:
+        logger.exception(f"Failed to enforce cap on {col.name if col else '?'}")
+
+
 # ── Public API ───────────────────────────────────────────────────────────
+
+def _new_uid(prefix: str) -> str:
+    """Generate a collision-free uid.
+
+    We avoid `count()+1` style ids because ChromaDB's `count()` may include
+    tombstones after deletions (observed in 1.x), which would reuse/shift ids
+    and break eviction ordering. A uuid is always unique.
+    """
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
 
 def add_task_memory(task_id: int, doc: str, metadata: dict | None = None) -> str:
     """Record a step/observation during task execution."""
@@ -84,8 +128,7 @@ def add_task_memory(task_id: int, doc: str, metadata: dict | None = None) -> str
         return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-    count = col.count()
-    uid = f"t{task_id}_{count + 1}"
+    uid = _new_uid(f"t{task_id}")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
     logger.debug(f"Task memory [{uid}]: {doc[:80]}...")
     return uid
@@ -98,9 +141,9 @@ def add_project_memory(project_id: int, doc: str, metadata: dict | None = None) 
         return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-    count = col.count()
-    uid = f"p{project_id}_{count + 1}"
+    uid = _new_uid(f"p{project_id}")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
+    _enforce_cap(col, PROJECT_MEMORY_CAP)
     logger.debug(f"Project memory [{uid}]: {doc[:80]}...")
     return uid
 
@@ -112,9 +155,9 @@ def add_global_memory(doc: str, metadata: dict | None = None) -> str:
         return ""
     meta = metadata or {}
     meta.setdefault("timestamp", datetime.now(timezone.utc).isoformat())
-    count = col.count()
-    uid = f"g_{count + 1}"
+    uid = _new_uid("g")
     col.add(documents=[doc], metadatas=[meta], ids=[uid])
+    _enforce_cap(col, GLOBAL_MEMORY_CAP)
     logger.debug(f"Global memory [{uid}]: {doc[:80]}...")
     return uid
 
@@ -151,6 +194,41 @@ def get_recent_task_memories(task_id: int, n: int = 10) -> list[str]:
     return _get_recent(name, n)
 
 
+def build_memory_context(project_id: int, query: str, n_results: int = 5) -> str:
+    """Aggregate project + global memories into a single injectable text block.
+
+    Used by the orchestrator to *proactively* feed historical context into the
+    task prompt — so the agent starts each run with relevant prior knowledge
+    rather than having to remember to search. Returns "" when no memories exist.
+    """
+    if not mem_ok():
+        return ""
+
+    blocks: list[str] = []
+    try:
+        proj = search_project_memory(project_id, query, n_results)
+        if proj:
+            blocks.append("【项目历史经验】\n" + "\n".join(f"- {d}" for d in proj))
+    except Exception:
+        logger.exception("build_memory_context: project search failed")
+
+    try:
+        glob = search_global_memory(query, n_results)
+        if glob:
+            blocks.append("【通用模式/经验】\n" + "\n".join(f"- {d}" for d in glob))
+    except Exception:
+        logger.exception("build_memory_context: global search failed")
+
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks)
+
+
+def mem_ok() -> bool:
+    """Whether the memory backend (ChromaDB) is available."""
+    return _chromadb_available and _get_client() is not None
+
+
 # ── Internal helpers ─────────────────────────────────────────────────────
 
 def _search(collection_name: str, query: str, n_results: int) -> list[str]:
@@ -173,15 +251,22 @@ def _get_recent(collection_name: str, n: int) -> list[str]:
         return []
     try:
         col = _get_or_create(collection_name)
-        if col is None or col.count() == 0:
+        if col is None:
             return []
-        # Fetch all and sort by id (ids are sequential), return last n
         all_data = col.get()
-        if not all_data["documents"]:
+        if not all_data.get("documents"):
             return []
-        # Sort by id, take last n
-        pairs = sorted(zip(all_data["ids"], all_data["documents"]), key=lambda x: x[0])
-        return [doc for _, doc in pairs[-n:]]
+        # Sort by metadata timestamp (ids are uuid-based, order-free), take last n.
+        ids = all_data["ids"]
+        docs = all_data["documents"]
+        metas = all_data.get("metadatas", [])
+
+        def _ts(m):
+            if isinstance(m, dict) and m.get("timestamp"):
+                return m["timestamp"]
+            return ""
+        pairs = sorted(zip(ids, docs, metas), key=lambda p: _ts(p[2]))
+        return [doc for _, doc, _ in pairs[-n:]]
     except Exception:
         logger.exception(f"ChromaDB get_recent failed in {collection_name}")
         return []
