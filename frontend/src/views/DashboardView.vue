@@ -148,6 +148,23 @@ function copyProjectId(id: string, event: Event) {
     MessagePlugin.warning('复制失败，请手动复制')
   })
 }
+
+async function handleJoinProject(p: any, event: Event) {
+  event.stopPropagation()
+  if (!p.project_id) {
+    MessagePlugin.error('该项目尚未生成项目 ID')
+    return
+  }
+  joining.value = true
+  try {
+    await api.post('/projects/join', { project_id: p.project_id })
+    MessagePlugin.success(`已申请加入「${p.name}」`)
+  } catch (e: any) {
+    MessagePlugin.error(e?.response?.data?.detail || '申请失败')
+  } finally {
+    joining.value = false
+  }
+}
 </script>
 
 <template>
@@ -260,6 +277,9 @@ function copyProjectId(id: string, event: Event) {
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </div>
         </div>
+        <button class="btn-join" @click.stop="handleJoinProject(p, $event)" title="申请加入" :disabled="joining">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+        </button>
         <button class="btn-members" @click.stop="openMembers(p)" title="成员管理">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </button>
@@ -451,6 +471,16 @@ function copyProjectId(id: string, event: Event) {
 }
 .project-card:hover .btn-members { opacity: 1; }
 .btn-members:hover { background: var(--primary-light); color: var(--primary); }
+
+.btn-join {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all var(--transition-fast);
+}
+.project-card:hover .btn-join { opacity: 1; }
+.btn-join:hover { background: var(--success-light); color: var(--success); }
+.btn-join:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .field-hint {
   font-size: 11px; color: var(--muted-foreground);
