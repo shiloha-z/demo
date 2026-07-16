@@ -60,22 +60,28 @@ def push(
 
 
 def _broadcast(msg: Message) -> None:
-    """Best-effort real-time push so the UI can refresh unread counts."""
-    try:
-        from app.api.ws import broadcast_sync
+    """Best-effort real-time push so the UI can refresh unread counts.
 
-        broadcast_sync(
-            "message_new",
-            {
-                "id": msg.id,
-                "category": msg.category.value if hasattr(msg.category, "value") else msg.category,
-                "level": msg.level.value if hasattr(msg.level, "value") else msg.level,
-                "title": msg.title,
-                "project_id": msg.project_id,
-                "recipient_id": msg.recipient_id,
-                "created_at": msg.created_at.isoformat() if msg.created_at else None,
-            },
-        )
+    When the message belongs to a project, broadcast only to that project's
+    members so non-members (e.g. join-request applicants) don't see it.
+    """
+    try:
+        payload = {
+            "id": msg.id,
+            "category": msg.category.value if hasattr(msg.category, "value") else msg.category,
+            "level": msg.level.value if hasattr(msg.level, "value") else msg.level,
+            "title": msg.title,
+            "project_id": msg.project_id,
+            "recipient_id": msg.recipient_id,
+            "created_at": msg.created_at.isoformat() if msg.created_at else None,
+        }
+
+        if msg.project_id is not None:
+            from app.api.ws import broadcast_sync_to_project
+            broadcast_sync_to_project(msg.project_id, "message_new", payload)
+        else:
+            from app.api.ws import broadcast_sync
+            broadcast_sync("message_new", payload)
     except Exception:
         # Messaging must never break the caller's main flow.
         pass
