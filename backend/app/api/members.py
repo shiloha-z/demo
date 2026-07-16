@@ -17,6 +17,10 @@ from datetime import datetime, timezone
 from app.models.models import User, Project, ProjectMember, ProjectRole, JoinRequest, JoinStatus
 
 router = APIRouter(prefix="/api", tags=["Members"])
+# Kept only so old function bodies remain available for migration reference.
+# It is intentionally not registered by the application: join requests are
+# served exclusively by the canonical project-ID routes in projects.py.
+legacy_router = APIRouter(prefix="/api", tags=["Legacy Members"])
 
 
 def _broadcast_member_update(project_id: int) -> None:
@@ -298,7 +302,7 @@ class JoinRequestResponse(BaseModel):
     project_name: str = ""
 
 
-@router.get("/projects/{project_id}/join-requests", response_model=list[JoinRequestResponse])
+@legacy_router.get("/projects/{project_id}/join-requests", response_model=list[JoinRequestResponse])
 def list_join_requests(
     project_id: int,
     db: Session = Depends(get_db),
@@ -326,7 +330,7 @@ def list_join_requests(
     ]
 
 
-@router.get("/projects/{project_id}/my-request")
+@legacy_router.get("/projects/{project_id}/my-request")
 def get_my_request(
     project_id: int,
     db: Session = Depends(get_db),
@@ -352,7 +356,7 @@ def get_my_request(
     )}
 
 
-@router.post("/projects/{project_id}/join")
+@legacy_router.post("/projects/{project_id}/join")
 def request_join(
     project_id: int,
     db: Session = Depends(get_db),
@@ -394,7 +398,7 @@ def request_join(
     return {"message": "Join request submitted", "id": req.id, "status": "pending"}
 
 
-@router.post("/projects/{project_id}/join-requests/{request_id}/approve")
+@legacy_router.post("/projects/{project_id}/join-requests/{request_id}/approve")
 def approve_join(
     project_id: int,
     request_id: int,
@@ -431,7 +435,7 @@ def approve_join(
     return {"message": f"Request approved — {req.username} is now a member"}
 
 
-@router.post("/projects/{project_id}/join-requests/{request_id}/reject")
+@legacy_router.post("/projects/{project_id}/join-requests/{request_id}/reject")
 def reject_join(
     project_id: int,
     request_id: int,

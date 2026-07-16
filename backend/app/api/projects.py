@@ -556,9 +556,17 @@ def approve_application(
     join_req.status = JoinStatus.APPROVED
     join_req.reviewed_at = datetime.now(timezone.utc)
 
-    # Add as member
-    db.add(ProjectMember(project_id=project_id, user_id=join_req.user_id, role=ProjectRole.MEMBER))
+    # An invitation may have added this user while their request was pending.
+    existing_member = db.query(ProjectMember).filter(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == join_req.user_id,
+    ).first()
+    if not existing_member:
+        db.add(ProjectMember(project_id=project_id, user_id=join_req.user_id, role=ProjectRole.MEMBER))
     db.commit()
+
+    from app.api.members import _broadcast_member_update
+    _broadcast_member_update(project_id)
 
     return {"message": f"已通过 {join_req.username} 的加入申请"}
 

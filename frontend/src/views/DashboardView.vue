@@ -13,10 +13,10 @@ const newProject = ref({ name: '', description: '', workspace_name: '' })
 const creating = ref(false)
 
 const memberDialogVisible = ref(false)
-const memberDialogProject = ref<{ id: number; name: string } | null>(null)
+const memberDialogProject = ref<{ id: number; name: string; projectCode: string | null } | null>(null)
 
 function openMembers(p: any) {
-  memberDialogProject.value = { id: p.id, name: p.name }
+  memberDialogProject.value = { id: p.id, name: p.name, projectCode: p.project_id }
   memberDialogVisible.value = true
 }
 
@@ -312,6 +312,7 @@ function copyProjectId(id: string, event: Event) {
         v-if="memberDialogProject"
         :project-id="memberDialogProject.id"
         :project-name="memberDialogProject.name"
+        :project-code="memberDialogProject.projectCode"
         @close="memberDialogVisible = false"
       />
     </t-dialog>

@@ -5,7 +5,7 @@ import { useAuthStore } from '../stores/auth'
 import { useWebSocketStore } from '../stores/websocket'
 import api, { getErrorMessage } from '../api'
 
-const props = defineProps<{ projectId: number; projectName: string }>()
+const props = defineProps<{ projectId: number; projectName: string; projectCode?: string | null }>()
 const emit = defineEmits<{ close: [] }>()
 
 const auth = useAuthStore()
@@ -34,7 +34,6 @@ const transferUsername = ref('')
 const showTransfer = ref(false)
 
 // Join request state
-const myRequest = ref<{ id: number; status: string } | null>(null)
 const joinRequests = ref<any[]>([])
 const requestLoading = ref(false)
 const joining = ref(false)
@@ -50,7 +49,6 @@ const roleColors: Record<string, string> = {
   member: 'var(--success)',
 }
 
-const myMember = computed(() => members.value.find(m => Number(m.user_id) === Number(auth.userId)))
 const isOwner = computed(() => myRole.value === 'owner')
 const isOwnerOrAdmin = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
 const canManage = computed(() => isOwnerOrAdmin.value)
@@ -100,7 +98,7 @@ async function loadAll() {
 async function loadJoinRequests() {
   requestLoading.value = true
   try {
-    const { data } = await api.get(`/projects/${props.projectId}/join-requests`)
+    const { data } = await api.get(`/projects/${props.projectId}/applications`)
     joinRequests.value = Array.isArray(data) ? data : []
   } catch { joinRequests.value = [] }
   finally { requestLoading.value = false }
@@ -197,10 +195,13 @@ async function handleTransfer() {
 }
 
 async function requestJoin() {
+  if (!props.projectCode) {
+    MessagePlugin.error('该项目尚未生成项目 ID，请联系项目主管')
+    return
+  }
   joining.value = true
   try {
-    const { data } = await api.post(`/projects/${props.projectId}/join`)
-    myRequest.value = { id: data.id, status: 'pending' }
+    await api.post('/projects/join', { project_id: props.projectCode })
     MessagePlugin.success('申请已提交，等待管理员审核')
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '申请失败')) }
   finally { joining.value = false }
@@ -208,7 +209,7 @@ async function requestJoin() {
 
 async function approveRequest(req: any) {
   try {
-    await api.post(`/projects/${props.projectId}/join-requests/${req.id}/approve`)
+    await api.post(`/projects/${props.projectId}/applications/${req.id}/approve`)
     MessagePlugin.success(`${req.username} 已加入项目`)
     await loadAll()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
@@ -216,7 +217,7 @@ async function approveRequest(req: any) {
 
 async function rejectRequest(req: any) {
   try {
-    await api.post(`/projects/${props.projectId}/join-requests/${req.id}/reject`)
+    await api.post(`/projects/${props.projectId}/applications/${req.id}/reject`)
     MessagePlugin.success(`已拒绝 ${req.username}`)
     await loadAll()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
@@ -340,7 +341,8 @@ function formatDate(iso: string | null) {
     <!-- Not a member state -->
     <div v-if="!loading && !isMember" class="mm-empty">
       <p>你不是该项目的成员，无法查看成员列表</p>
-      <p class="mm-empty-hint">请联系项目负责人，通过项目 ID 申请加入</p>
+      <p class="mm-empty-hint">项目 ID：{{ projectCode || '未生成' }}</p>
+      <t-button theme="primary" size="small" :loading="joining" :disabled="!projectCode" @click="requestJoin">申请加入项目</t-button>
     </div>
 
     <!-- Empty state -->

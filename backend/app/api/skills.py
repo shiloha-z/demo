@@ -41,7 +41,7 @@ class SkillResponse(BaseModel):
 
 @router.get("", response_model=list[SkillResponse])
 def list_skills(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    skills = db.query(Skill).order_by(Skill.updated_at.desc()).all()
+    skills = db.query(Skill).filter(Skill.creator_id == user.id).order_by(Skill.updated_at.desc()).all()
     return skills
 
 
@@ -51,7 +51,7 @@ def get_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     return skill
@@ -82,7 +82,7 @@ def update_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
 
@@ -100,7 +100,7 @@ def delete_skill(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    skill = db.query(Skill).filter(Skill.id == skill_id).first()
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
     db.delete(skill)

@@ -1,3 +1,7 @@
+import secrets
+import string
+from datetime import datetime, timezone
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from .config import settings
@@ -54,6 +58,7 @@ def _migrate_schema():
                 )
 
         _repair_project_memberships(conn, existing_tables)
+        _backfill_project_codes(conn, existing_tables)
 
 
 def _repair_project_memberships(conn, existing_tables: set[str]) -> None:
@@ -104,3 +109,30 @@ def _repair_project_memberships(conn, existing_tables: set[str]) -> None:
         CREATE UNIQUE INDEX IF NOT EXISTS uq_project_members_single_owner_idx
         ON project_members(project_id) WHERE role = 'OWNER'
     """))
+
+
+def _backfill_project_codes(conn, existing_tables: set[str]) -> None:
+    """Give legacy projects a stable public code used by join requests."""
+    if "projects" not in existing_tables:
+        return
+
+    conn.execute(text("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_projects_project_code_idx
+        ON projects(project_id)
+    """))
+    date_part = datetime.now(timezone.utc).strftime("%Y%m%d")
+    missing = conn.execute(text(
+        "SELECT id FROM projects WHERE project_id IS NULL OR project_id = ''"
+    )).scalars().all()
+    for project_id in missing:
+        while True:
+            suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))
+            code = f"PROJ-{date_part}-{suffix}"
+            exists = conn.execute(text(
+                "SELECT 1 FROM projects WHERE project_id = :code"
+            ), {"code": code}).first()
+            if not exists:
+                break
+        conn.execute(text(
+            "UPDATE projects SET project_id = :code WHERE id = :id"
+        ), {"code": code, "id": project_id})

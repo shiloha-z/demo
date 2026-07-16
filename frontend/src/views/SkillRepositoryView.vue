@@ -21,7 +21,6 @@ const showEditDialog = ref(false)
 const editingSkill = ref<Skill | null>(null)
 const formData = ref({ name: '', description: '', prompt_content: '' })
 const saving = ref(false)
-const currentTab = ref<'cards' | 'table'>('cards')
 
 onMounted(async () => { await loadSkills() })
 
