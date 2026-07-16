@@ -48,7 +48,7 @@ const roleColors: Record<string, string> = {
   member: 'var(--success)',
 }
 
-const myMember = computed(() => members.value.find(m => m.user_id === auth.userId))
+const myMember = computed(() => members.value.find(m => Number(m.user_id) === Number(auth.userId)))
 const isOwner = computed(() => myRole.value === 'owner')
 const isOwnerOrAdmin = computed(() => myRole.value === 'owner' || myRole.value === 'admin')
 const canManage = computed(() => isOwnerOrAdmin.value)
@@ -68,36 +68,16 @@ onMounted(async () => {
 async function loadAll() {
   loading.value = true
   try {
-    // Try loading members (will 403 if not a member)
     const { data } = await api.get(`/projects/${props.projectId}/members`)
     members.value = Array.isArray(data) ? data : []
-    const me = members.value.find(m => m.user_id === auth.userId)
+    const uid = Number(auth.userId)
+    const me = members.value.find(m => Number(m.user_id) === uid)
     if (me) {
       isMember.value = true
       myRole.value = me.role
     }
   } catch (e: any) {
-    // Not a member or no access
     members.value = []
-  }
-
-  // Owner is always a member even if /members API fails
-  if (!isMember.value) {
-    try {
-      const { data } = await api.get(`/projects/${props.projectId}`)
-      if (data.owner_id === auth.userId) {
-        isMember.value = true
-        myRole.value = 'owner'
-      }
-    } catch { /* ignore */ }
-  }
-
-  // Load my join request (only if not a member)
-  if (!isMember.value) {
-    try {
-      const { data } = await api.get(`/projects/${props.projectId}/my-request`)
-      myRequest.value = data.request
-    } catch { myRequest.value = null }
   }
 
   // Load join requests if owner/admin
@@ -242,22 +222,13 @@ function formatDate(iso: string | null) {
     <div class="mm-header">
       <h3>成员管理 — {{ projectName }}</h3>
       <div class="mm-header-actions">
-        <!-- Non-member: join button -->
-        <template v-if="!loading && !isMember">
-          <span v-if="myRequest?.status === 'pending'" class="mm-request-status pending">申请审核中...</span>
-          <span v-else-if="myRequest?.status === 'rejected'" class="mm-request-status rejected">已被拒绝</span>
-          <span v-else-if="myRequest?.status === 'approved'" class="mm-request-status approved">已通过</span>
-          <t-button v-if="!myRequest || myRequest.status === 'rejected'" size="small" theme="primary" :loading="joining" @click="requestJoin">
-            申请加入
-          </t-button>
-        </template>
         <!-- Member: manage buttons -->
         <template v-if="canManage">
           <t-button size="small" theme="primary" variant="outline" @click="showAdd = !showAdd">
             <template #icon>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </template>
-            添加成员
+            邀请成员
           </t-button>
           <t-button v-if="isOwner" size="small" variant="text" @click="showTransfer = !showTransfer">转让项目</t-button>
         </template>
@@ -266,12 +237,15 @@ function formatDate(iso: string | null) {
 
     <!-- Add member form -->
     <div class="mm-add-form" v-if="showAdd">
-      <t-input v-model="addUsername" placeholder="输入用户名" size="small" style="flex:1" @enter="handleAdd" />
+      <t-input v-model="addUsername" placeholder="输入对方用户名邀请加入" size="small" style="flex:1" @enter="handleAdd" />
       <t-select v-model="addRole" size="small" style="width:110px">
         <t-option value="admin" label="管理员" />
         <t-option value="member" label="一般成员" />
       </t-select>
-      <t-button size="small" theme="primary" :loading="adding" @click="handleAdd">添加</t-button>
+      <t-button size="small" theme="primary" :loading="adding" @click="handleAdd">邀请</t-button>
+    </div>
+    <div class="mm-invite-hint" v-if="showAdd">
+      输入已注册用户的用户名即可邀请加入项目
     </div>
 
     <!-- Transfer form -->
@@ -349,8 +323,14 @@ function formatDate(iso: string | null) {
       </div>
     </div>
 
+    <!-- Not a member state -->
+    <div v-if="!loading && !isMember" class="mm-empty">
+      <p>你不是该项目的成员，无法查看成员列表</p>
+      <p class="mm-empty-hint">请联系项目负责人，通过项目 ID 申请加入</p>
+    </div>
+
     <!-- Empty state -->
-    <div v-if="!loading && members.length === 0" class="mm-empty">
+    <div v-if="!loading && isMember && members.length === 0" class="mm-empty">
       暂无成员
     </div>
   </div>
@@ -404,8 +384,15 @@ function formatDate(iso: string | null) {
 .mm-actions { flex-shrink: 0; }
 
 .mm-empty {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  font-size: 13px; color: var(--muted-foreground);
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--muted-foreground); gap: 4px;
+}
+.mm-empty p { margin: 0; }
+.mm-empty-hint { font-size: 11px; opacity: 0.7; }
+
+.mm-invite-hint {
+  font-size: 11px; color: var(--muted-foreground);
+  padding: 0 14px 10px; margin-top: -8px;
 }
 
 /* ── Join requests ─────────────────── */
