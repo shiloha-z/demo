@@ -14,6 +14,7 @@ from app.api.versions import router as versions_router
 from app.api.settings import router as settings_router
 from app.api.chat import router as chat_router
 from app.api.members import router as members_router
+from app.api.messages import router as messages_router
 
 
 @asynccontextmanager
@@ -48,6 +49,7 @@ app.include_router(models_router)
 app.include_router(settings_router)
 app.include_router(chat_router)
 app.include_router(members_router)
+app.include_router(messages_router)
 app.include_router(ws_router)
 
 

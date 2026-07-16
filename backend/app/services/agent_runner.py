@@ -296,6 +296,21 @@ def run_agent_pipeline(task_id: int, feedback: str = ""):
             "last_task_id": task_id, "last_task_status": "reviewing",
         })
 
+        # ── Push system message: task awaiting review ──
+        try:
+            from app.services import message_service as msg
+            from app.models.models import MessageCategory, MessageLevel
+            msg.push(
+                title="任务待审核",
+                body=f"任务 #{task_id}（{task.title}）已生成代码，等待人工审查。",
+                category=MessageCategory.REVIEW,
+                level=MessageLevel.WARNING,
+                project_id=project_id,
+                link=f"/reviews?task_id={task_id}",
+            )
+        except Exception:
+            pass
+
         logger.info(f"Task {task_id} [{runner_type}] reviewing, review #{review.id} stored")
 
     except Exception as e:
@@ -351,3 +366,18 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     })
     broadcast_sync("agent_update", {"id": task.agent_id, "status": "idle"})
+
+    # ── Push system message: task failed ──
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="任务执行失败",
+            body=f"任务 #{task_id}（{task.title}）执行失败：{error[:200]}",
+            category=MessageCategory.TASK,
+            level=MessageLevel.ERROR,
+            project_id=project_id,
+            link=f"/tasks",
+        )
+    except Exception:
+        pass

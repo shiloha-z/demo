@@ -180,3 +180,39 @@ class ChatMessage(Base):
     file_type = Column(String(50), default="")   # "image", "file"
     file_size = Column(Integer, default=0)
     created_at = Column(DateTime, default=_now)
+
+
+class MessageCategory(str, Enum):
+    SYSTEM = "system"      # 纯系统提示
+    TASK = "task"          # 任务相关（执行完成/失败）
+    REVIEW = "review"      # 审查相关（待审核/通过/驳回）
+    VERSION = "version"    # 版本相关（回退）
+    MEMBER = "member"      # 成员相关（为多人协作预留）
+
+
+class MessageLevel(str, Enum):
+    INFO = "info"
+    SUCCESS = "success"
+    WARNING = "warning"
+    ERROR = "error"
+
+
+class Message(Base):
+    """系统/项目消息中心。
+
+    为后续多人协作预留 recipient_id：当前阶段可置 None 表示系统级广播，
+    将来定向推送给具体用户时写入 recipient_id 即可，前端结构无需改动。
+    """
+
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    category = Column(SAEnum(MessageCategory), default=MessageCategory.SYSTEM, nullable=False)
+    level = Column(SAEnum(MessageLevel), default=MessageLevel.INFO, nullable=False)
+    title = Column(String(200), nullable=False)
+    body = Column(Text, default="")
+    link = Column(String(300), default="")   # 点击跳转，如 /reviews?task_id=12
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=_now)

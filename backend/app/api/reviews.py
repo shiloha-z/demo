@@ -101,6 +101,21 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         except Exception:
             pass
 
+    # Push system message
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="审查已通过",
+            body=f"审查 #{review_id}（任务 #{review.task_id}）已通过，变更已合并到主分支。",
+            category=MessageCategory.REVIEW,
+            level=MessageLevel.SUCCESS,
+            project_id=review.project_id,
+            link=f"/versions",
+        )
+    except Exception:
+        pass
+
     return {"message": "Approved"}
 
 
@@ -146,6 +161,21 @@ def reject_review(
             f"Review #{review_id} (task #{review.task_id}) REJECTED. Feedback: {feedback}",
             {"type": "review_decision", "review_id": str(review_id), "decision": "rejected",
              "new_review_id": str(new_review.id)})
+    except Exception:
+        pass
+
+    # Push system message
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="审查已驳回",
+            body=f"审查 #{review_id}（任务 #{review.task_id}）已驳回，Agent 将根据反馈重新执行。",
+            category=MessageCategory.REVIEW,
+            level=MessageLevel.WARNING,
+            project_id=review.project_id,
+            link=f"/reviews?review_id={review_id}",
+        )
     except Exception:
         pass
 
@@ -197,6 +227,21 @@ def close_review(
                 {"type": "review_decision", "review_id": str(review_id), "decision": "closed"})
         except Exception:
             pass
+
+    # Push system message
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="审查已关闭",
+            body=f"审查 #{review_id}（任务 #{review.task_id}）已关闭，任务终止，未合并。",
+            category=MessageCategory.REVIEW,
+            level=MessageLevel.INFO,
+            project_id=review.project_id,
+            link=f"/reviews?review_id={review_id}",
+        )
+    except Exception:
+        pass
 
     return {"message": "Closed"}
 

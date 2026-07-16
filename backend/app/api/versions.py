@@ -111,6 +111,21 @@ def rollback_version(
     except Exception:
         pass
 
+    # Push system message
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="版本已回退",
+            body=f"项目已回退到版本 {target.commit_hash[:7]}。",
+            category=MessageCategory.VERSION,
+            level=MessageLevel.INFO,
+            project_id=project_id,
+            link=f"/versions",
+        )
+    except Exception:
+        pass
+
     return RollbackResponse(
         success=True,
         message=f"已回退到版本 {target.commit_hash[:7]}",
