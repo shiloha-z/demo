@@ -143,8 +143,7 @@ class OpenCodeRunner(BaseRunner):
             _OPENCODE_PATH, "run",
             "--format", "json",
             "--model", model_flag,
-            "--cwd", workspace,
-            "--no-interactive",
+            "--dir", workspace,
             prompt,
         ]
 
