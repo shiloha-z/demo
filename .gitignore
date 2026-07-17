@@ -37,9 +37,16 @@ Thumbs.db
 start.ps1
 
 # Walkthrough / runtime logs (test artifacts, never commit)
+*.log
 *.log.txt
 *_err.txt
+*_err.log
 *_log.txt
+*_log.log
+admin-console/admin_frontend.log
+admin-console/admin_frontend_err.log
+backend/admin_backend.log
+backend/admin_backend_err.log
 backend/backend_err.txt
 backend/backend_log.txt
 backend/bimp.txt

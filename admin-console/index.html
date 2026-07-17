@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>管理后台（调试用）</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">⚙</span>
+        <div>
+          <h1>管理后台</h1>
+          <p class="sub">调试用途 · 无鉴权 · 仅限本地</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <input id="globalSearch" class="search" type="text" placeholder="搜索（用户名 / 项目 / Agent）" />
+        <span id="apiStatus" class="api-status">后端：检测中…</span>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="users">账号 <span class="badge" id="count-users">0</span></button>
+      <button class="tab" data-tab="projects">项目 <span class="badge" id="count-projects">0</span></button>
+      <button class="tab" data-tab="agents">Agent <span class="badge" id="count-agents">0</span></button>
+    </nav>
+
+    <main class="content">
+      <div class="toolbar">
+        <span id="listSummary" class="summary"></span>
+        <button id="refreshBtn" class="btn ghost">刷新</button>
+      </div>
+      <div class="table-wrap">
+        <table class="grid">
+          <thead id="tableHead"></thead>
+          <tbody id="tableBody"></tbody>
+        </table>
+        <div id="emptyState" class="empty">暂无数据</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- 详情抽屉 -->
+  <div id="drawerMask" class="drawer-mask hidden">
+    <aside class="drawer">
+      <div class="drawer-head">
+        <h2 id="drawerTitle">详情</h2>
+        <button id="drawerClose" class="icon-btn">✕</button>
+      </div>
+      <div id="drawerBody" class="drawer-body"></div>
+      <div class="drawer-foot">
+        <button id="drawerDelete" class="btn danger">删除此项</button>
+      </div>
+    </aside>
+  </div>
+
+  <!-- 删除确认 -->
+  <div id="confirmMask" class="modal-mask hidden">
+    <div class="modal">
+      <h3>确认删除</h3>
+      <p id="confirmText"></p>
+      <div class="modal-foot">
+        <button id="confirmCancel" class="btn ghost">取消</button>
+        <button id="confirmOk" class="btn danger">确定删除</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
