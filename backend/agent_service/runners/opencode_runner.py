@@ -155,6 +155,7 @@ class OpenCodeRunner(BaseRunner):
         )
 
         stdout_lines: list[str] = []
+        error_msg = ""
         if proc.stdout:
             async for line in proc.stdout:
                 try:
@@ -162,10 +163,18 @@ class OpenCodeRunner(BaseRunner):
                     if not text:
                         continue
                     stdout_lines.append(text)
-                    # Try to parse JSON event for progress
+                    # Try to parse JSON event
                     try:
                         event = json.loads(text)
                         if isinstance(event, dict):
+                            # Check for error events first
+                            if event.get("type") == "error":
+                                err = event.get("error", {})
+                                err_data = err.get("data", {}) if isinstance(err, dict) else {}
+                                error_msg = err_data.get("message", "") or err.get("message", "") or str(err)
+                                if on_progress:
+                                    on_progress(f"❌ OpenCode 错误: {error_msg[:200]}", "opencode_error")
+                                continue
                             msg = event.get("message") or event.get("text") or ""
                             if msg and on_progress:
                                 on_progress(f"  {str(msg)[:200]}", "opencode_output")
@@ -182,7 +191,9 @@ class OpenCodeRunner(BaseRunner):
 
         await proc.wait()
 
-        if proc.returncode != 0 and not stdout_lines:
+        if error_msg:
+            return f"[OpenCode 执行失败]\n{error_msg}"
+        if proc.returncode != 0:
             return f"[OpenCode exited with code {proc.returncode}]\n{stderr_text}"
 
         return "\n".join(stdout_lines) if stdout_lines else stderr_text
