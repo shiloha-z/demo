@@ -145,6 +145,21 @@ def update_setting(req: SettingUpdate):
     if hasattr(app_settings, req.key):
         setattr(app_settings, req.key, req.value)
 
+    # Audit: 配置变更（记录变更项，敏感密钥不记原文）。
+    from app.services.audit_service import record as audit_record
+    from app.models.models import AuditAction, AuditActorType
+    is_secret = any(
+        f["type"] == "password" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key
+    )
+    audit_record(
+        action=AuditAction.CONFIG_UPDATE,
+        actor_type=AuditActorType.HUMAN,
+        target_type="config",
+        target_id=req.key,
+        intent=f"更新配置 {req.key}",
+        payload={"value": "***" if is_secret else req.value, "secret": is_secret},
+    )
+
     return {
         "key": req.key,
         "value": req.value,

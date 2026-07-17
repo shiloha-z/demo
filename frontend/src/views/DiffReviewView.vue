@@ -5,12 +5,17 @@ import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import { useAuthStore } from '../stores/auth'
 import DiffViewer from '../components/DiffViewer.vue'
+import AuditChainPanel from '../components/AuditChainPanel.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
 const auth = useAuthStore()
+
+// 审计责任链弹窗
+const chainVisible = ref(false)
+function openChain() { chainVisible.value = true }
 
 const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const reviews = ref<any[]>([])
@@ -200,10 +205,18 @@ function formatDate(d: string) {
         <div class="review-detail" v-if="selectedReview">
           <div class="detail-header">
             <h3>审查 #{{ selectedReview.id }}</h3>
-            <div class="detail-actions" v-if="selectedReview.status === 'pending'">
-              <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="openRejectDialog">驳回并修改</t-button>
-              <span v-if="hasApprovalQuorum" class="merge-queue-hint">通过票数已满足，正在进入合并队列</span>
-              <t-button size="small" theme="default" variant="text" :disabled="loading" @click="closeReview(selectedReview)">结束</t-button>
+            <div class="detail-actions">
+              <t-button size="small" theme="default" variant="outline" @click="openChain()">
+                <template #icon>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                </template>
+                责任链
+              </t-button>
+              <template v-if="selectedReview.status === 'pending'">
+                <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="openRejectDialog">驳回并修改</t-button>
+                <span v-if="hasApprovalQuorum" class="merge-queue-hint">通过票数已满足，正在进入合并队列</span>
+                <t-button size="small" theme="default" variant="text" :disabled="loading" @click="closeReview(selectedReview)">结束</t-button>
+              </template>
             </div>
           </div>
 
@@ -265,6 +278,8 @@ function formatDate(d: string) {
         <t-textarea v-model="feedbackText" placeholder="例如：登录页面缺少密码强度校验、需要添加手机号验证码登录方式..." :autosize="{ minRows: 3, maxRows: 6 }" />
       </div>
     </t-dialog>
+
+    <AuditChainPanel v-model:visible="chainVisible" :task-id="selectedReview?.task_id ?? null" />
   </div>
 </template>
 

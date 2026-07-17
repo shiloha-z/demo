@@ -63,6 +63,11 @@ const router = createRouter({
       name: 'SkillRepository',
       component: () => import('../views/SkillRepositoryView.vue'),
     },
+    {
+      path: '/audit',
+      name: 'AuditCenter',
+      component: () => import('../views/AuditLogView.vue'),
+    },
   ],
 })
 

@@ -7,6 +7,8 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentStatus, Project, Review, ReviewStatus, Task, TaskStatus, Version
 from app.services import git_service as git
+from app.services.audit_service import record as audit_record
+from app.models.models import AuditAction, AuditActorType
 
 
 def _update_task(task: Task, status: TaskStatus, error: str = "") -> None:
@@ -95,6 +97,18 @@ def integrate_task(task_id: int) -> None:
                 task.merge_error = ""
                 db.commit()
 
+                # Audit: 对项目的影响 —— 合并完成（落库版本，记录影响范围）。
+                audit_record(
+                    action=AuditAction.MERGE_DONE,
+                    actor_type=AuditActorType.SYSTEM,
+                    project_id=project.id,
+                    task_id=task.id,
+                    target_type="version",
+                    target_id=commit_or_error,
+                    intent=f"审查通过后合并任务 #{task.id} 到主分支",
+                    impact=f"版本 {commit_or_error}：任务「{task.title}」已合并至主分支",
+                )
+
                 git.remove_task_worktree(project.workspace_path, task.worktree_path)
                 git.delete_branch(project.workspace_path, branch_name)
                 _broadcast(task)
@@ -133,6 +147,18 @@ def integrate_task(task_id: int) -> None:
         task.status = TaskStatus.CONFLICT_RESOLUTION
         task.merge_error = f"Merge conflict in: {conflict_list}"
         task.completed_at = None
+
+        # Audit: 对项目的影响 —— 合并冲突，转交 Agent 自动解决。
+        audit_record(
+            action=AuditAction.CONFLICT_AUTO_RESOLVED,
+            actor_type=AuditActorType.SYSTEM,
+            project_id=project.id,
+            task_id=task.id,
+            target_type="task",
+            target_id=task.id,
+            intent=f"合并冲突，转交 Agent 自动解决（冲突文件：{conflict_list}）",
+            impact=f"任务 #{task.id} 合并主分支时发生冲突：{conflict_list}",
+        )
         agent = db.get(Agent, task.agent_id)
         if agent:
             agent.status = AgentStatus.WORKING

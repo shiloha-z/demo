@@ -40,6 +40,28 @@ def enqueue_agent_run(
         with _lock:
             _active_agent_tasks.discard(task_id)
         return False
+    # Audit: 人让 AI 干的事 —— 任务进入执行队列（记录派发意图）。
+    try:
+        from app.services.audit_service import record as audit_record
+        from app.models.models import AuditAction, AuditActorType, Task
+        adb = SessionLocal()
+        try:
+            atask = adb.get(Task, task_id)
+            if atask:
+                audit_record(
+                    action=AuditAction.AGENT_DISPATCH,
+                    actor_type=AuditActorType.SYSTEM,
+                    project_id=atask.project_id,
+                    task_id=task_id,
+                    target_type="task",
+                    target_id=task_id,
+                    intent=feedback or atask.description,
+                    payload={"resume": resume, "conflict_resolution": conflict_resolution},
+                )
+        finally:
+            adb.close()
+    except Exception:
+        pass
     return True
 
 

@@ -5,6 +5,7 @@ import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import TaskTimeline from '../components/TaskTimeline.vue'
+import AuditChainPanel from '../components/AuditChainPanel.vue'
 import type { StageState } from '../components/PipelineStepper.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
@@ -442,6 +443,10 @@ const agents = ref<any[]>([])
 const newTaskForm = ref({ agent_id: null as number | null, title: '', description: '', approval_percent: 50 })
 const creatingTask = ref(false)
 
+// 审计责任链弹窗
+const chainVisible = ref(false)
+function openChain() { chainVisible.value = true }
+
 async function loadAgents() {
   try {
     const { data } = await api.get('/agents')
@@ -743,6 +748,10 @@ async function resumeTask(task: any, event: Event) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 <span>工作空间</span>
               </button>
+              <button class="workspace-btn" @click="openChain()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+                <span>责任链</span>
+              </button>
               <div class="detail-time" v-if="taskDetail.created_at">
                 {{ formatDate(taskDetail.created_at) }}
               </div>
@@ -853,6 +862,8 @@ async function resumeTask(task: any, event: Event) {
               <p v-else>当前状态：{{ statusLabels[taskDetail.status] || taskDetail.status }}</p>
             </div>
           </div>
+
+          <AuditChainPanel v-model:visible="chainVisible" :task-id="selectedTask?.id ?? null" />
 
           <!-- Workspace file panel -->
           <Teleport to="body">

@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, ReviewRound, ReviewReviewer, ReviewVote, Project, ProjectMember
 from app.services import git_service as git
+from app.services.audit_service import record as audit_record
+
 
 # Lazy import — memory_service may fail if chromadb not installed
 try:

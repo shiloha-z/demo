@@ -64,6 +64,12 @@ def _migrate_schema():
 
         _repair_project_memberships(conn, existing_tables)
         _backfill_project_codes(conn, existing_tables)
+        # Drop tables that belonged to the removed nested sub-agent feature
+        # (TaskNode tree + SubAgentRun records). These are no longer referenced
+        # by any model, so dropping them keeps legacy databases clean.
+        for stale in ("task_nodes", "sub_agent_runs"):
+            if stale in existing_tables:
+                conn.execute(text(f'DROP TABLE IF EXISTS "{stale}"'))
         # Python-side column defaults do not populate rows that predate an
         # additive SQLite migration.  Preserve the product default for those
         # legacy tasks explicitly.

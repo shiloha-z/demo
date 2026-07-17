@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
+import AuditChainPanel from '../components/AuditChainPanel.vue'
 import api from '../api'
 
 const store = useProjectStore()
@@ -12,6 +13,21 @@ const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const versions = ref<any[]>([])
 const loading = ref(false)
 const rollingBack = ref<string | null>(null)
+
+// 审计责任链弹窗（按版本关联的任务）
+const chainVisible = ref(false)
+const chainTaskId = ref<number | null>(null)
+async function openChainForVersion(v: any) {
+  if (!v.review_id) return
+  try {
+    const { data } = await api.get(`/reviews/${v.review_id}`)
+    chainTaskId.value = data.task_id ?? null
+    chainVisible.value = true
+  } catch {
+    chainTaskId.value = null
+    chainVisible.value = true
+  }
+}
 
 watch(() => store.currentProject?.id, async (pid) => {
   if (!pid) return
@@ -116,6 +132,19 @@ function formatDate(d: string) {
           <div class="card-right">
             <span class="commit-time">{{ formatDate(v.created_at) }}</span>
             <span v-if="v.review_id" class="review-link">审查 #{{ v.review_id }}</span>
+            <t-button
+              v-if="v.review_id"
+              size="small"
+              variant="outline"
+              theme="default"
+              @click="openChainForVersion(v)"
+              title="查看责任链"
+            >
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+              </template>
+              责任链
+            </t-button>
             <t-button
               size="small"
               variant="outline"

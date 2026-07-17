@@ -19,6 +19,39 @@ class AgentStatus(str, Enum):
     ERROR = "error"
 
 
+class AuditActorType(str, Enum):
+    HUMAN = "human"      # 人类用户发起的操作
+    AGENT = "agent"      # AI Agent 执行/派发
+    SYSTEM = "system"    # 系统自动行为（合并/冲突解决/重启恢复）
+
+
+class AuditAction(str, Enum):
+    # 任务生命周期（人为操作 / 人让 AI 干的事）
+    TASK_CREATE = "task_create"
+    TASK_START = "task_start"
+    TASK_STOP = "task_stop"
+    TASK_RESUME = "task_resume"
+    TASK_ARCHIVE = "task_archive"
+    TASK_DELETE = "task_delete"
+    AGENT_DISPATCH = "agent_dispatch"   # 人让 AI 干的事：派发执行意图
+    # 审查投票
+    REVIEW_VOTE = "review_vote"
+    REVIEW_APPROVE = "review_approve"
+    REVIEW_REJECT = "review_reject"
+    REVIEW_CLOSE = "review_close"
+    # 协作与成员
+    TRANSFER_OWNER = "transfer_owner"
+    MEMBER_ADD = "member_add"
+    MEMBER_REMOVE = "member_remove"
+    JOIN_APPROVE = "join_approve"
+    JOIN_REJECT = "join_reject"
+    # 配置
+    CONFIG_UPDATE = "config_update"
+    # 对项目的影响（AI 自动行为）
+    MERGE_DONE = "merge_done"
+    CONFLICT_AUTO_RESOLVED = "conflict_auto_resolved"
+
+
 class TaskStatus(str, Enum):
     PENDING = "pending"          # 等待执行
     RUNNING = "running"          # 执行中
@@ -130,6 +163,7 @@ class Agent(Base):
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
 
     creator = relationship("User", back_populates="agents")
+
 
 
 class Skill(Base):
@@ -301,3 +335,38 @@ class MessageRead(Base):
     message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     read_at = Column(DateTime, default=_now, nullable=False)
+
+
+class AuditLog(Base):
+    """全链路审计账本（Append-only）。
+
+    串联三类事件：
+      - 人为操作（通过/驳回/转让/删成员/改配置…）
+      - 人让 AI 干的事（创建任务、派发指令、驳回反馈）
+      - AI 对项目的影响（合并、冲突自动解决、文件变更）
+
+    correlation_id 用顶层 task_id 串联；task_node_id 预留给后续需要更细粒度
+    关联的功能（如子任务、对话、技能等）。
+    """
+
+    __tablename__ = "audit_logs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    actor_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # 人类操作人；AGENT/SYSTEM 时为 NULL
+    actor_type = Column(SAEnum(AuditActorType), default=AuditActorType.HUMAN, nullable=False)
+    project_id = Column(Integer, ForeignKey("projects.id"), nullable=True, index=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+    # Reserved for future finer-grained linking (e.g. sub-tasks, conversations,
+    # skills). Kept as a plain indexed column now that task_nodes is gone.
+    task_node_id = Column(Integer, nullable=True, index=True)
+    action = Column(SAEnum(AuditAction), nullable=False, index=True)
+    target_type = Column(String(30), default="")  # task / review / member / project / config / file
+    target_id = Column(String(60), default="")
+    intent = Column(Text, default="")    # 人类填写的指令/feedback 原文（"人让 AI 干的事"）
+    payload = Column(Text, default="")   # JSON：变更前后快照 / 参数摘要（仅结构化摘要，不存大文本）
+    impact = Column(Text, default="")    # 文本/JSON：对项目造成的影响（如"合并了 3 个文件到 master"）
+    ip = Column(String(64), default="")
+    ua = Column(String(300), default="")
+    created_at = Column(DateTime, default=_now, nullable=False)  # 只追加不可变
+
+    actor = relationship("User")

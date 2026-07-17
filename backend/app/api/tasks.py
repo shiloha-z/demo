@@ -10,6 +10,9 @@ from app.core.auth import get_current_user
 from app.core.permissions import require_project_member
 from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
 from app.services import git_service as git
+from app.services.audit_service import record as audit_record
+from app.models.models import AuditAction, AuditActorType
+
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
 
@@ -121,6 +124,9 @@ def _task_to_response(t: Task) -> TaskResponse:
     )
 
 
+
+
+
 @router.get("", response_model=list[TaskResponse])
 def list_tasks(
     project_id: int,
@@ -205,6 +211,7 @@ def get_task_detail(
         agent_runner_type=task.agent.runner_type if task.agent else None,
         project_name=task.project.name if task.project else None,
         review={
+
             "id": review.id,
             "diff_content": review.diff_content,
             "agent_review_summary": review.agent_review_summary,
@@ -269,6 +276,19 @@ def create_task(
     # Notify all clients: new task created
     from app.api.ws import broadcast_sync
     broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "pending"})
+
+    # Audit: 人为创建任务（记录指令意图）。
+    audit_record(
+        action=AuditAction.TASK_CREATE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+        intent=req.description,
+        payload={"title": task.title, "agent_id": req.agent_id, "approval_percent": req.approval_percent},
+    )
 
     return _task_to_response(task)
 
@@ -337,6 +357,19 @@ def start_task(
         "id": agent.id, "status": "working", "current_task_id": task.id,
     })
 
+    # Audit: 人让 AI 干的事 —— 启动任务即派发执行。
+    audit_record(
+        action=AuditAction.TASK_START,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+        intent=task.description,
+        payload={"agent_id": agent.id, "agent_name": agent.name},
+    )
+
     # A bounded executor queues independent worktrees; requests never create
     # unbounded concurrent model calls.
     from app.services.execution_service import enqueue_agent_run
@@ -392,6 +425,16 @@ def stop_task(
     broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "paused"})
     if agent and not run_active and not other_active:
         broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+
+    audit_record(
+        action=AuditAction.TASK_STOP,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+    )
 
     return _task_to_response(task)
 
@@ -451,6 +494,16 @@ def resume_task(
         db.commit()
         raise HTTPException(status_code=409, detail="任务恢复入队失败，请稍后重试")
 
+    audit_record(
+        action=AuditAction.TASK_RESUME,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+    )
+
     return _task_to_response(task)
 
 
@@ -475,6 +528,16 @@ def archive_task(
         raise HTTPException(status_code=400, detail="任务已归档")
     task.archived = True
     db.commit()
+
+    audit_record(
+        action=AuditAction.TASK_ARCHIVE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+    )
     return {"message": "已归档"}
 
 
@@ -529,6 +592,16 @@ def delete_task(
 
     db.delete(task)
     db.commit()
+
+    audit_record(
+        action=AuditAction.TASK_DELETE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=task.id,
+        target_type="task",
+        target_id=task.id,
+    )
     return {"message": "已删除"}
 
 
@@ -568,6 +641,16 @@ def batch_delete_tasks(
         db.delete(t)
         deleted_count += 1
     db.commit()
+
+    audit_record(
+        action=AuditAction.TASK_DELETE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="task_bulk",
+        target_id=",".join(str(i) for i in task_ids),
+        payload={"deleted": task_ids},
+    )
     return {"message": f"已删除 {deleted_count} 个任务", "count": deleted_count}
 
 

@@ -9,6 +9,8 @@ from app.core.auth import get_current_user
 from app.core.permissions import require_project_admin, require_project_member
 from app.models.models import User, Review, ReviewStatus, ReviewRound, ReviewReviewer, ReviewVote, ProjectMember, Task, TaskStatus, Version, Agent, AgentStatus
 from app.services import git_service as git
+from app.services.audit_service import record as audit_record
+from app.models.models import AuditAction, AuditActorType
 
 # Lazy import — memory_service may fail if chromadb not installed
 try:
@@ -120,6 +122,18 @@ def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
         enqueue_merge(task.id)
     except Exception:
         logger.exception("Failed to wake merge queue for task %s", task.id)
+
+    # Audit: 审查达到法定票数，自动批准并入合并队列。
+    audit_record(
+        action=AuditAction.REVIEW_APPROVE,
+        actor_type=AuditActorType.SYSTEM,
+        project_id=review.project_id,
+        task_id=task.id,
+        target_type="review",
+        target_id=review.id,
+        intent="审查达到法定批准票数",
+        payload={"required_approvals": _ensure_vote_round(review, db).required_approvals},
+    )
     return {"message": "Approved and queued for merge"}
 
 
@@ -179,6 +193,23 @@ def configure_reviewers(
     db.query(ReviewReviewer).filter(ReviewReviewer.review_id == review.id).delete()
     db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in reviewer_ids])
     db.commit()
+
+    # Audit: 配置评审人 / 法定票数。
+    audit_record(
+        action=AuditAction.REVIEW_VOTE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=review.project_id,
+        task_id=review.task_id,
+        target_type="review",
+        target_id=review.id,
+        intent="配置评审人与法定批准票数",
+        payload={
+            "reviewer_ids": reviewer_ids,
+            "required_approvals": body.required_approvals,
+            "veto_on_reject": body.veto_on_reject,
+        },
+    )
     return _vote_summary(review, db)
 
 
@@ -222,6 +253,20 @@ def cast_review_vote(
             comment=body.comment.strip(),
         ))
     db.commit()
+
+    # Audit: 成员投票（记录决策与意见作为意图）。
+    audit_record(
+        action=AuditAction.REVIEW_VOTE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=review.project_id,
+        task_id=review.task_id,
+        target_type="review",
+        target_id=review.id,
+        intent=body.comment.strip(),
+        payload={"decision": body.decision},
+    )
+
     summary = _vote_summary(review, db)
     round_ = _ensure_vote_round(review, db)
     queued_for_merge = False
@@ -413,6 +458,19 @@ def reject_review(
     task.status = TaskStatus.RUNNING
     task.completed_at = None
 
+    # Audit: 审查被驳回（记录反馈作为意图，将触发 Agent 重新执行）。
+    audit_record(
+        action=AuditAction.REVIEW_REJECT,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=review.project_id,
+        task_id=review.task_id,
+        target_type="review",
+        target_id=review.id,
+        intent=feedback,
+        payload={"rerun": True},
+    )
+
     # Set agent to WORKING to prevent concurrent task creation during the gap
     agent = db.get(Agent, task.agent_id) if task else None
     if agent:
@@ -504,6 +562,18 @@ def close_review(
     task.status = TaskStatus.REJECTED
 
     db.commit()
+
+    # Audit: 审查被关闭（终止驳回，未合并）。
+    audit_record(
+        action=AuditAction.REVIEW_CLOSE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=review.project_id,
+        task_id=review.task_id,
+        target_type="review",
+        target_id=review.id,
+        intent="关闭审查（终止，未合并）",
+    )
 
     # Switch back to master and delete the task branch
     from app.models.models import Project

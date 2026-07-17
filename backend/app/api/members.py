@@ -15,6 +15,8 @@ from app.core.database import get_db
 from app.core.auth import get_current_user
 from datetime import datetime, timezone
 from app.models.models import User, Project, ProjectMember, ProjectRole, JoinRequest, JoinStatus, Review, ReviewVote, ReviewReviewer
+from app.services.audit_service import record as audit_record
+from app.models.models import AuditAction, AuditActorType
 
 router = APIRouter(prefix="/api", tags=["Members"])
 # Kept only so old function bodies remain available for migration reference.
@@ -165,6 +167,17 @@ def add_member(
     db.commit()
     db.refresh(pm)
 
+    # Audit: 新增成员。
+    audit_record(
+        action=AuditAction.MEMBER_ADD,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="member",
+        target_id=target.id,
+        intent=f"添加成员 {target.username}（角色：{body.role}）",
+    )
+
     _broadcast_member_update(project_id)
 
     return {
@@ -208,6 +221,18 @@ def update_member_role(
 
     target_pm.role = ProjectRole(body.role)
     db.commit()
+
+    # Audit: 调整成员角色。
+    audit_record(
+        action=AuditAction.MEMBER_ADD,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="member",
+        target_id=member_user_id,
+        intent=f"调整成员角色为 {body.role}",
+    )
+
     _broadcast_member_update(project_id)
 
     return {"message": f"Role updated to {body.role}"}
@@ -250,6 +275,18 @@ def remove_member(
         _cleanup_member_review_data(member_user_id, project_id)
         db.delete(target_pm)
         db.commit()
+
+        # Audit: 成员主动退出。
+        audit_record(
+            action=AuditAction.MEMBER_REMOVE,
+            actor_id=user.id,
+            actor_type=AuditActorType.HUMAN,
+            project_id=project_id,
+            target_type="member",
+            target_id=member_user_id,
+            intent="成员主动退出项目",
+        )
+
         _broadcast_member_update(project_id)
         return {"message": "You have left the project"}
 
@@ -265,6 +302,18 @@ def remove_member(
     _cleanup_member_review_data(member_user_id, project_id)
     db.delete(target_pm)
     db.commit()
+
+    # Audit: 移除成员。
+    audit_record(
+        action=AuditAction.MEMBER_REMOVE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="member",
+        target_id=member_user_id,
+        intent=f"移除成员（{target_pm.role.value}）",
+    )
+
     _broadcast_member_update(project_id)
 
     return {"message": "Member removed"}
@@ -323,6 +372,17 @@ def transfer_ownership(
         project.owner_id = target_user.id
 
     db.commit()
+
+    # Audit: 转让项目所有权（安全敏感操作）。
+    audit_record(
+        action=AuditAction.TRANSFER_OWNER,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="project",
+        target_id=project_id,
+        intent=f"项目主管由 {old_owner_name} 变更为 {target_user.username}",
+    )
 
     _broadcast_member_update(project_id)
 
@@ -484,6 +544,18 @@ def approve_join(
         ))
 
     db.commit()
+
+    # Audit: 批准加入申请。
+    audit_record(
+        action=AuditAction.JOIN_APPROVE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="join_request",
+        target_id=request_id,
+        intent=f"批准 {req.username} 的加入申请",
+    )
+
     _broadcast_member_update(project_id)
 
     return {"message": f"Request approved — {req.username} is now a member"}
@@ -511,5 +583,16 @@ def reject_join(
     req.status = JoinStatus.REJECTED
     req.reviewed_at = datetime.now(timezone.utc)
     db.commit()
+
+    # Audit: 驳回加入申请。
+    audit_record(
+        action=AuditAction.JOIN_REJECT,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        target_type="join_request",
+        target_id=request_id,
+        intent=f"驳回 {req.username} 的加入申请",
+    )
 
     return {"message": f"Request rejected for {req.username}"}

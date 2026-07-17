@@ -20,6 +20,14 @@ class Settings(BaseSettings):
     MERGE_MAX_CONCURRENCY: int = 2
     MERGE_TEST_COMMAND: str = ""
     MERGE_TEST_TIMEOUT_SECONDS: int = 300
+    # Audit trail — append-only ledger recording human actions, AI dispatch
+    # intents, and their impact on the project. Defaults on; never blocks the
+    # main flow (the recorder swallows its own exceptions).
+    AUDIT_ENABLED: bool = True
+    # Nested sub-agent decomposition limits.
+    MAX_SUBTASKS: int = 8                # Planner 最多拆出的直接子节点数（超出截断）
+    NESTING_MAX_DEPTH: int = 2           # 递归嵌套最大深度（防爆炸，顶层为 1）
+    PLANNER_DEFAULT_ON: bool = False     # 新任务默认是否开启自动划分
 
 
 settings = Settings()
