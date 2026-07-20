@@ -116,6 +116,21 @@ def _migrate_schema():
             conn.execute(text("UPDATE skills SET description = '' WHERE description IS NULL"))
             conn.execute(text("UPDATE skills SET prompt_content = '' WHERE prompt_content IS NULL"))
 
+        # Legacy agent rows created before planning columns existed hold NULL in
+        # the additive-migration columns (enable_planning/max_subtasks). Populate
+        # the ORM defaults so the list API returns well-formed values instead of
+        # tripping a 500 on serialization.
+        if "agents" in existing_tables:
+            conn.execute(text("UPDATE agents SET enable_planning = 0 WHERE enable_planning IS NULL"))
+            conn.execute(text("UPDATE agents SET max_subtasks = 6 WHERE max_subtasks IS NULL"))
+
+        # Nested-agent task-tree columns added after launch. Backfill the
+        # additive columns so existing rows serialize without NULL values.
+        if "tasks" in existing_tables:
+            conn.execute(text("UPDATE tasks SET plan_json = '[]' WHERE plan_json IS NULL"))
+            conn.execute(text("UPDATE tasks SET subtask_count = 0 WHERE subtask_count IS NULL"))
+            conn.execute(text("UPDATE tasks SET subtask_done = 0 WHERE subtask_done IS NULL"))
+
 
 def _repair_project_memberships(conn, existing_tables: set[str]) -> None:
     """Repair legacy membership data and enforce one owner per project.

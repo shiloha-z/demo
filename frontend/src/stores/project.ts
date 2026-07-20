@@ -50,9 +50,16 @@ export const useProjectStore = defineStore('project', () => {
       currentProject.value = null
       return true
     }
-    const allowed = switchableProjects.value.find(p => p.id === project.id)
-    currentProject.value = allowed || null
-    return !!allowed
+    // 仅允许进入“自己拥有或已加入”的项目。is_member 由后端对任一列表中的
+    // 项目统一计算，因此不再强依赖 switchableProjects 是否已加载完成，避免
+    // 在侧边栏项目列表尚未拉取时点击看板项目却选不中、导致任务页一直卡在
+    // “请先在侧边栏选择一个项目”而无法创建任务。
+    if (!project.is_member) {
+      currentProject.value = null
+      return false
+    }
+    currentProject.value = project
+    return true
   }
 
   return {

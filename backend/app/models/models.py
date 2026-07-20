@@ -68,6 +68,10 @@ class TaskStatus(str, Enum):
     APPROVED = "approved"        # 已通过（审查通过，已合并）
     REJECTED = "rejected"        # 已驳回（审查驳回）
     FAILED = "failed"            # 执行失败
+    # ── Nested-agent planning (阶段 B) ──
+    PLANNING = "planning"        # 父任务：规划 Agent 正在拆解为子任务
+    SUBTASK_RUNNING = "subtask_running"  # 父任务：子任务正在执行
+    SUBTASK_DONE = "subtask_done"  # 子任务：已完成并并入父任务共享分支（不单独审核）
 
 
 class ReviewStatus(str, Enum):
@@ -165,6 +169,10 @@ class Agent(Base):
     runner_type = Column(String(50), default="crewai")  # crewai / claude_code / opencode
     system_prompt = Column(Text, default="")
     status = Column(SAEnum(AgentStatus), default=AgentStatus.IDLE)
+    # Nested-agent planning: when enabled, the runner asks the model to split a
+    # task into self-contained subtasks before executing them (see planner.py).
+    enable_planning = Column(Boolean, default=False, nullable=False)
+    max_subtasks = Column(Integer, default=6, nullable=False)
 
     creator = relationship("User", back_populates="agents")
 
@@ -221,6 +229,18 @@ class Task(Base):
     reviewer_agent = relationship("Agent", foreign_keys=[reviewer_agent_id])
     security_agent = relationship("Agent", foreign_keys=[security_agent_id])
     project = relationship("Project")
+
+    # ── Nested-agent task tree (阶段 B) ──
+    # A parent task (status PLANNING / SUBTASK_RUNNING) is decomposed by a
+    # planning agent into child tasks that share the parent's worktree branch.
+    parent_task_id = Column(Integer, ForeignKey("tasks.id"), nullable=True, index=True)
+    plan_json = Column(Text, default="[]", nullable=False)
+    subtask_count = Column(Integer, default=0, nullable=False)
+    subtask_done = Column(Integer, default=0, nullable=False)
+    children = relationship(
+        "Task", backref=__tablename__ + "_parent", remote_side=[id],
+        order_by="Task.id",
+    )
 
 
 class QualityGateRun(Base):

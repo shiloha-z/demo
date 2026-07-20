@@ -7,7 +7,7 @@ number of HTTP requests to create simultaneous model calls.
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from threading import RLock
+from threading import BoundedSemaphore, RLock
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -20,6 +20,22 @@ _lock = RLock()
 _active_agent_tasks: set[int] = set()
 _pending_agent_runs: dict[int, tuple[str, bool, bool]] = {}
 _active_merge_projects: set[int] = set()
+# Child tasks of a planning tree share the parent's single worktree branch, so
+# only ONE child of the same parent may write to it at a time. This lock
+# serializes children of a given parent (different parents may still run in
+# parallel). Top-level tasks are unaffected.
+_parent_run_locks: dict[int, RLock] = {}
+
+# Child tasks of a planning tree may run concurrently across *different* parents;
+# this bounds their total in-flight count to the agent pool capacity so a large
+# plan can never exhaust the executor (top-level tasks are unaffected and still
+# bounded by the pool).
+_subtask_semaphore = BoundedSemaphore(max(1, settings.AGENT_MAX_CONCURRENCY))
+
+
+def _parent_lock(parent_id: int) -> RLock:
+    with _lock:
+        return _parent_run_locks.setdefault(parent_id, RLock())
 
 
 def enqueue_agent_run(
@@ -109,10 +125,38 @@ def _release_paused_agent(task_id: int) -> None:
 
 def _run_agent(task_id: int, feedback: str, resume: bool, conflict_resolution: bool) -> None:
     pending: tuple[str, bool, bool] | None = None
+    holds_subtask_slot = False
+    holds_parent_lock = False
+    plock = None
     try:
+        # Child tasks of a planning tree consume a bounded concurrency slot so a
+        # large plan cannot starve the executor. Top-level tasks run normally.
+        # In addition, children of the SAME parent are serialized so they never
+        # write to the shared parent branch concurrently.
+        db = SessionLocal()
+        try:
+            t = db.get(Task, task_id)
+            if t and t.parent_task_id is not None:
+                _subtask_semaphore.acquire()
+                holds_subtask_slot = True
+                plock = _parent_lock(t.parent_task_id)
+                plock.acquire()
+                holds_parent_lock = True
+        finally:
+            db.close()
         from app.services.agent_runner import run_agent_pipeline
         run_agent_pipeline(task_id, feedback, resume, conflict_resolution)
     finally:
+        if holds_parent_lock and plock is not None:
+            try:
+                plock.release()
+            except ValueError:
+                pass
+        if holds_subtask_slot:
+            try:
+                _subtask_semaphore.release()
+            except ValueError:
+                pass
         # Keep the task registered as active until its agent state has been
         # reconciled. A resume request during this window must wait instead
         # of queueing a duplicate run.

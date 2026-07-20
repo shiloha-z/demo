@@ -25,7 +25,7 @@ const showCreateTask = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const importingAgent = ref(false)
 const selectedAgent = ref<any>(null)
-const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai', skill_id: null as number | null })
+const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai', skill_id: null as number | null, enable_planning: false, max_subtasks: 6 })
 const newTask = ref({ title: '', description: '', project_id: null as number | null, approval_percent: 50, reviewer_agent_id: null as number | null, security_agent_id: null as number | null })
 const loading = ref(false)
 const skills = ref<any[]>([])
@@ -117,7 +117,7 @@ async function createAgent() {
     await api.post('/agents', newAgent.value)
     MessagePlugin.success('Agent 已创建')
     showCreateAgent.value = false
-    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '', runner_type: 'crewai', skill_id: null }
+    newAgent.value = { name: '', role: 'code_gen', model: availableModels.value[0]?.id || '', system_prompt: '', runner_type: 'crewai', skill_id: null, enable_planning: false, max_subtasks: 6 }
     await loadAgents()
   } finally { loading.value = false }
 }
@@ -355,6 +355,7 @@ function fmtTs(iso: string): string {
             <span class="runner-badge" :style="{ background: (runnerColors[a.runner_type] || 'var(--muted-foreground)') + '14', color: runnerColors[a.runner_type] || 'var(--muted-foreground)' }">
               {{ runnerLabels[a.runner_type] || a.runner_type || 'CrewAI' }}
             </span>
+            <span v-if="a.enable_planning" class="planning-badge">自主规划</span>
             <span v-if="a.creator_name" class="creator-tag">{{ a.is_creator ? '我创建的' : `创建者：${a.creator_name}` }}</span>
           </div>
 
@@ -438,6 +439,13 @@ function fmtTs(iso: string): string {
           <t-option v-else-if="availableModels.length === 0" value="" label="暂无可用模型，点击上方按钮检测" />
           <t-option v-for="m in availableModels" :key="m.id" :value="m.id" :label="m.name || m.id" />
         </t-select>
+        <label class="field-label switch-label">
+          启用自主任务规划
+          <t-switch v-model="newAgent.enable_planning" />
+        </label>
+        <p class="field-hint">开启后，Agent 执行任务前会先让模型把目标拆解为多个子步骤，自动增强完成任务的能力。</p>
+        <label v-if="newAgent.enable_planning" class="field-label">最大子任务数</label>
+        <t-input-number v-if="newAgent.enable_planning" v-model="newAgent.max_subtasks" :min="1" :max="20" theme="column" />
         <label class="field-label">系统提示词（选填）</label>
         <textarea v-model="newAgent.system_prompt" class="field-textarea" rows="3" placeholder="自定义 Agent 行为..." />
         <label class="field-label">从技能模板加载（可选）</label>
@@ -535,6 +543,12 @@ function fmtTs(iso: string): string {
 .role-badge { padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600; }
 .model-tag { padding: 1px 6px; border-radius: 99px; font-size: 10px; color: var(--muted-foreground); background: var(--surface-hover); font-family: var(--font-mono); }
 .creator-tag { font-size: 11px; color: var(--muted-foreground); }
+.planning-badge {
+  padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600;
+  color: #fff; background: linear-gradient(90deg, var(--primary), var(--accent, #8957e5));
+}
+.switch-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.field-hint { margin: 4px 0 6px; font-size: 12px; color: var(--muted-foreground); line-height: 1.5; }
 .agent-actions { display: flex; gap: 2px; flex-shrink: 0; margin-top: 2px; }
 
 /* Current task indicator */

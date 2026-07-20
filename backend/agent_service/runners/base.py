@@ -49,6 +49,8 @@ class BaseRunner(ABC):
         project_id: int,
         agent_id: int = 0,
         *,
+        enable_planning: bool = False,
+        max_subtasks: int = 6,
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
     ) -> RunResult:

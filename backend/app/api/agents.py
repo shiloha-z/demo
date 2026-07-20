@@ -21,6 +21,8 @@ class AgentCreate(BaseModel):
     model: str = Field(default="deepseek-chat")
     runner_type: str = Field(default="crewai")
     system_prompt: str = Field(default="")
+    enable_planning: bool = Field(default=False)
+    max_subtasks: int = Field(default=6, ge=1, le=20)
 
 
 class AgentImport(BaseModel):
@@ -37,6 +39,8 @@ class AgentResponse(BaseModel):
     model: str
     runner_type: str = "crewai"
     system_prompt: str
+    enable_planning: bool = False
+    max_subtasks: int = 6
     status: str
     total_tasks: int = 0
     approved_tasks: int = 0
@@ -106,6 +110,8 @@ def list_agents(
             model=a.model,
             runner_type=a.runner_type or "crewai",
             system_prompt=a.system_prompt if a.creator_id == user.id else "",
+            enable_planning=bool(a.enable_planning),
+            max_subtasks=a.max_subtasks,
             status=a.status.value if hasattr(a.status, 'value') else str(a.status),
             total_tasks=total_tasks,
             approved_tasks=approved_tasks,
@@ -133,6 +139,8 @@ def create_agent(
         model=req.model,
         runner_type=req.runner_type,
         system_prompt=req.system_prompt,
+        enable_planning=req.enable_planning,
+        max_subtasks=req.max_subtasks,
         status=AgentStatus.IDLE,
     )
     db.add(agent)
@@ -147,6 +155,8 @@ def create_agent(
         model=agent.model,
         runner_type=agent.runner_type or "crewai",
         system_prompt=agent.system_prompt,
+        enable_planning=agent.enable_planning,
+        max_subtasks=agent.max_subtasks,
         status=agent.status.value,
         creator_id=user.id,
         creator_name=user.display_name or user.username,
@@ -176,6 +186,8 @@ def export_agent(
             "model": agent.model,
             "runner_type": agent.runner_type or "crewai",
             "system_prompt": agent.system_prompt or "",
+            "enable_planning": bool(agent.enable_planning),
+            "max_subtasks": agent.max_subtasks,
         },
     }
 
@@ -198,6 +210,8 @@ def import_agent(
         model=source.model,
         runner_type=source.runner_type,
         system_prompt=source.system_prompt,
+        enable_planning=bool(getattr(source, "enable_planning", False)),
+        max_subtasks=getattr(source, "max_subtasks", 6) or 6,
         status=AgentStatus.IDLE,
     )
     db.add(agent)
@@ -213,6 +227,8 @@ def import_agent(
         model=agent.model,
         runner_type=agent.runner_type or "crewai",
         system_prompt=agent.system_prompt,
+        enable_planning=agent.enable_planning,
+        max_subtasks=agent.max_subtasks,
         status=agent.status.value,
         creator_id=user.id,
         creator_name=user.display_name or user.username,

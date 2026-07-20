@@ -15,6 +15,7 @@ from app.services import git_service as git
 from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
+from agent_service.planner import plan_task
 
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
@@ -50,6 +51,8 @@ class TaskCreate(BaseModel):
     reviewer_agent_id: int | None = None
     security_agent_id: int | None = None
     approval_percent: int = Field(default=50, ge=1, le=100)
+    # Nested-agent: a child task belongs to a parent task tree.
+    parent_task_id: int | None = Field(default=None)
 
 
 class TaskResponse(BaseModel):
@@ -72,6 +75,11 @@ class TaskResponse(BaseModel):
     reviewer_agent_name: str | None = None
     security_agent_name: str | None = None
     project_name: str | None = None
+    # Nested-agent fields
+    parent_task_id: int | None = None
+    plan_json: str = "[]"
+    subtask_count: int = 0
+    subtask_done: int = 0
 
     class Config:
         from_attributes = True
@@ -139,6 +147,10 @@ def _task_to_response(t: Task) -> TaskResponse:
         reviewer_agent_name=t.reviewer_agent.name if t.reviewer_agent else None,
         security_agent_name=t.security_agent.name if t.security_agent else None,
         project_name=t.project.name if t.project else None,
+        parent_task_id=t.parent_task_id,
+        plan_json=t.plan_json or "[]",
+        subtask_count=t.subtask_count or 0,
+        subtask_done=t.subtask_done or 0,
     )
 
 
@@ -360,6 +372,7 @@ def create_task(
         description=req.description,
         approval_percent=req.approval_percent,
         status=TaskStatus.PENDING,
+        parent_task_id=req.parent_task_id,
     )
     db.add(task)
     db.commit()
@@ -385,6 +398,221 @@ def create_task(
     return _task_to_response(task)
 
 
+# ── Nested-agent planning (阶段 B) ──────────────────────────────────
+
+class PlanRequest(BaseModel):
+    # Optional per-step agent assignment. Length must match the number of
+    # generated steps when provided; missing entries fall back to the parent
+    # agent so the planning tree can run on distinct agents for parallelism.
+    agents: list[int] | None = None
+    auto_start: bool = False
+
+
+class SubtaskBrief(BaseModel):
+    id: int
+    title: str
+    status: str
+    agent_id: int
+    agent_name: str | None = None
+
+
+class PlanResponse(BaseModel):
+    parent: TaskResponse
+    plan: list[dict]
+    subtasks: list[SubtaskBrief]
+
+
+@router.post("/{task_id}/plan", response_model=PlanResponse)
+def plan_task_endpoint(
+    project_id: int,
+    task_id: int,
+    req: PlanRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Decompose a parent task into child tasks via a planning model.
+
+    The parent task enters PLANNING; each generated step becomes a child Task
+    (sharing the parent's project). With ``auto_start`` the children are queued
+    and the parent moves to SUBTASK_RUNNING. Any planning failure keeps the
+    parent untouched (fail-closed for the planning step itself).
+    """
+    project = _check_task_access(project_id, user, db)
+    require_project_member(project_id, user, db)
+    parent = db.query(Task).filter(
+        Task.id == task_id, Task.project_id == project_id,
+    ).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if parent.parent_task_id is not None:
+        raise HTTPException(status_code=400, detail="子任务不能再次拆解")
+    if parent.status not in (TaskStatus.PENDING, TaskStatus.FAILED, TaskStatus.PLANNING):
+        raise HTTPException(status_code=400, detail=f"仅待开始/失败的任务可规划，当前状态：{parent.status.value}")
+
+    agent = db.get(Agent, parent.agent_id) if parent.agent_id else None
+    if not agent:
+        raise HTTPException(status_code=400, detail="父任务未绑定 Agent，无法规划")
+
+    model_name = agent.model or "deepseek-chat"
+    from app.core.config import settings
+    steps = plan_task(
+        f"{parent.title}\n{parent.description}".strip(),
+        model_name,
+        settings.DEEPSEEK_API_KEY,
+        settings.DEEPSEEK_BASE_URL,
+        int(agent.max_subtasks) if agent.max_subtasks else 6,
+    )
+    if not steps:
+        raise HTTPException(status_code=422, detail="规划模型未能生成可用子任务，请稍后重试或手动创建子任务")
+
+    plan_payload = [
+        {"id": s.id, "title": s.title, "goal": s.goal, "deps": s.deps}
+        for s in steps
+    ]
+    parent.plan_json = json.dumps(plan_payload, ensure_ascii=False)
+    parent.subtask_count = len(steps)
+    parent.subtask_done = 0
+    parent.status = TaskStatus.PLANNING
+    db.flush()
+
+    children: list[Task] = []
+    for idx, step in enumerate(steps):
+        child_agent_id = agent.id
+        if req.agents and idx < len(req.agents):
+            child_agent_id = req.agents[idx]
+        child = Task(
+            title=f"{step.title}",
+            description=f"{step.goal}\n\n（来自父任务「{parent.title}」子步骤 {step.id}）",
+            agent_id=child_agent_id,
+            approval_percent=parent.approval_percent,
+            project_id=project_id,
+            status=TaskStatus.PENDING,
+            parent_task_id=parent.id,
+        )
+        db.add(child)
+        children.append(child)
+    db.flush()
+    for c in children:
+        db.refresh(c)
+
+    audit_record(
+        action=AuditAction.TASK_CREATE,
+        actor_id=user.id,
+        actor_type=AuditActorType.HUMAN,
+        project_id=project_id,
+        task_id=parent.id,
+        target_type="task",
+        target_id=parent.id,
+        intent=f"规划拆解为 {len(steps)} 个子任务",
+        payload={"plan": plan_payload},
+    )
+
+    # Create the parent's single shared worktree/branch up front so every child
+    # commits onto the SAME branch — that yields ONE combined change for ONE
+    # aggregated review.  (Children also lazily create it if this step is skipped.)
+    if not parent.worktree_path:
+        ws = git.default_task_worktree_path(project.workspace_path, parent.id)
+        bname = f"task/{parent.id}"
+        created, werr = git.create_task_worktree(project.workspace_path, ws, bname)
+        if created:
+            parent.worktree_path = ws
+            parent.branch_name = bname
+            parent.base_commit = git.head_commit(project.workspace_path, git.get_base_branch(project.workspace_path))
+            db.commit()
+        # Non-fatal: the first child pipeline retries if creation failed here.
+
+    if req.auto_start:
+        db.commit()  # Persist children (and parent worktree) before queuing.
+        from app.services.execution_service import enqueue_agent_run
+        # Only the first child is queued; it chains the rest sequentially so the
+        # children write to the shared parent branch one at a time.
+        if children:
+            first = children[0]
+            claimed = db.query(Task).filter(
+                Task.id == first.id, Task.status == TaskStatus.PENDING
+            ).update(
+                {Task.status: TaskStatus.RUNNING, Task.started_at: datetime.now(timezone.utc)},
+                synchronize_session=False,
+            )
+            db.commit()
+            if claimed and enqueue_agent_run(first.id):
+                parent.status = TaskStatus.SUBTASK_RUNNING
+                db.commit()
+    else:
+        db.commit()
+    db.refresh(parent)
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_update", {"id": parent.id, "project_id": project_id, "status": parent.status.value})
+
+    return PlanResponse(
+        parent=_task_to_response(parent),
+        plan=plan_payload,
+        subtasks=[
+            SubtaskBrief(
+                id=c.id, title=c.title, status=c.status.value,
+                agent_id=c.agent_id,
+                agent_name=(c.agent.name if c.agent else None),
+            )
+            for c in children
+        ],
+    )
+
+
+@router.get("/{task_id}/subtasks", response_model=PlanResponse)
+def get_subtasks(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return a parent task's planning tree and live child progress."""
+    _check_task_access(project_id, user, db)
+    require_project_member(project_id, user, db)
+    parent = db.query(Task).filter(
+        Task.id == task_id, Task.project_id == project_id,
+    ).first()
+    if not parent:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    children = db.query(Task).filter(Task.parent_task_id == parent.id).order_by(Task.id).all()
+
+    terminal = {TaskStatus.APPROVED, TaskStatus.REJECTED, TaskStatus.FAILED,
+                TaskStatus.MERGE_QUEUED, TaskStatus.MERGING, TaskStatus.INTEGRATING,
+                TaskStatus.MERGED, TaskStatus.MERGE_BLOCKED, TaskStatus.SUBTASK_DONE}
+    done = sum(1 for c in children if c.status in terminal)
+    parent.subtask_done = done
+    if children and parent.status in (TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING) and done == len(children):
+        # All children reached a terminal state.  Only promote the parent to
+        # REVIEWING once the pipeline has actually created the aggregated parent
+        # review, so the frontend never sees a "reviewing" parent with no review
+        # attached (the pipeline builds the review + gate + approval round).
+        if db.query(Review).filter(Review.task_id == parent.id).first():
+            parent.status = TaskStatus.REVIEWING
+    db.commit()
+
+    try:
+        plan = json.loads(parent.plan_json or "[]")
+    except (ValueError, TypeError):
+        plan = []
+
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_update", {"id": parent.id, "project_id": project_id, "status": parent.status.value})
+
+    return PlanResponse(
+        parent=_task_to_response(parent),
+        plan=plan,
+        subtasks=[
+            SubtaskBrief(
+                id=c.id, title=c.title, status=c.status.value,
+                agent_id=c.agent_id,
+                agent_name=(c.agent.name if c.agent else None),
+            )
+            for c in children
+        ],
+    )
+
+
 # ── Start task (manual trigger) ─────────────────────────────────────
 
 @router.post("/{task_id}/start", response_model=TaskResponse)
@@ -404,10 +632,25 @@ def start_task(
     if task.status != TaskStatus.PENDING:
         raise HTTPException(status_code=400, detail=f"只有待开始的任务才能启动，当前状态：{task.status.value}")
 
+    if task.parent_task_id is not None:
+        # Children of a planning tree share the parent's branch and run serially.
+        # Block starting a second child while another sibling is still running.
+        sibling_running = db.query(Task).filter(
+            Task.parent_task_id == task.parent_task_id,
+            Task.status == TaskStatus.RUNNING,
+        ).first()
+        if sibling_running:
+            raise HTTPException(
+                status_code=409,
+                detail=f"父任务的另一个子任务 #{sibling_running.id} 正在执行，子任务共享同一分支需串行执行，请等待其完成",
+            )
+
     agent = db.get(Agent, task.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if agent.status == AgentStatus.WORKING:
+    if agent.status == AgentStatus.WORKING and task.parent_task_id is None:
+        # Top-level tasks still enforce one-agent-one-task. Child tasks in a
+        # planning tree may run concurrently, so the guard is relaxed for them.
         active_task = db.query(Task).filter(
             Task.agent_id == agent.id,
             Task.status == TaskStatus.RUNNING,

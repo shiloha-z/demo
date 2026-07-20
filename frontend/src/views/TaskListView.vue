@@ -43,6 +43,20 @@ const TASK_FILE_CACHE_TTL = 10_000
 const statusFilter = ref('all')
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
+// 兜底：进入任务页时若尚未选择项目，自动选中可切换项目列表中的第一个，
+// 避免任务列表为空、且“创建任务”被“请先在侧边栏选择一个项目”拦截。
+let autoSelectedProject = false
+watch(
+  () => store.switchableProjects,
+  (list) => {
+    if (!autoSelectedProject && !store.currentProject && list && list.length > 0) {
+      store.setCurrentProject(list[0])
+      autoSelectedProject = true
+    }
+  },
+  { immediate: true },
+)
+
 // Pipeline stepper state
 const pipelineStages = ref<StageState[]>([
   { key: 'code_gen',   label: '代码工程师', icon: 'code',   status: 'waiting', startedAt: null, doneAt: null },
@@ -70,11 +84,87 @@ const statusColors: Record<string, string> = {
 Object.assign(statusLabels, {
   merge_queued: '等待合并', integrating: '正在合并',
   conflict_resolution: '冲突处理中', merge_blocked: '合并受阻',
+  planning: '规划中', subtask_running: '子任务执行中',
+  subtask_done: '子任务完成',
 })
 Object.assign(statusColors, {
   merge_queued: '#8b5cf6', integrating: '#0ea5e9',
   conflict_resolution: '#f97316', merge_blocked: 'var(--danger)',
+  planning: 'var(--primary)', subtask_running: '#8957e5',
+  subtask_done: 'var(--success)',
 })
+
+// ── Nested-agent task tree (阶段 B) ──
+const expanded = ref<Set<number>>(new Set())
+const subtasksMap = ref<Record<number, any[]>>({})
+const planning = ref<Set<number>>(new Set())
+
+function hasChildren(t: any): boolean {
+  return (subtasksMap.value[t.id]?.length ?? 0) > 0
+}
+function isParentState(t: any): boolean {
+  return t.status === 'planning' || t.status === 'subtask_running'
+}
+
+function toggleExpand(t: any) {
+  const next = new Set(expanded.value)
+  if (next.has(t.id)) next.delete(t.id)
+  else { next.add(t.id); loadSubtasks(t) }
+  expanded.value = next
+}
+
+async function loadSubtasks(t: any) {
+  if (!filterProjectId.value) return
+  try {
+    const res = await api.get(`/projects/${filterProjectId.value}/tasks/${t.id}/subtasks`)
+    const data = res.data
+    subtasksMap.value = { ...subtasksMap.value, [t.id]: data.subtasks || [] }
+    // Reflect aggregated parent state returned by the endpoint.
+    const idx = tasks.value.findIndex((x) => x.id === t.id)
+    if (idx !== -1) {
+      tasks.value[idx] = { ...tasks.value[idx], status: data.parent.status, subtask_done: data.parent.subtask_done, subtask_count: data.parent.subtask_count }
+    }
+  } catch (e) {
+    /* ignore subtree load errors */
+  }
+}
+
+async function planTask(t: any, ev?: Event) {
+  ev?.stopPropagation()
+  if (!filterProjectId.value) return
+  const dialog = DialogPlugin.confirm({
+    header: '自主任务规划',
+    body: `将让规划模型把「${t.title}」拆解为多个子任务并自动派发执行。确定继续？`,
+    theme: 'primary',
+    onConfirm: async () => {
+      planning.value = new Set(planning.value).add(t.id)
+      dialog.hide()
+      try {
+        await api.post(`/projects/${filterProjectId.value}/tasks/${t.id}/plan`, { auto_start: true })
+        MessagePlugin.success('已生成子任务并开始执行')
+        await loadTasks()
+        const parent = tasks.value.find((x) => x.id === t.id)
+        if (parent) { expanded.value = new Set(expanded.value).add(t.id); await loadSubtasks(parent) }
+      } catch (e) {
+        MessagePlugin.error('规划失败：' + getErrorMessage(e))
+      } finally {
+        const s = new Set(planning.value); s.delete(t.id); planning.value = s
+      }
+    },
+  })
+}
+
+// Refresh planning trees after the initial load so progress is visible.
+async function refreshSubtrees() {
+  for (const t of tasks.value) {
+    if (isParentState(t)) {
+      await loadSubtasks(t)
+      if ((subtasksMap.value[t.id]?.length ?? 0) > 0) {
+        expanded.value = new Set(expanded.value).add(t.id)
+      }
+    }
+  }
+}
 
 const reviewStatusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
@@ -212,6 +302,7 @@ async function loadTasks() {
   tasks.value = active.data.items || active.data
   archivedTasks.value = archived.data.items || archived.data
   archiveChecked.value = new Set()
+  await refreshSubtrees()
 }
 
 const filteredTasks = computed(() => {
@@ -612,6 +703,23 @@ async function resumeTask(task: any, event: Event) {
               <span class="task-id">#{{ t.id }}</span>
               <div class="task-item-actions">
                 <button
+                  v-if="isParentState(t) || hasChildren(t)"
+                  class="tree-toggle"
+                  :class="{ rotated: expanded.has(t.id) }"
+                  title="展开/收起子任务"
+                  @click="toggleExpand(t, $event)"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+                <button
+                  v-if="t.status === 'pending' && !t.parent_task_id && !planning.has(t.id)"
+                  class="plan-btn"
+                  title="自主任务规划（拆解为子任务）"
+                  @click="planTask(t, $event)"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a3 3 0 0 0 3 3h.5M18 8.5v3a3 3 0 0 1-3 3h-.5"/></svg>
+                </button>
+                <button
                   v-if="t.status === 'running'"
                   class="stop-btn"
                   title="停止"
@@ -656,7 +764,43 @@ async function resumeTask(task: any, event: Event) {
               </span>
               <span>{{ t.agent_name || 'Agent #' + t.agent_id }}</span>
               <span v-if="t.created_at">{{ formatDate(t.created_at) }}</span>
+              <span v-if="isParentState(t) && t.subtask_count" class="subtask-progress">
+                子任务 {{ t.subtask_done || 0 }}/{{ t.subtask_count }}
+              </span>
             </div>
+
+          <!-- Child tasks (nested-agent tree) -->
+          <div v-if="expanded.has(t.id) && subtasksMap[t.id]?.length" class="subtask-list">
+            <div
+              v-for="c in subtasksMap[t.id]"
+              :key="c.id"
+              class="task-item subtask-item"
+              :class="{ active: selectedTask?.id === c.id }"
+              @click="selectTask(c)"
+            >
+              <div class="task-item-top">
+                <span class="task-id">#{{ c.id }}</span>
+                <div class="task-item-actions">
+                  <button
+                    v-if="c.status === 'pending'"
+                    class="start-btn"
+                    title="开始执行"
+                    @click="startTask(c, $event)"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                  </button>
+                  <span class="task-status" :style="{ color: statusColors[c.status] }">
+                    <span class="status-dot" :class="c.status"></span>
+                    {{ statusLabels[c.status] || c.status }}
+                  </span>
+                </div>
+              </div>
+              <div class="task-title-text">{{ c.title }}</div>
+              <div class="task-meta">
+                <span>{{ c.agent_name || 'Agent #' + c.agent_id }}</span>
+              </div>
+            </div>
+          </div>
           </div>
 
           <!-- Archived tasks section -->
@@ -1277,6 +1421,40 @@ async function resumeTask(task: any, event: Event) {
 .review-status-badge { font-size: 12px; font-weight: 700; }
 
 .review-actions { display: flex; gap: 6px; margin-left: auto; }
+
+/* Nested-agent task tree */
+.tree-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 6px; border: none; cursor: pointer;
+  background: transparent; color: var(--muted-foreground);
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+.tree-toggle:hover { color: var(--foreground); background: var(--surface-hover); }
+.tree-toggle.rotated { transform: rotate(90deg); }
+.plan-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 6px; border: none; cursor: pointer;
+  color: #fff; background: linear-gradient(90deg, var(--primary), #8957e5);
+  transition: filter var(--transition-fast), transform var(--transition-fast);
+}
+.plan-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.subtask-progress {
+  margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 99px;
+  color: #8957e5; background: #8957e514; font-weight: 600;
+}
+.subtask-list {
+  margin: 4px 0 8px 26px; padding-left: 10px;
+  border-left: 1px dashed var(--border, rgba(255,255,255,0.08));
+  display: flex; flex-direction: column; gap: 6px;
+  animation: subtree-in 160ms ease;
+}
+@keyframes subtree-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+.subtask-item { background: var(--surface-2, rgba(255,255,255,0.02)); }
+.subtask-item .task-title-text { font-size: 13px; }
+.status-dot.planning { background: var(--primary); animation: breathe 1.4s ease-in-out infinite; }
+.status-dot.subtask_running { background: #8957e5; }
+.status-dot.subtask_done { background: var(--success); }
+@keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
 .feedback-dialog-body { display: flex; flex-direction: column; gap: 10px; }
 .feedback-hint { font-size: 13px; color: var(--muted-foreground); margin: 0; line-height: 1.5; }
