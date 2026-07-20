@@ -9,6 +9,7 @@ interface SettingField {
   type: string
   value: string
   masked_value: string
+  configured?: boolean
 }
 
 interface SettingSection {
@@ -51,6 +52,7 @@ function onFieldInput(field: SettingField, rawValue: string) {
 }
 
 function isModified(field: SettingField): boolean {
+  if (field.type === 'password') return edits[field.key] !== undefined && edits[field.key].length > 0
   return edits[field.key] !== undefined && edits[field.key] !== field.value
 }
 
@@ -63,7 +65,8 @@ async function saveField(field: SettingField) {
     await api.post('/settings', { key: field.key, value: newValue })
     MessagePlugin.success(`「${field.label}」已保存`)
     // Update local state to reflect saved value
-    field.value = newValue
+    field.value = field.type === 'password' ? '' : newValue
+    field.configured = field.type === 'password' ? Boolean(newValue) : field.configured
     if (field.type === 'password') {
       // Re-mask: show first 4 + **** + last 4
       const v = newValue

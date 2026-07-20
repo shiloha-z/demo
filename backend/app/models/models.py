@@ -174,6 +174,9 @@ class Skill(Base):
     name = Column(String(100), nullable=False)
     description = Column(Text, default="")
     prompt_content = Column(Text, default="")
+    source = Column(String(30), default="local", nullable=False)
+    source_id = Column(String(300), default="")
+    source_url = Column(String(1000), default="")
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 

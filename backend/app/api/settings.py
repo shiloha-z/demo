@@ -28,6 +28,7 @@ SETTINGS_SECTIONS = [
         "fields": [
             {"key": "DEEPSEEK_API_KEY",  "label": "DeepSeek API Key",      "type": "password"},
             {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API Key",     "type": "password"},
+            {"key": "SKILLHUB_API_KEY",  "label": "SkillHub API Key",      "type": "password"},
         ],
     },
     {
@@ -115,8 +116,9 @@ def get_settings():
                 "key": f["key"],
                 "label": f["label"],
                 "type": f["type"],
-                "value": raw,
+                "value": "" if f["type"] == "password" else raw,
                 "masked_value": _mask(raw) if f["type"] == "password" else raw,
+                "configured": bool(raw),
             })
         sections_out.append({
             "key": sec["key"],
@@ -162,9 +164,10 @@ def update_setting(req: SettingUpdate):
 
     return {
         "key": req.key,
-        "value": req.value,
+        "value": "" if is_secret else req.value,
         "masked_value": _mask(req.value) if any(
             f["type"] == "password" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key
         ) else req.value,
+        "configured": bool(req.value) if is_secret else None,
         "message": "已保存，部分设置需重启后端生效",
     }

@@ -8,6 +8,9 @@ interface Skill {
   name: string
   description: string
   prompt_content: string
+  source: string
+  source_id: string
+  source_url: string
   created_at: string | null
   updated_at: string | null
 }
@@ -21,6 +24,14 @@ const showEditDialog = ref(false)
 const editingSkill = ref<Skill | null>(null)
 const formData = ref({ name: '', description: '', prompt_content: '' })
 const saving = ref(false)
+const showSkillHubDialog = ref(false)
+const showRemotePreview = ref(false)
+const skillHubConfigured = ref(false)
+const remoteQuery = ref('')
+const remoteSkills = ref<any[]>([])
+const remoteLoading = ref(false)
+const importingRemote = ref(false)
+const selectedRemote = ref<any | null>(null)
 
 onMounted(async () => { await loadSkills() })
 
@@ -101,6 +112,103 @@ async function deleteSkill(skill: Skill) {
   })
 }
 
+function extractRemoteSkills(payload: any): any[] {
+  if (Array.isArray(payload)) return payload
+  for (const key of ['data', 'skills', 'results', 'items']) {
+    if (Array.isArray(payload?.[key])) return payload[key]
+  }
+  return []
+}
+
+function remoteName(skill: any): string {
+  return String(skill?.name || skill?.title || skill?.slug || skill?.id || 'SkillHub Skill')
+}
+
+function remoteDescription(skill: any): string {
+  return String(skill?.description || skill?.summary || skill?.excerpt || '')
+}
+
+function remoteContent(skill: any): string {
+  return String(skill?.skill_md || skill?.content || skill?.prompt_content || skill?.instructions || skill?.markdown || remoteDescription(skill))
+}
+
+function remoteId(skill: any): string {
+  return String(skill?.id || skill?.slug || skill?.source_id || remoteName(skill))
+}
+
+function remoteUrl(skill: any): string {
+  return String(skill?.url || skill?.source_url || skill?.github_url || '')
+}
+
+async function openSkillHubDialog() {
+  showSkillHubDialog.value = true
+  try {
+    const { data } = await api.get('/skills/skillhub/status')
+    skillHubConfigured.value = Boolean(data.configured)
+    if (!skillHubConfigured.value) {
+      MessagePlugin.warning('请先在系统设置中配置 SkillHub API Key')
+      return
+    }
+    if (remoteSkills.value.length === 0) await loadSkillHubCatalog()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '无法连接 SkillHub'))
+  }
+}
+
+async function loadSkillHubCatalog() {
+  remoteLoading.value = true
+  try {
+    const { data } = await api.get('/skills/skillhub/catalog', { params: { limit: 20, sort: 'score' } })
+    remoteSkills.value = extractRemoteSkills(data)
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '加载 SkillHub 目录失败'))
+  } finally {
+    remoteLoading.value = false
+  }
+}
+
+async function searchSkillHub() {
+  if (remoteQuery.value.trim().length < 2) {
+    MessagePlugin.warning('请输入至少两个字符')
+    return
+  }
+  remoteLoading.value = true
+  try {
+    const { data } = await api.post('/skills/skillhub/search', { query: remoteQuery.value.trim(), limit: 20, method: 'hybrid' })
+    remoteSkills.value = extractRemoteSkills(data)
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '搜索 SkillHub 失败'))
+  } finally {
+    remoteLoading.value = false
+  }
+}
+
+function previewRemoteSkill(skill: any) {
+  selectedRemote.value = skill
+  showRemotePreview.value = true
+}
+
+async function importRemoteSkill() {
+  if (!selectedRemote.value) return
+  importingRemote.value = true
+  try {
+    await api.post('/skills/skillhub/import', {
+      name: remoteName(selectedRemote.value),
+      description: remoteDescription(selectedRemote.value),
+      prompt_content: remoteContent(selectedRemote.value),
+      source_id: remoteId(selectedRemote.value),
+      source_url: remoteUrl(selectedRemote.value),
+    })
+    MessagePlugin.success('已导入到本地技能仓库')
+    showRemotePreview.value = false
+    await loadSkills()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '导入 SkillHub 技能失败'))
+  } finally {
+    importingRemote.value = false
+  }
+}
+
 function truncate(text: string, maxLen: number): string {
   if (!text) return ''
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
@@ -127,6 +235,14 @@ function fmtTime(iso: string | null): string {
         创建技能
       </t-button>
     </div>
+
+    <section class="external-source-card">
+      <div>
+        <strong>SkillHub</strong>
+        <p>搜索公开 Agent Skills，预览后导入为你的本地技能模板。</p>
+      </div>
+      <t-button variant="outline" @click="openSkillHubDialog">浏览 SkillHub</t-button>
+    </section>
 
     <!-- Loading state -->
     <div v-if="loading" class="empty-card">
@@ -173,6 +289,43 @@ function fmtTime(iso: string | null): string {
         </div>
       </article>
     </div>
+
+    <t-dialog v-model:visible="showSkillHubDialog" header="从 SkillHub 导入技能" width="760px" :footer="false">
+      <div v-if="!skillHubConfigured" class="remote-empty">
+        请先在系统设置中保存 SkillHub API Key，然后重新打开此窗口。
+      </div>
+      <template v-else>
+        <div class="remote-search-row">
+          <t-input v-model="remoteQuery" placeholder="搜索技能，例如：PDF processing" @enter="searchSkillHub" />
+          <t-button theme="primary" :loading="remoteLoading" @click="searchSkillHub">搜索</t-button>
+        </div>
+        <div v-if="remoteLoading" class="remote-empty">正在加载 SkillHub 技能…</div>
+        <div v-else-if="remoteSkills.length === 0" class="remote-empty">未找到可导入的技能。</div>
+        <div v-else class="remote-skill-list">
+          <article v-for="skill in remoteSkills" :key="remoteId(skill)" class="remote-skill-item">
+            <div>
+              <h4>{{ remoteName(skill) }}</h4>
+              <p>{{ truncate(remoteDescription(skill), 220) || 'SkillHub 未提供简介。' }}</p>
+            </div>
+            <t-button size="small" variant="outline" @click="previewRemoteSkill(skill)">预览并导入</t-button>
+          </article>
+        </div>
+      </template>
+    </t-dialog>
+
+    <t-dialog v-model:visible="showRemotePreview" header="预览 SkillHub 技能" width="760px" :footer="false">
+      <template v-if="selectedRemote">
+        <div class="remote-preview-meta">
+          <strong>{{ remoteName(selectedRemote) }}</strong>
+          <a v-if="remoteUrl(selectedRemote)" :href="remoteUrl(selectedRemote)" target="_blank" rel="noreferrer">查看来源</a>
+        </div>
+        <pre class="remote-preview-content">{{ remoteContent(selectedRemote) || 'SkillHub 未返回完整内容；将导入当前简介。' }}</pre>
+        <div class="dialog-footer">
+          <t-button theme="default" variant="text" @click="showRemotePreview = false">取消</t-button>
+          <t-button theme="primary" :loading="importingRemote" @click="importRemoteSkill">导入到本地仓库</t-button>
+        </div>
+      </template>
+    </t-dialog>
 
     <!-- Create Dialog -->
     <t-dialog v-model:visible="showCreateDialog" header="创建技能" width="520px" :footer="false">
@@ -222,6 +375,50 @@ function fmtTime(iso: string | null): string {
 
 <style scoped>
 .page-root { max-width: 1000px; }
+
+.external-source-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.external-source-card strong { font-size: 14px; }
+.external-source-card p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
+.remote-search-row { display: flex; gap: 8px; margin-bottom: 14px; }
+.remote-skill-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow: auto; }
+.remote-skill-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+}
+.remote-skill-item h4 { margin: 0; font-size: 14px; }
+.remote-skill-item p { margin: 5px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.remote-empty { padding: 24px; text-align: center; color: var(--muted-foreground); }
+.remote-preview-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.remote-preview-meta a { color: var(--primary); font-size: 13px; }
+.remote-preview-content {
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--page-canvas);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
 
 /* ── Skill cards grid ──────────────────────────────────────────────── */
 .skill-grid {

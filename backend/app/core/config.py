@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     ANTHROPIC_API_KEY: str = ""
+    SKILLHUB_API_KEY: str = ""
     OPENCODE_SERVER_URL: str = "http://localhost:36000"
     # Executor limits are intentionally bounded: tasks queue instead of
     # exhausting the web server or the model provider's rate limit.

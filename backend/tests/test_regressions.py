@@ -10,9 +10,11 @@ from sqlalchemy.pool import StaticPool
 from app.api.messages import list_messages, mark_read, unread_message_count
 from app.api.projects import ProjectCreate, create_project, delete_project
 from app.api.reviews import VoteRequest, cast_review_vote
+from app.api.skills import SkillHubImportRequest, import_skillhub_skill
 from app.api.tasks import resume_task, start_task, stop_task
 from app.core.config import settings
 from app.services import memory_service as mem
+from app.services import skillhub_service
 from app.models.models import (
     Agent,
     AgentStatus,
@@ -295,6 +297,44 @@ class MemoryHierarchyTests(unittest.TestCase):
             self.assertEqual(mem.add_agent_memory(0, "ignored"), "")
             self.assertEqual(mem.search_agent_memory(0, "query"), [])
         get_collection.assert_not_called()
+
+
+class SkillHubTests(DatabaseTestCase):
+    def test_import_copies_a_reviewed_remote_skill_to_local_library(self) -> None:
+        imported = import_skillhub_skill(
+            SkillHubImportRequest(
+                name="PDF workflow",
+                description="Extract tables from PDF files",
+                prompt_content="# PDF workflow\nUse the checked extraction flow.",
+                source_id="vendor/pdf-workflow",
+                source_url="https://www.skillhub.club/skills/vendor-pdf-workflow",
+            ),
+            self.db,
+            self.owner,
+        )
+
+        self.assertEqual(imported.source, "skillhub")
+        self.assertEqual(imported.source_id, "vendor/pdf-workflow")
+        self.assertEqual(imported.creator_id, self.owner.id)
+
+    def test_search_uses_backend_key_without_returning_it(self) -> None:
+        class Response:
+            status_code = 200
+
+            @staticmethod
+            def json() -> dict:
+                return {"data": [{"id": "skill-1", "name": "PDF workflow"}]}
+
+        with (
+            patch.object(skillhub_service.settings, "SKILLHUB_API_KEY", "sk-sh-test-key"),
+            patch.object(skillhub_service.httpx, "request", return_value=Response()) as request,
+        ):
+            result = skillhub_service.search_skills("PDF", limit=5)
+
+        self.assertEqual(result["data"][0]["id"], "skill-1")
+        self.assertEqual(request.call_args.args[:2], ("POST", f"{skillhub_service.BASE_URL}/skills/search"))
+        self.assertEqual(request.call_args.kwargs["headers"], {"Authorization": "Bearer sk-sh-test-key"})
+        self.assertEqual(request.call_args.kwargs["json"]["query"], "PDF")
 
 
 if __name__ == "__main__":
