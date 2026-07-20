@@ -171,3 +171,26 @@ def update_setting(req: SettingUpdate):
         "configured": bool(req.value) if is_secret else None,
         "message": "已保存，部分设置需重启后端生效",
     }
+
+
+# ── Memory viewers ────────────────────────────────────────────────────────
+
+@router.get("/global-memories")
+def list_global_memories(limit: int = 50):
+    """List recent global (cross-project) memories from ChromaDB."""
+    from app.services import memory_service as mem
+    return {"memories": mem.list_global_memories(n=max(1, min(200, limit)))}
+
+
+@router.get("/project-memories")
+def list_project_memories(project_id: int, limit: int = 50):
+    """List recent project-scoped memories from ChromaDB."""
+    from app.services import memory_service as mem
+    return {"memories": mem.list_project_memories(project_id, n=max(1, min(200, limit)))}
+
+
+@router.get("/agent-memories")
+def list_agent_memories(agent_id: int, limit: int = 50):
+    """List recent agent-scoped memories from ChromaDB."""
+    from app.services import memory_service as mem
+    return {"memories": mem.list_agent_memories(agent_id, n=max(1, min(200, limit)))}

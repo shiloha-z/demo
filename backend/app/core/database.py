@@ -205,7 +205,7 @@ def _seed_builtin_skills():
 
     from app.models.models import Skill, User
 
-    seed_file = Path(__file__).resolve().parent.parent / "seed_data" / "banking_skills.json"
+    seed_file = Path(__file__).resolve().parent.parent.parent / "seed_data" / "banking_skills.json"
     if not seed_file.exists():
         return
 

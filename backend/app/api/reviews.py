@@ -1,12 +1,14 @@
 import json
 from datetime import datetime, timezone
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.config import settings
+from app.core.pagination import paginate
 from app.core.permissions import require_project_admin, require_project_member
 from app.models.models import User, QualityGateRun, Review, ReviewStatus, ReviewRound, ReviewReviewer, ReviewVote, ProjectMember, Task, TaskStatus, Version, Agent, AgentStatus
 from app.services import git_service as git
@@ -108,6 +110,17 @@ def _latest_quality_gate(review_id: int, db: Session) -> QualityGateRun | None:
 
 def _require_passed_quality_gate(review: Review, db: Session) -> QualityGateRun:
     run = _latest_quality_gate(review.id, db)
+
+    # When the quality-gate subsystem is disabled, skip the required-check
+    # logic entirely.  Synthesise a dummy "passed" record so that callers
+    # which read .commit_hash / .id still work.
+    if not settings.QUALITY_GATE_ENABLED:
+        return type(
+            "_SyntheticGate",
+            (),
+            {"status": "passed", "commit_hash": "", "id": None},
+        )()
+
     if not run or run.status != "passed":
         raise HTTPException(
             status_code=409,
@@ -171,11 +184,31 @@ def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("/projects/{project_id}/reviews", response_model=list[ReviewResponse])
-def list_reviews(project_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@router.get("/projects/{project_id}/reviews")
+def list_reviews(
+    project_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     require_project_member(project_id, user, db)
-    reviews = db.query(Review).filter(Review.project_id == project_id).order_by(Review.id.desc()).all()
-    return [ReviewResponse.model_validate(r) for r in reviews]
+    q = db.query(Review).filter(Review.project_id == project_id).order_by(Review.id.desc())
+    reviews, paging = paginate(q, page, page_size)
+    return {"items": [ReviewResponse.model_validate(r) for r in reviews], **paging}
+
+
+@router.get("/reviews/pending-count")
+def pending_review_count(
+    project_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return count of pending reviews, optionally scoped to a project."""
+    q = db.query(Review).filter(Review.status == ReviewStatus.PENDING)
+    if project_id is not None:
+        q = q.filter(Review.project_id == project_id)
+    return {"count": q.count()}
 
 
 @router.get("/reviews/{review_id}", response_model=ReviewResponse)
@@ -462,74 +495,6 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
         )
     return _queue_review_merge(review, task, db)
 
-    # Merge task branch → master, then commit
-    from app.models.models import Project
-    proj = db.get(Project, review.project_id)
-    if proj and proj.workspace_path:
-        branch_name = f"task/{review.task_id}"
-        # 1. Merge task branch into master (agent already committed on the branch)
-        merged = git.merge_branch(proj.workspace_path, branch_name)
-        if not merged:
-            raise HTTPException(status_code=409, detail="Could not merge task branch")
-        if merged:
-            # A fast-forward merge leaves no uncommitted changes, so the
-            # normal `commit()` returns None. Fall back to an empty auditable
-            # commit so a Version record is always created for the approval.
-            commit_hash = git.commit(
-                proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})"
-            ) or git.commit_allow_empty(
-                proj.workspace_path, f"Review #{review_id} approved (task #{review.task_id})"
-            )
-            if commit_hash:
-                v = Version(project_id=review.project_id, commit_hash=commit_hash,
-                            commit_message=f"Review #{review_id} approved", review_id=review.id)
-                db.add(v)
-                db.commit()
-        # 2. Clean up the task branch
-        git.delete_branch(proj.workspace_path, branch_name)
-
-    review.status = ReviewStatus.APPROVED
-    task.status = TaskStatus.APPROVED
-    db.commit()
-
-    from app.api.ws import broadcast_sync
-    broadcast_sync("review_update", {
-        "id": review.id, "task_id": review.task_id,
-        "project_id": review.project_id, "status": "approved",
-    })
-    broadcast_sync("task_update", {
-        "id": task.id, "project_id": task.project_id, "status": "approved",
-    })
-    broadcast_sync("version_update", {"project_id": review.project_id})
-    broadcast_sync("file_change", {"project_id": review.project_id})
-
-    # Record to project memory
-    if mem:
-        try:
-            mem.add_project_memory(review.project_id,
-                f"Review #{review_id} (task #{review.task_id}) APPROVED. "
-                f"Changes merged to master.",
-                {"type": "review_decision", "review_id": str(review_id), "decision": "approved"})
-        except Exception:
-            pass
-
-    # Push system message
-    try:
-        from app.services import message_service as msg
-        from app.models.models import MessageCategory, MessageLevel
-        msg.push(
-            title="审查已通过",
-            body=f"审查 #{review_id}（任务 #{review.task_id}）已通过，变更已合并到主分支。",
-            category=MessageCategory.REVIEW,
-            level=MessageLevel.SUCCESS,
-            project_id=review.project_id,
-            link=f"/versions",
-        )
-    except Exception:
-        pass
-
-    return {"message": "Approved"}
-
 
 @router.post("/reviews/{review_id}/reject")
 def reject_review(
@@ -732,6 +697,11 @@ def close_review(
         raise HTTPException(status_code=409, detail="Task is not awaiting review")
     task.status = TaskStatus.REJECTED
 
+    # Release the agent so it can accept new work.
+    agent = db.get(Agent, task.agent_id)
+    if agent and agent.status == AgentStatus.DONE:
+        agent.status = AgentStatus.IDLE
+
     db.commit()
 
     # Audit: 审查被关闭（终止驳回，未合并）。
@@ -746,13 +716,24 @@ def close_review(
         intent="关闭审查（终止，未合并）",
     )
 
-    # Switch back to master and delete the task branch
+    # ── WebSocket broadcasts ──────────────────────────────────────
+    broadcast_sync("review_update", {
+        "id": review.id, "task_id": review.task_id,
+        "project_id": review.project_id, "status": "rejected",
+    })
+    broadcast_sync("task_update", {
+        "id": task.id, "project_id": task.project_id, "status": "rejected",
+    })
+    if agent:
+        broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+
+    # Clean up task worktree and branch
     from app.models.models import Project
     proj = db.get(Project, review.project_id)
-    if proj and proj.workspace_path:
-        branch_name = f"task/{review.task_id}"
+    if proj and proj.workspace_path and task.worktree_path:
+        branch_name = task.branch_name or f"task/{review.task_id}"
         git.switch_branch(proj.workspace_path, "master")
-        git.delete_branch(proj.workspace_path, branch_name)
+        git.cleanup_task_resources(proj.workspace_path, task.worktree_path, branch_name)
 
     # Record the terminal outcome in the Agent and project layers.
     if mem:
@@ -787,16 +768,3 @@ def close_review(
         pass
 
     return {"message": "Closed"}
-
-
-@router.get("/reviews/pending-count")
-def pending_review_count(
-    project_id: int | None = None,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Return count of pending reviews, optionally scoped to a project."""
-    q = db.query(Review).filter(Review.status == ReviewStatus.PENDING)
-    if project_id is not None:
-        q = q.filter(Review.project_id == project_id)
-    return {"count": q.count()}

@@ -78,6 +78,21 @@ class ConnectionManager:
             if self._user_project.get(uid) == project_id
         ]
 
+    def send_to_user(self, user_id: int, event_type: str, data: dict) -> None:
+        """Push a single event to a specific user (e.g. private chat)."""
+        info = self._clients.get(user_id)
+        if info is None:
+            return
+        try:
+            import asyncio
+            loop = self._main_loop or asyncio.get_running_loop()
+            async def _send():
+                msg = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)
+                await info["ws"].send_text(msg)
+            asyncio.run_coroutine_threadsafe(_send(), loop)
+        except Exception:
+            pass
+
     async def _broadcast_to_project_async(self, project_id: int, event_type: str, data: dict) -> None:
         """Send a typed event to all clients currently viewing the given project."""
         message = json.dumps({"type": event_type, "data": data}, ensure_ascii=False)

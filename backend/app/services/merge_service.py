@@ -18,6 +18,7 @@ from app.models.models import (
 from app.services import git_service as git
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
+from app.core.config import settings
 
 
 def _update_task(task: Task, status: TaskStatus, error: str = "") -> None:
@@ -79,7 +80,7 @@ def integrate_task(task_id: int) -> None:
             QualityGateRun.review_id == review.id,
         ).order_by(QualityGateRun.id.desc()).first()
         branch_commit = git.head_commit(task.worktree_path)
-        if (
+        if settings.QUALITY_GATE_ENABLED and (
             not gate_run
             or gate_run.status != "passed"
             or not gate_run.commit_hash
@@ -138,8 +139,7 @@ def integrate_task(task_id: int) -> None:
                     impact=f"版本 {commit_or_error}：任务「{task.title}」已合并至主分支",
                 )
 
-                git.remove_task_worktree(project.workspace_path, task.worktree_path)
-                git.delete_branch(project.workspace_path, branch_name)
+                git.cleanup_task_resources(project.workspace_path, task.worktree_path, branch_name)
                 _broadcast(task)
                 broadcast_sync("version_update", {"project_id": project.id})
                 broadcast_sync("file_change", {"project_id": project.id})

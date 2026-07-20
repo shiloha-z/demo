@@ -85,3 +85,44 @@ app.include_router(ws_router)
 @app.get("/")
 def root():
     return {"message": "Agent Collaboration Platform API"}
+
+
+@app.get("/api/health")
+def health_check():
+    """Readiness probe — verify DB, Git, and optional ChromaDB are reachable."""
+    checks: dict[str, str] = {}
+    healthy = True
+
+    # Database
+    try:
+        from app.core.database import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        db.execute(text("SELECT 1"))
+        db.close()
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {e}"
+        healthy = False
+
+    # Git CLI
+    try:
+        import subprocess
+        subprocess.run(["git", "--version"], capture_output=True, check=True, timeout=5)
+        checks["git"] = "ok"
+    except Exception as e:
+        checks["git"] = f"error: {e}"
+        healthy = False
+
+    # ChromaDB (optional — degrade gracefully)
+    try:
+        from app.services import memory_service as mem
+        if mem is not None and hasattr(mem, 'mem_ok') and not mem.mem_ok():
+            checks["chromadb"] = "unavailable"
+        else:
+            checks["chromadb"] = "ok" if mem is not None else "not installed"
+    except Exception:
+        checks["chromadb"] = "not installed"
+
+    status_code = 200 if healthy else 503
+    return {"status": "ok" if healthy else "degraded", "checks": checks}, status_code

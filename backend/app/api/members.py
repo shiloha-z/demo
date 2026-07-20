@@ -6,13 +6,14 @@ Roles (from highest to lowest):
   - member: view, create tasks, chat
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from datetime import datetime, timezone
 from app.models.models import User, Project, ProjectMember, ProjectRole, JoinRequest, JoinStatus, Review, ReviewVote, ReviewReviewer
 from app.services.audit_service import record as audit_record
@@ -103,34 +104,39 @@ def require_role(project_id: int, user: User, db: Session, *roles: str) -> Proje
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("/projects/{project_id}/members", response_model=list[MemberResponse])
+@router.get("/projects/{project_id}/members")
 def list_members(
     project_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """List all members of a project (must be a member to view)."""
     require_member(project_id, user, db)
 
-    members = (
+    q = (
         db.query(ProjectMember, User)
         .join(User, ProjectMember.user_id == User.id)
         .filter(ProjectMember.project_id == project_id)
         .order_by(ProjectMember.role.desc(), ProjectMember.joined_at.asc())
-        .all()
     )
-    return [
-        MemberResponse(
-            id=pm.id,
-            project_id=pm.project_id,
-            user_id=pm.user_id,
-            username=u.username,
-            display_name=u.display_name or u.username,
-            role=pm.role.value,
-            joined_at=pm.joined_at.isoformat() if pm.joined_at else None,
-        )
-        for pm, u in members
-    ]
+    members, paging = paginate(q, page, page_size)
+    return {
+        "items": [
+            MemberResponse(
+                id=pm.id,
+                project_id=pm.project_id,
+                user_id=pm.user_id,
+                username=u.username,
+                display_name=u.display_name or u.username,
+                role=pm.role.value,
+                joined_at=pm.joined_at.isoformat() if pm.joined_at else None,
+            )
+            for pm, u in members
+        ],
+        **paging,
+    }
 
 
 @router.post("/projects/{project_id}/members")
@@ -416,9 +422,11 @@ class JoinRequestResponse(BaseModel):
     project_name: str = ""
 
 
-@legacy_router.get("/projects/{project_id}/join-requests", response_model=list[JoinRequestResponse])
+@legacy_router.get("/projects/{project_id}/join-requests")
 def list_join_requests(
     project_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -426,22 +434,25 @@ def list_join_requests(
     require_role(project_id, user, db, "owner", "admin")
 
     project = db.get(Project, project_id)
-    requests = (
+    q = (
         db.query(JoinRequest)
         .filter(JoinRequest.project_id == project_id)
         .order_by(JoinRequest.status == "pending", JoinRequest.created_at.desc())
-        .all()
     )
-    return [
-        JoinRequestResponse(
-            id=r.id, project_id=r.project_id, user_id=r.user_id,
-            username=r.username, status=r.status.value,
-            created_at=r.created_at.isoformat() if r.created_at else None,
-            reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
-            project_name=project.name if project else "",
-        )
-        for r in requests
-    ]
+    requests, paging = paginate(q, page, page_size)
+    return {
+        "items": [
+            JoinRequestResponse(
+                id=r.id, project_id=r.project_id, user_id=r.user_id,
+                username=r.username, status=r.status.value,
+                created_at=r.created_at.isoformat() if r.created_at else None,
+                reviewed_at=r.reviewed_at.isoformat() if r.reviewed_at else None,
+                project_name=project.name if project else "",
+            )
+            for r in requests
+        ],
+        **paging,
+    }
 
 
 @legacy_router.get("/projects/{project_id}/my-request")

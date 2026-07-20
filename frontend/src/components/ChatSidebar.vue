@@ -16,12 +16,92 @@ const ws = useWebSocketStore()
 const auth = useAuthStore()
 const projectStore = useProjectStore()
 
+// ── Chat mode: team | dm ──────────────────────────────────────────
+type ChatMode = 'team' | 'dm'
+const chatMode = ref<ChatMode>('team')
+const dmUser = ref<{ id: number; username: string; display_name: string } | null>(null)
+const members = ref<{ id: number; username: string; display_name: string; role: string }[]>([])
+
+// ── @mention autocomplete ─────────────────────────────────────────
+const mentionActive = ref(false)
+const mentionQuery = ref('')
+const mentionIndex = ref(0)
+const filteredMembers = computed(() => {
+  const q = mentionQuery.value.toLowerCase()
+  const onlineIds = new Set(onlineUsers.value.map(u => u.user_id))
+  // Online members first, then the rest
+  const sorted = [...members.value].sort((a, b) => {
+    const aOn = onlineIds.has(a.id) ? 0 : 1
+    const bOn = onlineIds.has(b.id) ? 0 : 1
+    return aOn - bOn
+  })
+  if (!q) return sorted.slice(0, 8)
+  return sorted.filter(m =>
+    m.username.toLowerCase().includes(q) || m.display_name.toLowerCase().includes(q)
+  ).slice(0, 8)
+})
+
+function onInputWithMention(e: Event) {
+  const el = e.target as HTMLTextAreaElement
+  const val = el.value
+  const cursor = el.selectionStart ?? 0
+  // Find @ before cursor
+  const beforeCursor = val.slice(0, cursor)
+  const match = beforeCursor.match(/@(\w*)$/)
+  if (match) {
+    mentionActive.value = true
+    mentionQuery.value = match[1]
+    mentionIndex.value = 0
+  } else {
+    mentionActive.value = false
+  }
+  onInput()
+}
+
+function insertMention(member: typeof members.value[0]) {
+  const el = document.querySelector('.chat-input') as HTMLTextAreaElement | null
+  if (!el) return
+  const val = el.value
+  const cursor = el.selectionStart ?? 0
+  const beforeCursor = val.slice(0, cursor)
+  const afterCursor = val.slice(cursor)
+  const atPos = beforeCursor.lastIndexOf('@')
+  if (atPos === -1) return
+  const newText = beforeCursor.slice(0, atPos) + `@${member.username} ` + afterCursor
+  inputText.value = newText
+  mentionActive.value = false
+  el.focus()
+  nextTick(() => {
+    const pos = atPos + member.username.length + 2
+    el.setSelectionRange(pos, pos)
+  })
+}
+
+function handleMentionKeydown(e: KeyboardEvent) {
+  if (!mentionActive.value) return
+  if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndex.value = Math.min(mentionIndex.value + 1, filteredMembers.value.length - 1) }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndex.value = Math.max(mentionIndex.value - 1, 0) }
+  else if (e.key === 'Enter' || e.key === 'Tab') {
+    const m = filteredMembers.value[mentionIndex.value]
+    if (m) { e.preventDefault(); insertMention(m) }
+  }
+  else if (e.key === 'Escape') { mentionActive.value = false }
+}
+
+function renderMsgWithMentions(text: string): string {
+  if (!text) return ''
+  let html = renderMsg(text)
+  html = html.replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>')
+  return html
+}
+
 interface ChatMsg {
   id: number
   user_id: number
   username: string
   message: string
   project_id?: number
+  recipient_id?: number | null
   created_at: string
   system?: boolean
   file_url?: string
@@ -117,22 +197,36 @@ watch(() => projectStore.currentProject?.id, (newId, oldId) => {
   }
 })
 
+function switchToTeam() { chatMode.value = 'team'; dmUser.value = null; messages.value = []; loadMessages() }
+function switchToDM(user: typeof members.value[0]) { chatMode.value = 'dm'; dmUser.value = user; messages.value = []; loadMessages() }
+
 async function joinProjectRoom(projectId: number) {
-  // Tell the server which project we're viewing
   try {
     ws.send(JSON.stringify({ type: 'join_project', project_id: projectId }))
   } catch { /* ignore */ }
   messages.value = []
+  chatMode.value = 'team'
+  dmUser.value = null
   await loadMessages()
   await loadOnlineUsers()
+  loadMembers()
 }
 
 function setupWS() {
   unsubChat = ws.on('chat_message', (data: ChatMsg & { system?: boolean }) => {
-    // Only process messages for the current project
     const currentPid = projectStore.currentProject?.id
     if (currentPid == null || data.project_id !== currentPid) return
-    // Dedup: message may already be in the list from optimistic send
+    // For DM mode, only show if it's between the two participants
+    if (chatMode.value === 'dm' && dmUser.value) {
+      const isParticipant = (data.user_id === auth.userId && data.recipient_id === dmUser.value.id)
+        || (data.user_id === dmUser.value.id && data.recipient_id === auth.userId)
+      if (!isParticipant && data.recipient_id != null) return
+      // Team messages (recipient_id=null) shouldn't appear in DM mode
+      if (data.recipient_id == null) return
+    } else {
+      // Team mode: skip private messages
+      if (data.recipient_id != null) return
+    }
     if (!messages.value.some(m => m.id === data.id)) {
       messages.value.push(data)
       if (!props.visible && data.user_id !== auth.userId) {
@@ -167,12 +261,22 @@ function setupWS() {
 }
 
 // ── Load ───────────────────────────────────────────────────────
+async function loadMembers() {
+  const pid = projectStore.currentProject?.id
+  if (pid == null) return
+  try {
+    const { data } = await api.get('/chat/members', { params: { project_id: pid } })
+    members.value = data.members || []
+  } catch { /* ignore */ }
+}
+
 async function loadMessages(beforeId?: number) {
   const pid = projectStore.currentProject?.id
   if (pid == null) return
   loading.value = true
   try {
     const params: Record<string, any> = { project_id: pid, limit: 50 }
+    if (chatMode.value === 'dm' && dmUser.value) params.recipient_id = dmUser.value.id
     if (beforeId) params.before_id = beforeId
     const { data } = await api.get('/chat/messages', { params })
     const arr: ChatMsg[] = Array.isArray(data) ? data : []
@@ -239,6 +343,9 @@ async function sendMessage() {
       const form = new FormData()
       form.append('project_id', String(pid))
       form.append('message', text)
+      if (chatMode.value === 'dm' && dmUser.value) {
+        form.append('recipient_id', String(dmUser.value.id))
+      }
       const { data } = await api.post('/chat/messages', form)
       // Optimistically add message to local list so it appears immediately.
       // Dedup: the WebSocket broadcast will also deliver it, so skip duplicates.
@@ -352,6 +459,7 @@ function onInput() {
 
 // ── Handle Enter key ───────────────────────────────────────────
 function handleKeydown(e: KeyboardEvent) {
+  if (mentionActive.value) return  // don't send while choosing a mention
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     sendMessage()
@@ -439,12 +547,20 @@ watch(() => props.visible, (v) => {
     <div class="chat-header">
       <div class="chat-header-left">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        <span>团队聊天</span>
-        <template v-if="projectStore.currentProject">
-          <span class="chat-header-sep">·</span>
-          <span class="chat-header-project">{{ projectStore.currentProject.name }}</span>
+        <template v-if="chatMode === 'dm' && dmUser">
+          <span>{{ dmUser.display_name }}</span>
+          <button class="chat-mode-btn" @click="switchToTeam()" title="切换回团队聊天">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
         </template>
-        <span class="chat-badge" v-if="onlineUsers.length > 0">{{ onlineUsers.length }} 在线</span>
+        <template v-else>
+          <span>团队聊天</span>
+          <template v-if="projectStore.currentProject">
+            <span class="chat-header-sep">·</span>
+            <span class="chat-header-project">{{ projectStore.currentProject.name }}</span>
+          </template>
+          <span class="chat-badge" v-if="onlineUsers.length > 0">{{ onlineUsers.length }} 在线</span>
+        </template>
       </div>
       <div class="chat-header-actions">
         <button class="chat-icon-btn" :class="{ active: showOnlineUsers }" title="在线成员" @click="showOnlineUsers = !showOnlineUsers">
@@ -456,8 +572,21 @@ watch(() => props.visible, (v) => {
       </div>
     </div>
 
+    <!-- ── DM member list ────────────────── -->
+    <div class="chat-online-bar" v-if="chatMode === 'dm' && members.length > 0">
+      <span style="font-size:12px;color:var(--muted-foreground);padding:2px 4px">选择私聊对象：</span>
+      <button
+        v-for="m in members" :key="m.id"
+        class="dm-chip"
+        :class="{ active: dmUser?.id === m.id }"
+        @click="switchToDM(m)"
+      >
+        {{ m.display_name }}
+        <span class="dm-chip-dot" :class="{ online: onlineUsers.some(u => u.user_id === m.id) }"></span>
+      </button>
+    </div>
     <!-- ── Online users ──────────────────── -->
-    <div class="chat-online-bar" v-if="showOnlineUsers && onlineUsers.length > 0">
+    <div class="chat-online-bar" v-if="chatMode === 'team' && showOnlineUsers && onlineUsers.length > 0">
       <div v-for="u in onlineUsers" :key="u.user_id" class="online-user-chip" :title="u.display_name || u.username">
         <span class="online-dot" />
         {{ u.display_name || u.username }}
@@ -528,7 +657,7 @@ watch(() => props.visible, (v) => {
               </div>
 
               <!-- Text content -->
-              <div class="msg-bubble" v-if="msg.message" v-html="renderMsg(msg.message)" />
+              <div class="msg-bubble" v-if="msg.message" v-html="renderMsgWithMentions(msg.message)" />
 
               <!-- Image attachment -->
               <div class="msg-attachment" v-if="msg.file_type === 'image' && msg.file_url">
@@ -569,6 +698,21 @@ watch(() => props.visible, (v) => {
       <span class="mini-spinner"></span> 上传文件中...
     </div>
 
+    <!-- ── @mention dropdown ──────────────── -->
+    <div class="mention-dropdown" v-if="mentionActive && filteredMembers.length > 0">
+      <button
+        v-for="(m, i) in filteredMembers" :key="m.id"
+        class="mention-item"
+        :class="{ active: i === mentionIndex }"
+        @click="insertMention(m)"
+        @mouseenter="mentionIndex = i"
+      >
+        <span class="mention-name">{{ m.display_name }}</span>
+        <span class="mention-username">@{{ m.username }}</span>
+        <span class="mention-online-dot" v-if="onlineUsers.some(u => u.user_id === m.id)"></span>
+      </button>
+    </div>
+
     <!-- ── Input ──────────────────────────── -->
     <div class="chat-input-area">
       <input
@@ -593,8 +737,8 @@ watch(() => props.visible, (v) => {
         rows="2"
         maxlength="2000"
         :disabled="!projectStore.currentProject"
-        @keydown="handleKeydown"
-        @input="onInput"
+        @keydown="handleMentionKeydown($event); handleKeydown($event)"
+        @input="onInputWithMention"
       />
       <button
         class="chat-send-btn"
@@ -799,6 +943,7 @@ watch(() => props.visible, (v) => {
 
 /* ── Input ──────────────────────────── */
 .chat-input-area {
+  position: relative;
   display: flex; align-items: flex-end; gap: 6px;
   padding: 10px 16px;
   border-top: 1px solid var(--surface-border);
@@ -844,4 +989,45 @@ watch(() => props.visible, (v) => {
 /* ── Mini spinner ───────────────────── */
 .mini-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--surface-border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── @mention / DM / mode toggle ────────────────────────────────────── */
+.chat-mode-btn {
+  margin-left: auto; width: 24px; height: 24px;
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+}
+.chat-mode-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+
+.dm-chip {
+  padding: 2px 8px; border-radius: 999px; font-size: 11px;
+  border: 1px solid var(--surface-border); background: var(--surface);
+  color: var(--muted-foreground); cursor: pointer;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.dm-chip:hover, .dm-chip.active { border-color: var(--primary); color: var(--primary); }
+.dm-chip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.4; }
+.dm-chip-dot.online { background: var(--success); opacity: 1; }
+
+.mention-tag {
+  color: var(--primary); background: var(--primary-light);
+  padding: 1px 3px; border-radius: 3px; font-weight: 600;
+}
+
+.mention-dropdown {
+  position: absolute; bottom: calc(100% + 4px); left: 16px; right: 16px;
+  max-height: 200px; overflow-y: auto;
+  background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); box-shadow: 0 -4px 16px rgba(0,0,0,0.1);
+  z-index: 20;
+}
+.mention-item {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 8px 12px;
+  border: none; background: transparent; color: var(--foreground);
+  font-size: 13px; cursor: pointer; text-align: left;
+}
+.mention-item:hover, .mention-item.active { background: var(--surface-hover); }
+.mention-name { font-weight: 500; }
+.mention-username { font-size: 11px; color: var(--muted-foreground); margin-left: auto; }
+.mention-online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
 </style>

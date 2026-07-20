@@ -40,6 +40,25 @@ def list_users(
         like = f"%{q}%"
         query = query.filter(User.username.ilike(like) | User.display_name.ilike(like))
     users = query.order_by(User.id.desc()).limit(limit).all()
+    user_ids = [u.id for u in users]
+
+    # Pre-fetch all counts with a single GROUP BY per entity type
+    project_counts = dict(
+        db.query(Project.owner_id, func.count(Project.id))
+        .filter(Project.owner_id.in_(user_ids))
+        .group_by(Project.owner_id).all()
+    ) if user_ids else {}
+    agent_counts = dict(
+        db.query(Agent.creator_id, func.count(Agent.id))
+        .filter(Agent.creator_id.in_(user_ids))
+        .group_by(Agent.creator_id).all()
+    ) if user_ids else {}
+    skill_counts = dict(
+        db.query(Skill.creator_id, func.count(Skill.id))
+        .filter(Skill.creator_id.in_(user_ids))
+        .group_by(Skill.creator_id).all()
+    ) if user_ids else {}
+
     items = []
     for u in users:
         items.append({
@@ -47,9 +66,9 @@ def list_users(
             "username": u.username,
             "display_name": u.display_name or "",
             "email": u.email or "",
-            "project_count": db.query(func.count(Project.id)).filter(Project.owner_id == u.id).scalar() or 0,
-            "agent_count": db.query(func.count(Agent.id)).filter(Agent.creator_id == u.id).scalar() or 0,
-            "skill_count": db.query(func.count(Skill.id)).filter(Skill.creator_id == u.id).scalar() or 0,
+            "project_count": project_counts.get(u.id, 0),
+            "agent_count": agent_counts.get(u.id, 0),
+            "skill_count": skill_counts.get(u.id, 0),
         })
     return {"total": len(items), "items": items}
 
@@ -144,6 +163,20 @@ def list_projects(
         like = f"%{q}%"
         query = query.filter(Project.name.ilike(like) | Project.project_id.ilike(like))
     projects = query.order_by(desc(Project.created_at)).limit(limit).all()
+    project_ids = [p.id for p in projects]
+
+    # Pre-fetch all counts with a single GROUP BY per entity type
+    task_counts = dict(
+        db.query(Task.project_id, func.count(Task.id))
+        .filter(Task.project_id.in_(project_ids))
+        .group_by(Task.project_id).all()
+    ) if project_ids else {}
+    member_counts = dict(
+        db.query(ProjectMember.project_id, func.count(ProjectMember.id))
+        .filter(ProjectMember.project_id.in_(project_ids))
+        .group_by(ProjectMember.project_id).all()
+    ) if project_ids else {}
+
     items = []
     for p in projects:
         items.append({
@@ -152,8 +185,8 @@ def list_projects(
             "name": p.name,
             "owner_id": p.owner_id,
             "owner_name": p.owner.username if p.owner else "",
-            "task_count": db.query(func.count(Task.id)).filter(Task.project_id == p.id).scalar() or 0,
-            "member_count": db.query(func.count(ProjectMember.id)).filter(ProjectMember.project_id == p.id).scalar() or 0,
+            "task_count": task_counts.get(p.id, 0),
+            "member_count": member_counts.get(p.id, 0),
             "workspace_path": p.workspace_path or "",
             "created_at": p.created_at.isoformat() if p.created_at else "",
         })
@@ -280,6 +313,15 @@ def list_agents(
         like = f"%{q}%"
         query = query.filter(Agent.name.ilike(like) | Agent.role.ilike(like))
     agents = query.order_by(Agent.id.desc()).limit(limit).all()
+    agent_ids = [a.id for a in agents]
+
+    # Pre-fetch all task counts with a single GROUP BY
+    task_counts = dict(
+        db.query(Task.agent_id, func.count(Task.id))
+        .filter(Task.agent_id.in_(agent_ids))
+        .group_by(Task.agent_id).all()
+    ) if agent_ids else {}
+
     items = []
     for a in agents:
         items.append({
@@ -291,7 +333,7 @@ def list_agents(
             "status": a.status.value if hasattr(a.status, "value") else str(a.status),
             "creator_id": a.creator_id,
             "creator_name": a.creator.display_name or a.creator.username if a.creator else "",
-            "task_count": db.query(func.count(Task.id)).filter(Task.agent_id == a.id).scalar() or 0,
+            "task_count": task_counts.get(a.id, 0),
         })
     return {"total": len(items), "items": items}
 

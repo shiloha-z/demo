@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from app.core.permissions import require_project_member
 from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, QualityGateRun, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
 from app.services import git_service as git
@@ -46,6 +47,8 @@ class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(default="")
     agent_id: int
+    reviewer_agent_id: int | None = None
+    security_agent_id: int | None = None
     approval_percent: int = Field(default=50, ge=1, le=100)
 
 
@@ -57,6 +60,8 @@ class TaskResponse(BaseModel):
     status: str
     archived: bool = False
     agent_id: int
+    reviewer_agent_id: int | None = None
+    security_agent_id: int | None = None
     project_id: int
     created_at: str | None = None
     started_at: str | None = None
@@ -64,6 +69,8 @@ class TaskResponse(BaseModel):
     merge_error: str = ""
     agent_name: str | None = None
     agent_role: str | None = None
+    reviewer_agent_name: str | None = None
+    security_agent_name: str | None = None
     project_name: str | None = None
 
     class Config:
@@ -81,6 +88,8 @@ class TaskDetailResponse(BaseModel):
     approval_percent: int = 50
     status: str
     agent_id: int
+    reviewer_agent_id: int | None = None
+    security_agent_id: int | None = None
     project_id: int
     created_at: str | None = None
     started_at: str | None = None
@@ -90,6 +99,8 @@ class TaskDetailResponse(BaseModel):
     agent_role: str | None = None
     agent_model: str | None = None
     agent_runner_type: str | None = None
+    reviewer_agent_name: str | None = None
+    security_agent_name: str | None = None
     project_name: str | None = None
     review: dict | None = None
     quality_gate: dict | None = None
@@ -116,6 +127,8 @@ def _task_to_response(t: Task) -> TaskResponse:
         status=t.status.value if hasattr(t.status, 'value') else t.status,
         archived=bool(t.archived),
         agent_id=t.agent_id,
+        reviewer_agent_id=t.reviewer_agent_id,
+        security_agent_id=t.security_agent_id,
         project_id=t.project_id,
         created_at=t.created_at.isoformat() if t.created_at else None,
         started_at=t.started_at.isoformat() if t.started_at else None,
@@ -123,6 +136,8 @@ def _task_to_response(t: Task) -> TaskResponse:
         merge_error=t.merge_error or "",
         agent_name=t.agent.name if t.agent else None,
         agent_role=t.agent.role if t.agent else None,
+        reviewer_agent_name=t.reviewer_agent.name if t.reviewer_agent else None,
+        security_agent_name=t.security_agent.name if t.security_agent else None,
         project_name=t.project.name if t.project else None,
     )
 
@@ -155,11 +170,13 @@ def _quality_gate_to_dict(run: QualityGateRun | None) -> dict | None:
 
 
 
-@router.get("", response_model=list[TaskResponse])
+@router.get("")
 def list_tasks(
     project_id: int,
     archived: bool = False,
     sort: str = Query(default="created_desc", description="created_desc | created_asc | status | title_asc | title_desc"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -175,7 +192,7 @@ def list_tasks(
     q = (
         db.query(Task)
         .filter(Task.project_id == project_id)
-        .options(joinedload(Task.agent), joinedload(Task.project))
+        .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
     )
     # Filter by archived status — default shows active (non-archived) tasks
     q = q.filter(Task.archived == bool(archived))
@@ -184,9 +201,9 @@ def list_tasks(
     else:
         q = q.order_by(Task.id.desc())
 
-    tasks = q.all()
+    tasks, paging = paginate(q, page, page_size)
 
-    # Client-side status sort (group pending/running/reviewing first, then approved/rejected/failed)
+    # Client-side status sort — only sorts within the current page when paginated
     if sort == "status":
         status_priority = {
             "running": 0, "conflict_resolution": 1, "integrating": 2,
@@ -198,7 +215,7 @@ def list_tasks(
             t.status.value if hasattr(t.status, 'value') else str(t.status), 99
         ))
 
-    return [_task_to_response(t) for t in tasks]
+    return {"items": [_task_to_response(t) for t in tasks], **paging}
 
 
 @router.get("/{task_id}", response_model=TaskDetailResponse)
@@ -212,7 +229,7 @@ def get_task_detail(
     task = (
         db.query(Task)
         .filter(Task.id == task_id, Task.project_id == project_id)
-        .options(joinedload(Task.agent), joinedload(Task.project))
+        .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
         .first()
     )
     if not task:
@@ -283,11 +300,33 @@ def create_task(
 ):
     _check_task_access(project_id, user, db)
 
-    # Agents are shared globally; the project membership check above controls
-    # who may assign work in this project.
-    agent = db.query(Agent).filter(Agent.id == req.agent_id).first()
+    # ── Resolve and validate agents ──────────────────────────────────
+
+    def _resolve_agent(aid: int | None, role: str) -> Agent | None:
+        """Validate that *aid* exists and has the expected *role*.
+        When *aid* is None, auto-pick the first idle agent with that role.
+        """
+        if aid is not None:
+            a = db.query(Agent).filter(Agent.id == aid).first()
+            if not a:
+                raise HTTPException(status_code=404, detail=f"Agent #{aid} not found")
+            if a.role != role:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Agent「{a.name}」的角色是 {ROLE_LABELS.get(a.role, a.role)}，不能作为 {ROLE_LABELS.get(role, role)} Agent 使用",
+                )
+            return a
+        # Auto-select the first idle agent with the target role.
+        return db.query(Agent).filter(
+            Agent.role == role, Agent.status == AgentStatus.IDLE,
+        ).first()
+
+    agent = _resolve_agent(req.agent_id, "code_gen")
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+
+    reviewer_agent = _resolve_agent(req.reviewer_agent_id, "reviewer")
+    security_agent = _resolve_agent(req.security_agent_id, "security")
 
     # ── Conflict guard ───────────────────────────────────────────────
     # Agent must be idle — one agent can only run one task at a time
@@ -314,6 +353,8 @@ def create_task(
 
     task = Task(
         agent_id=req.agent_id,
+        reviewer_agent_id=reviewer_agent.id if reviewer_agent else None,
+        security_agent_id=security_agent.id if security_agent else None,
         project_id=project_id,
         title=req.title,
         description=req.description,
@@ -354,8 +395,8 @@ def start_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Manually start a pending task. Agent must be idle."""
+    _check_task_access(project_id, user, db)
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -445,8 +486,8 @@ def stop_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Stop a running or pending task, set status to paused."""
+    _check_task_access(project_id, user, db)
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -498,8 +539,8 @@ def resume_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Resume a paused task."""
+    _check_task_access(project_id, user, db)
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -567,8 +608,8 @@ def archive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Archive a completed or failed task. Pending/running tasks cannot be archived."""
+    _check_task_access(project_id, user, db)
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -599,8 +640,8 @@ def unarchive_task(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    _check_task_access(project_id, user, db)
     """Restore an archived task back to the active list."""
+    _check_task_access(project_id, user, db)
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -646,6 +687,18 @@ def delete_task(
 
     db.delete(task)
     db.commit()
+
+    # Clean up Git resources (worktree + branch) if the task had executed.
+    from app.models.models import Project
+    from app.services import git_service as git
+    proj = db.get(Project, project_id)
+    if proj and proj.workspace_path:
+        try:
+            if task.worktree_path:
+                branch_name = task.branch_name or f"task/{task_id}"
+                git.cleanup_task_resources(proj.workspace_path, task.worktree_path, branch_name)
+        except Exception:
+            logger.warning("Git cleanup failed for deleted task %s", task_id)
 
     audit_record(
         action=AuditAction.TASK_DELETE,
@@ -713,9 +766,14 @@ def batch_delete_tasks(
 
 # ── Global task listing (across all projects) ─────────────────────────
 
-@global_router.get("", response_model=list[TaskResponse])
-def list_all_tasks(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    tasks = (
+@global_router.get("")
+def list_all_tasks(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = (
         db.query(Task)
         .join(Project, Task.project_id == Project.id)
         .outerjoin(ProjectMember, and_(
@@ -724,12 +782,11 @@ def list_all_tasks(db: Session = Depends(get_db), user: User = Depends(get_curre
         ))
         .filter(Task.archived == False)
         .filter(or_(Project.owner_id == user.id, ProjectMember.user_id == user.id))
-        .options(joinedload(Task.agent), joinedload(Task.project))
+        .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
         .order_by(Task.id.desc())
-        .limit(100)
-        .all()
     )
-    return [_task_to_response(t) for t in tasks]
+    tasks, paging = paginate(q, page, page_size)
+    return {"items": [_task_to_response(t) for t in tasks], **paging}
 
 
 # ── Task workspace (browse task branch files) ─────────────────────────

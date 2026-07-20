@@ -1,11 +1,12 @@
 """Version history API — list commits and rollback."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from app.core.permissions import require_project_admin, require_project_member
 from app.models.models import User, Project, Version
 from app.services import git_service as git
@@ -47,22 +48,24 @@ def _version_to_response(v: Version) -> VersionResponse:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[VersionResponse])
+@router.get("")
 def list_versions(
     project_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """List all versions (commits) for a project."""
     require_project_member(project_id, user, db)
 
-    versions = (
+    q = (
         db.query(Version)
         .filter(Version.project_id == project_id)
         .order_by(Version.created_at.desc())
-        .all()
     )
-    return [_version_to_response(v) for v in versions]
+    versions, paging = paginate(q, page, page_size)
+    return {"items": [_version_to_response(v) for v in versions], **paging}
 
 
 @router.post("/{version_id}/rollback", response_model=RollbackResponse)

@@ -39,7 +39,7 @@ async function loadSkills() {
   loading.value = true
   try {
     const { data } = await api.get('/skills')
-    skills.value = data
+    skills.value = data.items || data
   } catch (e: any) {
     MessagePlugin.error(getErrorMessage(e, '加载技能列表失败'))
   } finally {

@@ -10,6 +10,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from app.models.models import User, Project, Task, TaskStatus, QualityGateRun, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, MessageRead, ReviewVote, ReviewReviewer, ReviewRound
 from app.services import git_service as git
 
@@ -126,10 +127,12 @@ def _get_workspace(project_id: int, user: User, db: Session) -> str:
 
 # ── Project CRUD ──────────────────────────────────────────────────────
 
-@router.get("", response_model=ProjectListResponse)
+@router.get("")
 def list_projects(
     sort: str = Query(default="created_desc", description="created_desc | created_asc | updated_desc | name_asc | name_desc"),
     filter: str = Query(default="all", description="all | joined | owner | admin | member | other"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -145,8 +148,6 @@ def list_projects(
 
     # Filter by user's relationship to the project
     if filter == "joined":
-        # Used by the global project switcher. A user may only enter projects
-        # where they are the owner or have an explicit membership.
         joined_project_ids = [
             row[0] for row in
             db.query(ProjectMember.project_id).filter(
@@ -177,7 +178,6 @@ def list_projects(
         ]
         q = q.filter(Project.id.in_(member_project_ids)) if member_project_ids else q.filter(Project.id == -1)
     elif filter == "other":
-        # Projects where user is NOT the owner and NOT a member
         all_my_project_ids = [
             row[0] for row in
             db.query(ProjectMember.project_id).filter(
@@ -188,7 +188,7 @@ def list_projects(
         if all_my_project_ids:
             q = q.filter(Project.id.notin_(all_my_project_ids))
 
-    projects = q.order_by(order).all()
+    projects, paging = paginate(q.order_by(order), page, page_size)
 
     # Collect member project IDs for is_member flag
     member_project_ids = set(
@@ -201,7 +201,7 @@ def list_projects(
         resp = ProjectResponse.model_validate(p)
         resp.is_member = (p.owner_id == user.id) or (p.id in member_project_ids)
         result.append(resp)
-    return ProjectListResponse(projects=result)
+    return {"projects": result, **paging}
 
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -537,6 +537,23 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     return result
 
 
+def _mark_join_messages_read(db: Session, request_id: int, project_id: int) -> None:
+    """When a join request is processed, mark all related notification messages
+    as read so other admins don't see stale pending notifications."""
+    try:
+        from app.models.models import Message
+        link_pattern = f"join_request={request_id}"
+        db.query(Message).filter(
+            Message.project_id == project_id,
+            Message.link == f"/dashboard?{link_pattern}",
+        ).update({Message.read: True}, synchronize_session=False)
+        db.commit()
+        from app.api.ws import broadcast_sync
+        broadcast_sync("message_new", {"project_id": project_id})
+    except Exception:
+        pass
+
+
 # ── Join requests ────────────────────────────────────────────────────
 
 class JoinApplyRequest(BaseModel):
@@ -618,7 +635,7 @@ def apply_join_project(
             level=MessageLevel.INFO,
             project_id=project.id,
             recipient_id=project.owner_id,
-            link=f"/dashboard",
+            link=f"/dashboard?join_request={join_req.id}",
         )
     except Exception:
         pass
@@ -626,9 +643,11 @@ def apply_join_project(
     return {"message": f"已申请加入项目「{project.name}」，请等待项目负责人审批", "request_id": join_req.id}
 
 
-@router.get("/{project_id}/applications", response_model=list[JoinRequestResponse])
+@router.get("/{project_id}/applications")
 def list_applications(
     project_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -642,11 +661,11 @@ def list_applications(
         if not membership or membership.role not in (ProjectRole.OWNER, ProjectRole.ADMIN):
             raise HTTPException(status_code=403, detail="只有项目主管或管理员才能查看申请列表")
 
-    requests = db.query(JoinRequest).filter(
+    q = db.query(JoinRequest).filter(
         JoinRequest.project_id == project_id,
-    ).order_by(JoinRequest.status == "pending", JoinRequest.created_at.desc()).all()
-
-    return [JoinRequestResponse.model_validate(r) for r in requests]
+    ).order_by(JoinRequest.status == "pending", JoinRequest.created_at.desc())
+    requests, paging = paginate(q, page, page_size)
+    return {"items": [JoinRequestResponse.model_validate(r) for r in requests], **paging}
 
 
 @router.post("/{project_id}/applications/{app_id}/approve")
@@ -687,6 +706,8 @@ def approve_application(
         db.add(ProjectMember(project_id=project_id, user_id=join_req.user_id, role=ProjectRole.MEMBER))
     db.commit()
 
+    _mark_join_messages_read(db, app_id, project_id)
+
     from app.api.members import _broadcast_member_update
     _broadcast_member_update(project_id)
 
@@ -722,5 +743,7 @@ def reject_application(
     join_req.status = JoinStatus.REJECTED
     join_req.reviewed_at = datetime.now(timezone.utc)
     db.commit()
+
+    _mark_join_messages_read(db, app_id, project_id)
 
     return {"message": f"已驳回 {join_req.username} 的加入申请"}

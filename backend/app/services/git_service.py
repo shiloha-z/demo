@@ -170,6 +170,14 @@ def remove_task_worktree(base_workspace: str, worktree_path: str) -> bool:
             return False
 
 
+def cleanup_task_resources(project_workspace: str, task_worktree: str, branch_name: str) -> None:
+    """Remove task worktree and branch — safe to call even if already cleaned up."""
+    if task_worktree:
+        remove_task_worktree(project_workspace, task_worktree)
+    if branch_name:
+        delete_branch(project_workspace, branch_name)
+
+
 def begin_integration(workspace: str, source_branch: str) -> dict[str, Any]:
     """Start a no-commit merge in the base workspace.
 

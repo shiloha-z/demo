@@ -26,7 +26,7 @@ const importInput = ref<HTMLInputElement | null>(null)
 const importingAgent = ref(false)
 const selectedAgent = ref<any>(null)
 const newAgent = ref({ name: '', role: 'code_gen', model: '', system_prompt: '', runner_type: 'crewai', skill_id: null as number | null })
-const newTask = ref({ title: '', description: '', project_id: null as number | null })
+const newTask = ref({ title: '', description: '', project_id: null as number | null, approval_percent: 50, reviewer_agent_id: null as number | null, security_agent_id: null as number | null })
 const loading = ref(false)
 const skills = ref<any[]>([])
 
@@ -79,7 +79,7 @@ onUnmounted(() => {
 async function loadAgents() {
   try {
     const { data } = await api.get('/agents')
-    agents.value = data
+    agents.value = data.items || data
   } catch (e: any) {
     MessagePlugin.error(e?.response?.data?.detail || '加载 Agent 列表失败')
   }
@@ -188,14 +188,18 @@ async function createTask() {
   if (!newTask.value.title || !newTask.value.project_id || !selectedAgent.value) return
   loading.value = true
   try {
-    await api.post(`/projects/${newTask.value.project_id}/tasks`, {
+    const payload: Record<string, any> = {
       title: newTask.value.title,
       description: newTask.value.description,
       agent_id: selectedAgent.value.id,
-    })
+      approval_percent: newTask.value.approval_percent,
+    }
+    if (newTask.value.reviewer_agent_id) payload.reviewer_agent_id = newTask.value.reviewer_agent_id
+    if (newTask.value.security_agent_id) payload.security_agent_id = newTask.value.security_agent_id
+    await api.post(`/projects/${newTask.value.project_id}/tasks`, payload)
     MessagePlugin.success('任务已创建，待开始执行')
     showCreateTask.value = false
-    newTask.value = { title: '', description: '', project_id: null }
+    newTask.value = { title: '', description: '', project_id: null, approval_percent: 50, reviewer_agent_id: null, security_agent_id: null }
   } finally { loading.value = false }
 }
 
@@ -205,7 +209,7 @@ function openTaskDialog(agent: any) {
     return
   }
   selectedAgent.value = agent
-  newTask.value = { title: '', description: '', project_id: store.currentProject.id }
+  newTask.value = { title: '', description: '', project_id: store.currentProject.id, approval_percent: 50, reviewer_agent_id: null, security_agent_id: null }
   showCreateTask.value = true
 }
 
@@ -225,7 +229,7 @@ async function checkRunnerAvailability(runnerType: string) {
 async function fetchSkills() {
   try {
     const { data } = await api.get('/skills')
-    skills.value = Array.isArray(data) ? data : []
+    skills.value = data.items || data || []
   } catch (e: any) {
     console.error('加载技能列表失败:', e?.response?.status, e?.response?.data || e?.message)
   }
@@ -266,6 +270,33 @@ function lastResultLabel(status: string | null): string {
     failed: '最近失败', completed: '最近完成',
   }
   return map[status] || status
+}
+
+// ── Agent memory ─────────────────────────────────────────────────────
+interface MemoryEntry { id: string; document: string; metadata: Record<string, any> }
+const memoryDialogVisible = ref(false)
+const memoryDialogAgent = ref<{ id: number; name: string } | null>(null)
+const agentMemories = ref<MemoryEntry[]>([])
+const memoryLoading = ref(false)
+
+function openAgentMemory(a: any) {
+  memoryDialogAgent.value = { id: a.id, name: a.name }
+  memoryDialogVisible.value = true
+  loadAgentMemories(a.id)
+}
+
+async function loadAgentMemories(agentId: number) {
+  memoryLoading.value = true
+  try {
+    const { data } = await api.get('/settings/agent-memories', { params: { agent_id: agentId, limit: 30 } })
+    agentMemories.value = data.memories || []
+  } catch { /* ChromaDB may not be available */ }
+  finally { memoryLoading.value = false }
+}
+
+function fmtTs(iso: string): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
@@ -351,6 +382,9 @@ function lastResultLabel(status: string | null): string {
         <div class="agent-actions">
           <t-button v-if="a.is_creator" size="small" variant="text" @click="exportAgent(a)">导出</t-button>
           <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
+          <t-button size="small" variant="text" @click="openAgentMemory(a)" title="Agent 记忆">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          </t-button>
           <t-button v-if="a.is_creator" size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
             <template #icon>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
@@ -430,11 +464,40 @@ function lastResultLabel(status: string | null): string {
         <t-input v-model="newTask.title" placeholder="例如：写一个用户登录接口" />
         <label class="field-label">详细描述</label>
         <textarea v-model="newTask.description" class="field-textarea" rows="4" placeholder="描述清楚你要 Agent 做什么..." />
+        <label class="field-label">代码审查 Agent（选填）</label>
+        <t-select v-model="newTask.reviewer_agent_id" placeholder="使用内置审查 Agent" clearable>
+          <t-option v-for="a in agents.filter(x => x.role === 'reviewer')" :key="a.id" :value="a.id" :label="`${a.name}（${a.model}）`" />
+        </t-select>
+        <label class="field-label">安全审查 Agent（选填）</label>
+        <t-select v-model="newTask.security_agent_id" placeholder="使用内置安全 Agent" clearable>
+          <t-option v-for="a in agents.filter(x => x.role === 'security')" :key="a.id" :value="a.id" :label="`${a.name}（${a.model}）`" />
+        </t-select>
+        <label class="field-label">审批通过率（{{ newTask.approval_percent }}%）</label>
+        <t-input-number v-model="newTask.approval_percent" :min="1" :max="100" theme="normal" style="width: 100%" />
+        <p class="field-hint">审查时至少需要 {{ newTask.approval_percent }}% 的评审人投通过票</p>
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
         <t-button theme="primary" :disabled="!newTask.title || !newTask.project_id" @click="createTask">创建</t-button>
       </template>
+    </t-dialog>
+
+    <!-- Agent memory dialog -->
+    <t-dialog v-model:visible="memoryDialogVisible" :header="`Agent 记忆 — ${memoryDialogAgent?.name || ''}`" width="540px" :footer="false">
+      <div v-if="memoryLoading" class="memory-empty">加载中...</div>
+      <div v-else-if="agentMemories.length === 0" class="memory-empty">
+        <p>暂无 Agent 记忆</p>
+        <p class="memory-hint">Agent 执行任务后会将经验教训、常见错误和解决方案记录在此。</p>
+      </div>
+      <div v-else class="memory-scroll">
+        <div v-for="m in agentMemories" :key="m.id" class="memory-item">
+          <div class="memory-doc">{{ m.document }}</div>
+          <div class="memory-meta">
+            <span v-if="m.metadata.type" class="memory-tag">{{ m.metadata.type }}</span>
+            <span v-if="m.metadata.timestamp">{{ fmtTs(m.metadata.timestamp) }}</span>
+          </div>
+        </div>
+      </div>
     </t-dialog>
   </div>
 </template>
@@ -501,6 +564,7 @@ function lastResultLabel(status: string | null): string {
 
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }
 .task-project-info { font-size: 13px; color: var(--muted-foreground); padding: 8px 12px; background: var(--primary-lighter); border-radius: var(--radius-md); }
+.field-hint { font-size: 11px; color: var(--muted-foreground); margin: 2px 0 0; }
 .no-project-warning {
   display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--warning); padding: 10px 12px;
@@ -524,4 +588,21 @@ function lastResultLabel(status: string | null): string {
 .runner-warning-body strong { font-weight: 600; }
 .runner-warning-body p { margin: 3px 0 0; font-size: 12px; opacity: 0.85; }
 
+/* ── Memory dialog ──────────────────────────────────────────────────── */
+.memory-empty { padding: 24px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
+.memory-hint { font-size: 12px; margin-top: 4px; opacity: 0.7; }
+.memory-scroll { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.memory-item {
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--page-canvas);
+}
+.memory-doc { font-size: 13px; line-height: 1.5; color: var(--foreground); word-break: break-word; white-space: pre-wrap; }
+.memory-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+.memory-tag {
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--primary-light); color: var(--primary);
+  font-size: 10px; font-weight: 600;
+}
 </style>

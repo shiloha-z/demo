@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -13,6 +14,7 @@ import { renderMarkdown } from '../utils/markdown'
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
 const auth = useAuthStore()
+const route = useRoute()
 
 // 审计责任链弹窗
 const chainVisible = ref(false)
@@ -82,7 +84,12 @@ async function loadReviews() {
   if (!selectedProjectId.value) { reviews.value = []; return }
   try {
     const { data } = await api.get(`/projects/${selectedProjectId.value}/reviews`)
-    reviews.value = Array.isArray(data) ? data : []
+    reviews.value = data.items || data || []
+    // Auto-select review when navigated with ?review_id=X
+    const targetId = Number(route.query.review_id)
+    if (targetId && !selectedReview.value) {
+      selectedReview.value = reviews.value.find((r: any) => r.id === targetId) || null
+    }
   } catch (e: any) {
     console.error('加载审查记录失败:', e?.response?.status, e?.response?.data || e?.message)
     reviews.value = []
@@ -301,7 +308,7 @@ function formatDate(d: string) {
                   size="small"
                   theme="success"
                   variant="outline"
-                  :disabled="loading || qualityGate?.status !== 'passed'"
+                  :disabled="loading || (qualityGate != null && qualityGate.status !== 'passed')"
                   @click="castVote('approve')"
                 >投通过票</t-button>
                 <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="castVote('reject')">投驳回票</t-button>

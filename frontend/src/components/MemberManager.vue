@@ -86,7 +86,7 @@ async function loadAll() {
 
   try {
     const { data } = await api.get(`/projects/${props.projectId}/members`)
-    members.value = Array.isArray(data) ? data : []
+    members.value = data.items || data || []
     const uid = Number(auth.userId)
     const me = members.value.find(m => Number(m.user_id) === uid)
     if (me) {
@@ -109,7 +109,7 @@ async function loadJoinRequests() {
   requestLoading.value = true
   try {
     const { data } = await api.get(`/projects/${props.projectId}/applications`)
-    joinRequests.value = Array.isArray(data) ? data : []
+    joinRequests.value = data.items || data || []
   } catch { joinRequests.value = [] }
   finally { requestLoading.value = false }
 }
@@ -118,7 +118,7 @@ async function loadMembers() {
   loading.value = true
   try {
     const { data } = await api.get(`/projects/${props.projectId}/members`)
-    members.value = Array.isArray(data) ? data : []
+    members.value = data.items || data || []
   } catch { /* ignore */ }
   finally { loading.value = false }
 }

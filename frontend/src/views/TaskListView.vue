@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -13,6 +14,13 @@ import { renderMarkdown } from '../utils/markdown'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
+const router = useRouter()
+
+function goToReview(taskDetail: any) {
+  if (taskDetail?.review?.id) {
+    router.push(`/reviews?review_id=${taskDetail.review.id}`)
+  }
+}
 
 const tasks = ref<any[]>([])
 const archivedTasks = ref<any[]>([])
@@ -201,8 +209,8 @@ async function loadTasks() {
     api.get(`/projects/${filterProjectId.value}/tasks`, { params: { sort: sortBy.value } }),
     api.get(`/projects/${filterProjectId.value}/tasks`, { params: { archived: true } }),
   ])
-  tasks.value = active.data
-  archivedTasks.value = archived.data
+  tasks.value = active.data.items || active.data
+  archivedTasks.value = archived.data.items || archived.data
   archiveChecked.value = new Set()
 }
 
@@ -332,20 +340,6 @@ async function deleteOne(task: any, event?: Event) {
   })
 }
 
-async function approveReview() {
-  if (!taskDetail.value?.review) return
-  try {
-    const { data } = await api.post(`/reviews/${taskDetail.value.review.id}/vote`, {
-      decision: 'approve',
-      comment: '',
-    })
-    if (data.queued_for_merge) MessagePlugin.success('已达到通过票数，任务进入合并队列')
-    else MessagePlugin.success(`已投通过票（${data.approve_count}/${data.required_approvals}）`)
-    if (selectedTask.value) await selectTask(selectedTask.value)
-    await loadTasks()
-  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
-}
-
 const rejectingGate = ref(false)
 const retryingGate = ref(false)
 async function rejectFailedQualityGate() {
@@ -381,11 +375,6 @@ const feedbackDialogVisible = ref(false)
 const feedbackText = ref('')
 const feedbackSubmitting = ref(false)
 
-function openRejectDialog() {
-  feedbackText.value = ''
-  feedbackDialogVisible.value = true
-}
-
 async function submitRejectWithFeedback() {
   if (!taskDetail.value?.review || !feedbackText.value.trim()) return
   feedbackSubmitting.value = true
@@ -399,25 +388,6 @@ async function submitRejectWithFeedback() {
     await loadTasks()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
   finally { feedbackSubmitting.value = false }
-}
-
-async function closeReview() {
-  if (!taskDetail.value?.review) return
-  const confirmDialog = DialogPlugin.confirm({
-    header: '确认结束',
-    body: '确定要结束此审查吗？任务将被标记为驳回且不会重新执行。',
-    confirmBtn: { content: '确认结束', theme: 'danger' },
-    cancelBtn: '取消',
-    onConfirm: async () => {
-      try {
-        await api.post(`/reviews/${taskDetail.value.review.id}/close`)
-        MessagePlugin.warning('审查已结束')
-        if (selectedTask.value) await selectTask(selectedTask.value)
-        await loadTasks()
-      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
-      confirmDialog.destroy()
-    },
-  })
 }
 
 function formatDate(d: string) {
@@ -479,7 +449,7 @@ function fileIcon(filename: string): string {
 // ── Create task dialog ──────────────────────────────────────────
 const showCreateTask = ref(false)
 const agents = ref<any[]>([])
-const newTaskForm = ref({ agent_id: null as number | null, title: '', description: '', approval_percent: 50 })
+const newTaskForm = ref({ agent_id: null as number | null, reviewer_agent_id: null as number | null, security_agent_id: null as number | null, title: '', description: '', approval_percent: 50 })
 const creatingTask = ref(false)
 
 // 审计责任链弹窗
@@ -489,7 +459,7 @@ function openChain() { chainVisible.value = true }
 async function loadAgents() {
   try {
     const { data } = await api.get('/agents')
-    agents.value = data
+    agents.value = data.items || data
   } catch { /* ignore */ }
 }
 
@@ -498,7 +468,7 @@ function openCreateTaskDialog() {
     MessagePlugin.warning('请先在侧边栏选择一个项目')
     return
   }
-  newTaskForm.value = { agent_id: null, title: '', description: '', approval_percent: 50 }
+  newTaskForm.value = { agent_id: null, reviewer_agent_id: null, security_agent_id: null, title: '', description: '', approval_percent: 50 }
   loadAgents()
   showCreateTask.value = true
 }
@@ -507,12 +477,15 @@ async function submitCreateTask() {
   if (!newTaskForm.value.title || !newTaskForm.value.agent_id || !filterProjectId.value) return
   creatingTask.value = true
   try {
-    await api.post(`/projects/${filterProjectId.value}/tasks`, {
+    const payload: Record<string, any> = {
       title: newTaskForm.value.title,
       description: newTaskForm.value.description,
       agent_id: newTaskForm.value.agent_id,
       approval_percent: newTaskForm.value.approval_percent,
-    })
+    }
+    if (newTaskForm.value.reviewer_agent_id) payload.reviewer_agent_id = newTaskForm.value.reviewer_agent_id
+    if (newTaskForm.value.security_agent_id) payload.security_agent_id = newTaskForm.value.security_agent_id
+    await api.post(`/projects/${filterProjectId.value}/tasks`, payload)
     MessagePlugin.success('任务已创建，待开始执行')
     showCreateTask.value = false
     await loadTasks()
@@ -860,14 +833,7 @@ async function resumeTask(task: any, event: Event) {
                   @click="showReviewDiff = !showReviewDiff"
                 >{{ showReviewDiff ? '收起代码' : '展开代码' }}</button>
                 <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
-                  <t-button size="small" theme="warning" variant="outline" @click="openRejectDialog">驳回并修改</t-button>
-                  <t-button
-                    size="small"
-                    theme="success"
-                    :disabled="taskDetail.quality_gate?.status !== 'passed'"
-                    @click="approveReview"
-                  >通过</t-button>
-                  <t-button size="small" theme="default" variant="text" @click="closeReview">结束</t-button>
+                  <t-button size="small" theme="primary" @click="goToReview(taskDetail)">前往审查</t-button>
                 </div>
               </div>
 
@@ -998,9 +964,17 @@ async function resumeTask(task: any, event: Event) {
         <div class="task-project-info">
           目标项目：<strong>{{ store.currentProject?.name }}</strong>
         </div>
-        <label class="field-label">选择 Agent</label>
-        <t-select v-model="newTaskForm.agent_id" placeholder="请选择一个 Agent">
-          <t-option v-for="a in agents" :key="a.id" :value="a.id" :label="`${a.name} (${roleLabels[a.role] || a.role})`" />
+        <label class="field-label">代码生成 Agent</label>
+        <t-select v-model="newTaskForm.agent_id" placeholder="请选择一个代码生成 Agent">
+          <t-option v-for="a in agents.filter((a: any) => a.role === 'code_gen')" :key="a.id" :value="a.id" :label="`${a.name}`" />
+        </t-select>
+        <label class="field-label">审查 Agent <span style="font-weight:400;font-size:11px;color:var(--muted-foreground)">（可选，留空使用内置默认）</span></label>
+        <t-select v-model="newTaskForm.reviewer_agent_id" placeholder="使用内置审查 Agent" clearable>
+          <t-option v-for="a in agents.filter((a: any) => a.role === 'reviewer')" :key="a.id" :value="a.id" :label="`${a.name}`" />
+        </t-select>
+        <label class="field-label">安全 Agent <span style="font-weight:400;font-size:11px;color:var(--muted-foreground)">（可选，留空使用内置默认）</span></label>
+        <t-select v-model="newTaskForm.security_agent_id" placeholder="使用内置安全 Agent" clearable>
+          <t-option v-for="a in agents.filter((a: any) => a.role === 'security')" :key="a.id" :value="a.id" :label="`${a.name}`" />
         </t-select>
         <label class="field-label">任务标题</label>
         <t-input v-model="newTaskForm.title" placeholder="例如：写一个用户登录接口" />

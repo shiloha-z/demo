@@ -36,6 +36,7 @@ class ChatMessageResponse(BaseModel):
     username: str
     message: str
     project_id: int | None = None
+    recipient_id: int | None = None
     created_at: datetime | None = None
     system: bool = False
     file_url: str = ""
@@ -54,6 +55,7 @@ class ChatMessageResponse(BaseModel):
             username=msg.username,
             message=msg.message or "",
             project_id=msg.project_id,
+            recipient_id=msg.recipient_id,
             created_at=msg.created_at,
             system=msg.user_id == 0,
             file_url=msg.file_url or "",
@@ -68,19 +70,54 @@ class ChatMessageResponse(BaseModel):
 @router.get("/chat/messages", response_model=list[ChatMessageResponse])
 def get_messages(
     project_id: int,
+    recipient_id: int | None = None,
     limit: int = 50,
     before_id: int | None = None,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get recent chat messages for a project. Pass `before_id` to load older messages."""
+    """Get recent chat messages. Team chat by default; pass `recipient_id` for DM."""
     q = db.query(ChatMessage).filter(
-        ChatMessage.project_id == project_id
-    ).order_by(ChatMessage.id.desc())
+        ChatMessage.project_id == project_id,
+        ChatMessage.recipient_id == recipient_id,  # None = team, int = DM
+    )
+    # For private chat, also include messages the current user sent
+    if recipient_id is not None:
+        q = db.query(ChatMessage).filter(
+            ChatMessage.project_id == project_id,
+            ChatMessage.recipient_id.in_([recipient_id, user.id]),
+            ChatMessage.user_id.in_([recipient_id, user.id]),
+        )
     if before_id is not None:
         q = q.filter(ChatMessage.id < before_id)
-    messages = q.limit(limit).all()
+    messages = q.order_by(ChatMessage.id.desc()).limit(limit).all()
     return [ChatMessageResponse.from_orm_obj(m) for m in reversed(messages)]
+
+
+@router.get("/chat/members")
+def get_project_members(
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return project members for @mention and DM selection."""
+    from app.models.models import Project, ProjectMember
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    members = []
+    # Owner
+    owner = db.query(User).filter(User.id == project.owner_id).first()
+    if owner and owner.id != user.id:
+        members.append({"id": owner.id, "username": owner.username, "display_name": owner.display_name or owner.username, "role": "owner"})
+    # Members
+    rows = db.query(ProjectMember, User).join(User, ProjectMember.user_id == User.id).filter(
+        ProjectMember.project_id == project_id
+    ).all()
+    for pm, u in rows:
+        if u.id != user.id:
+            members.append({"id": u.id, "username": u.username, "display_name": u.display_name or u.username, "role": pm.role.value if hasattr(pm.role, 'value') else str(pm.role)})
+    return {"members": members}
 
 
 @router.post("/chat/upload")
@@ -126,13 +163,14 @@ def send_message(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     project_id: int = Form(...),
+    recipient_id: int | None = Form(None),
     message: str = Form(""),
     file_url: str = Form(""),
     file_name: str = Form(""),
     file_type: str = Form(""),
     file_size: int = Form(0),
 ):
-    """Send a chat message (optionally with file attachment) to a project and broadcast."""
+    """Send a chat message. Set `recipient_id` for private DM; omit for team chat."""
     message_text = message.strip()
     file_url_str = file_url.strip()
     file_name_str = file_name.strip()
@@ -147,6 +185,7 @@ def send_message(
         user_id=user.id,
         username=user.username,
         project_id=project_id,
+        recipient_id=recipient_id,
         message=message_text,
         file_url=file_url_str,
         file_name=file_name_str,
@@ -158,7 +197,18 @@ def send_message(
     db.refresh(msg)
 
     resp = ChatMessageResponse.from_orm_obj(msg)
-    broadcast_sync_to_project(project_id, "chat_message", resp.model_dump(mode="json"))
+    payload = resp.model_dump(mode="json")
+    if recipient_id is not None:
+        # Private message: push to both participants only.
+        from app.api.ws import manager
+        manager.send_to_user(user.id, "chat_message", payload)
+        manager.send_to_user(recipient_id, "chat_message", payload)
+    else:
+        broadcast_sync_to_project(project_id, "chat_message", payload)
+
+    # Notify @mentioned users
+    _notify_mentions(message_text, user, project_id, db)
+
     return resp
 
 
@@ -189,3 +239,33 @@ def serve_chat_file(filename: str):
     }
     media_type = mime_map.get(ext, "application/octet-stream")
     return FileResponse(str(file_path), media_type=media_type)
+
+
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+def _notify_mentions(text: str, sender: User, project_id: int, db: Session) -> None:
+    """Push message-centre notifications for every @username in *text*."""
+    import re
+    mentioned = set(re.findall(r"@(\w+)", text))
+    if not mentioned:
+        return
+    from app.models.models import Project
+    from app.services import message_service as msg
+    from app.models.models import MessageCategory, MessageLevel
+    project = db.query(Project).filter(Project.id == project_id).first()
+    project_name = project.name if project else f"项目 #{project_id}"
+    for username in mentioned:
+        target = db.query(User).filter(User.username == username).first()
+        if target and target.id != sender.id:
+            try:
+                msg.push(
+                    title=f"{sender.username} @ 了你",
+                    body=f"在「{project_name}」的聊天中提到了你",
+                    category=MessageCategory.SYSTEM,
+                    level=MessageLevel.INFO,
+                    project_id=project_id,
+                    recipient_id=target.id,
+                    link="/dashboard",
+                )
+            except Exception:
+                pass

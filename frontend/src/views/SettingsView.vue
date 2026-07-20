@@ -25,8 +25,34 @@ const edits = reactive<Record<string, string>>({})
 const saving = reactive<Record<string, boolean>>({})
 const showPassword = reactive<Record<string, boolean>>({})
 
+// ── Global memory viewer ────────────────────────────────────────────
+interface MemoryEntry {
+  id: string
+  document: string
+  metadata: Record<string, any>
+}
+
+const globalMemories = ref<MemoryEntry[]>([])
+const memoryLoading = ref(false)
+
+function formatTs(iso: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
+async function loadGlobalMemories() {
+  memoryLoading.value = true
+  try {
+    const { data } = await api.get('/settings/global-memories', { params: { limit: 50 } })
+    globalMemories.value = data.memories || []
+  } catch { /* ChromaDB may not be available */ }
+  finally { memoryLoading.value = false }
+}
+
 onMounted(async () => {
   await loadSettings()
+  loadGlobalMemories()
 })
 
 async function loadSettings() {
@@ -149,6 +175,34 @@ function togglePasswordVisibility(fieldKey: string) {
         </div>
       </div>
     </div>
+
+    <!-- Global Memory Viewer -->
+    <div class="settings-card" style="margin-top: 24px">
+      <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+        <h3 class="card-title">全局记忆 ({{ globalMemories.length }})</h3>
+        <t-button size="small" variant="text" :loading="memoryLoading" @click="loadGlobalMemories">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+        </t-button>
+      </div>
+      <div class="card-body">
+        <div v-if="memoryLoading" class="memory-empty">加载中...</div>
+        <div v-else-if="globalMemories.length === 0" class="memory-empty">
+          <p>暂无全局记忆</p>
+          <p class="memory-hint">当 Agent 执行任务时会将通用经验记录到全局记忆中，供跨项目复用。</p>
+        </div>
+        <div v-else class="memory-list">
+          <div v-for="m in globalMemories" :key="m.id" class="memory-item">
+            <div class="memory-doc">{{ m.document }}</div>
+            <div class="memory-meta">
+              <span v-if="m.metadata.type" class="memory-tag">{{ m.metadata.type }}</span>
+              <span v-if="m.metadata.timestamp">{{ formatTs(m.metadata.timestamp) }}</span>
+              <span v-if="m.metadata.agent_id">Agent #{{ m.metadata.agent_id }}</span>
+              <span v-if="m.metadata.project_id">Project #{{ m.metadata.project_id }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -225,4 +279,33 @@ function togglePasswordVisibility(fieldKey: string) {
   transition: all var(--transition-fast);
 }
 .toggle-vis-btn:hover { color: var(--foreground); background: var(--surface-hover); }
+
+/* ── Global memory viewer ──────────────────────────────────────────── */
+.memory-empty { padding: 16px 0; text-align: center; color: var(--muted-foreground); font-size: 13px; }
+.memory-hint { font-size: 12px; margin-top: 4px; opacity: 0.7; }
+.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+.memory-item {
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--page-canvas);
+}
+.memory-doc {
+  font-size: 13px; line-height: 1.5;
+  color: var(--foreground);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+.memory-meta {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 6px;
+  font-size: 11px; color: var(--muted-foreground);
+}
+.memory-tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 10px; font-weight: 600;
+}
 </style>

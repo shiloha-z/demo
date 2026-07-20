@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from app.models.models import User, Agent, AgentStatus, Task, TaskStatus, QualityGateRun, Review, ReviewStatus, ReviewVote, ReviewReviewer, ReviewRound, Version
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
@@ -53,11 +54,17 @@ class AgentResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[AgentResponse])
-def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+@router.get("")
+def list_agents(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     # Agents are a shared pool. Project-level permission is enforced when a
     # user assigns one to a task; ownership only controls deletion.
-    agents = db.query(Agent).options(joinedload(Agent.creator)).order_by(Agent.id.desc()).all()
+    q = db.query(Agent).options(joinedload(Agent.creator)).order_by(Agent.id.desc())
+    agents, paging = paginate(q, page, page_size)
     result = []
     for a in agents:
         # Task stats
@@ -110,7 +117,7 @@ def list_agents(db: Session = Depends(get_db), user: User = Depends(get_current_
             creator_name=a.creator.display_name or a.creator.username if a.creator else "",
             is_creator=a.creator_id == user.id,
         ))
-    return result
+    return {"items": result, **paging}
 
 
 @router.post("", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)

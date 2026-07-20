@@ -3,6 +3,7 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
+import AuditChainPanel from '../components/AuditChainPanel.vue'
 import api from '../api'
 
 const store = useProjectStore()
@@ -46,7 +47,7 @@ async function loadVersions() {
   loading.value = true
   try {
     const { data } = await api.get(`/projects/${selectedProjectId.value}/versions`)
-    versions.value = data
+    versions.value = data.items || data
   } catch { versions.value = [] }
   finally { loading.value = false }
 }
@@ -162,6 +163,7 @@ function formatDate(d: string) {
         </div>
       </div>
     </div>
+    <AuditChainPanel v-model:visible="chainVisible" :task-id="chainTaskId" />
   </div>
 </template>
 

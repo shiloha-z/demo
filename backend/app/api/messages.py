@@ -6,7 +6,7 @@ future per-user delivery (see Message model) but not filtered here yet.
 """
 
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -131,6 +131,38 @@ def mark_read(
         read=True,
         created_at=m.created_at.isoformat() if m.created_at else None,
     )
+
+
+@router.delete("/messages/{message_id}")
+def delete_message(
+    message_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    m = db.query(Message).filter(Message.id == message_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Message not found")
+    db.query(MessageRead).filter(MessageRead.message_id == message_id).delete()
+    db.delete(m)
+    db.commit()
+    return {"message": "已删除"}
+
+
+@router.delete("/messages")
+def delete_all_messages(
+    project_id: int | None = Query(None, description="按项目过滤，留空则删除全部"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(Message)
+    if project_id is not None:
+        q = q.filter(Message.project_id == project_id)
+    message_ids = [row[0] for row in q.with_entities(Message.id).all()]
+    if message_ids:
+        db.query(MessageRead).filter(MessageRead.message_id.in_(message_ids)).delete(synchronize_session=False)
+        q.delete(synchronize_session=False)
+        db.commit()
+    return {"message": f"已删除 {len(message_ids)} 条消息", "count": len(message_ids)}
 
 
 @router.post("/messages/read-all", response_model=ReadAllResponse)

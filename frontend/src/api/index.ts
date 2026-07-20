@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { MessagePlugin } from 'tdesign-vue-next'
 
 const api = axios.create({
   baseURL: '/api',
@@ -6,38 +7,77 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
-// Track whether we're already handling a 401 to prevent loops
 let handling401 = false
+// Avoid duplicate toasts for the same error within a short window
+const _recentErrors = new Map<string, number>()
 
-// Request interceptor – attach JWT token, remove JSON content-type for FormData
+function _shouldNotify(key: string): boolean {
+  const now = Date.now()
+  const last = _recentErrors.get(key) || 0
+  if (now - last < 2000) return false
+  _recentErrors.set(key, now)
+  for (const [k, t] of _recentErrors) {
+    if (now - t > 10000) _recentErrors.delete(k)
+  }
+  return true
+}
+
+// Request interceptor – attach JWT token
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
-  // Let browser set Content-Type for FormData (multipart/form-data with boundary)
   if (config.data instanceof FormData) {
     delete config.headers['Content-Type']
   }
   return config
 })
 
-// Response interceptor – handle 401
+// Response interceptor – unified error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401 && !handling401) {
+    const status = error.response?.status
+    const detail = error.response?.data?.detail || ''
+    const url = error.config?.url || ''
+
+    if (status === 401 && !handling401) {
       handling401 = true
       localStorage.removeItem('token')
-      // Use location.href only if not already on login page
       if (!window.location.pathname.includes('/login')) {
         window.location.href = '/login'
       }
-      // Reset the flag after a delay (page will reload before this if redirecting)
       setTimeout(() => { handling401 = false }, 1000)
+      return Promise.reject(error)
     }
+
+    // Show a unified toast for common errors — components can still
+    // catch and override with a custom fallback message if needed.
+    if (status && _shouldNotify(`${status}:${url}`)) {
+      switch (status) {
+        case 403:
+          MessagePlugin.warning(detail || '权限不足，无法执行此操作')
+          break
+        case 404:
+          MessagePlugin.warning(detail || '请求的资源不存在')
+          break
+        case 409:
+          MessagePlugin.warning(detail || '操作冲突，请稍后重试')
+          break
+        case 422:
+          MessagePlugin.warning(detail || '提交的数据格式不正确')
+          break
+        case 500:
+        case 502:
+        case 503:
+          MessagePlugin.error(detail || '服务暂时不可用，请稍后重试')
+          break
+      }
+    }
+
     return Promise.reject(error)
-  }
+  },
 )
 
 /**

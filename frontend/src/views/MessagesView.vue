@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import api from '../api'
 import { useMessageStore } from '../stores/message'
 
@@ -18,7 +18,7 @@ interface MessageItem {
   created_at: string | null
 }
 
-type TabKey = 'all' | 'system' | 'task' | 'review' | 'version'
+type TabKey = 'all' | 'system' | 'task' | 'review' | 'member' | 'version'
 
 const router = useRouter()
 const msgStore = useMessageStore()
@@ -31,6 +31,7 @@ const tabs: { key: TabKey; label: string }[] = [
   { key: 'all', label: '全部' },
   { key: 'task', label: '任务' },
   { key: 'review', label: '审查' },
+  { key: 'member', label: '成员' },
   { key: 'version', label: '版本' },
   { key: 'system', label: '系统' },
 ]
@@ -90,6 +91,73 @@ async function markAllRead() {
   }
 }
 
+async function deleteMessage(m: MessageItem) {
+  const dlg = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要删除消息「${m.title}」吗？`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/messages/${m.id}`)
+        messages.value = messages.value.filter((x) => x.id !== m.id)
+        await msgStore.refresh()
+        MessagePlugin.success('已删除')
+      } catch {
+        MessagePlugin.error('删除失败')
+      }
+      dlg.destroy()
+    },
+  })
+}
+
+async function deleteAllMessages() {
+  if (filtered.value.length === 0) return
+  const count = filtered.value.length
+  const dlg = DialogPlugin.confirm({
+    header: '确认删除全部',
+    body: `确定要删除当前列表中的 ${count} 条消息吗？此操作不可撤销。`,
+    confirmBtn: { content: '删除全部', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete('/messages')
+        messages.value = messages.value.filter((x) => !filtered.value.includes(x))
+        await msgStore.refresh()
+        MessagePlugin.success(`已删除 ${count} 条消息`)
+      } catch {
+        MessagePlugin.error('删除失败')
+      }
+      dlg.destroy()
+    },
+  })
+}
+
+const processingJoins = ref<Record<number, boolean>>({})
+
+function parseJoinRequest(link: string): number | null {
+  const m = link.match(/join_request=(\d+)/)
+  return m ? Number(m[1]) : null
+}
+
+async function handleJoinAction(msg: MessageItem, action: 'approve' | 'reject') {
+  const requestId = parseJoinRequest(msg.link)
+  if (!requestId || !msg.project_id) return
+  processingJoins.value[msg.id] = true
+  try {
+    const url = `/projects/${msg.project_id}/applications/${requestId}/${action === 'approve' ? 'approve' : 'reject'}`
+    await api.post(url)
+    MessagePlugin.success(action === 'approve' ? '已通过' : '已驳回')
+    // Replace the action buttons with the result
+    msg.link = ''  // clear so buttons disappear
+    msg.title = action === 'approve' ? '已通过加入申请' : '已驳回加入申请'
+  } catch (e: any) {
+    MessagePlugin.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    processingJoins.value[msg.id] = false
+  }
+}
+
 function openLink(link: string) {
   if (link) router.push(link)
 }
@@ -132,15 +200,27 @@ onUnmounted(() => { unsubMsg?.() })
           <span v-if="unreadTotal > 0" class="unread-tip">{{ unreadTotal }} 条未读</span>
         </p>
       </div>
-      <t-button
-        v-if="unreadTotal > 0"
-        variant="outline"
-        size="small"
-        :disabled="loading"
-        @click="markAllRead"
-      >
-        全部已读
-      </t-button>
+      <div class="header-btns">
+        <t-button
+          v-if="unreadTotal > 0"
+          variant="outline"
+          size="small"
+          :disabled="loading"
+          @click="markAllRead"
+        >
+          全部已读
+        </t-button>
+        <t-button
+          v-if="messages.length > 0"
+          variant="outline"
+          size="small"
+          theme="danger"
+          :disabled="loading"
+          @click="deleteAllMessages"
+        >
+          删除全部
+        </t-button>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -168,8 +248,8 @@ onUnmounted(() => { unsubMsg?.() })
         v-for="m in filtered"
         :key="m.id"
         class="msg-card"
-        :class="{ unread: !m.read, clickable: !!m.link }"
-        @click="m.link ? openLink(m.link) : null"
+        :class="{ unread: !m.read, clickable: !!m.link && !parseJoinRequest(m.link) }"
+        @click="m.link && !parseJoinRequest(m.link) ? openLink(m.link) : null"
       >
         <div class="msg-main">
           <div class="msg-top">
@@ -179,6 +259,10 @@ onUnmounted(() => { unsubMsg?.() })
             <span class="badge" :class="categoryMeta[m.category]?.cls">{{ categoryMeta[m.category]?.label || m.category }}</span>
           </div>
           <p v-if="m.body" class="msg-body">{{ m.body }}</p>
+          <div v-if="m.category === 'member' && parseJoinRequest(m.link)" class="msg-actions">
+            <t-button size="small" theme="success" :loading="processingJoins[m.id]" @click.stop="handleJoinAction(m, 'approve')">通过</t-button>
+            <t-button size="small" theme="default" :loading="processingJoins[m.id]" @click.stop="handleJoinAction(m, 'reject')">驳回</t-button>
+          </div>
           <div class="msg-foot">
             <span class="msg-time">{{ fmtTime(m.created_at) }}</span>
             <span v-if="m.link" class="msg-link">查看详情 →</span>
@@ -187,6 +271,11 @@ onUnmounted(() => { unsubMsg?.() })
               class="mark-btn"
               @click.stop="markRead(m.id)"
             >标为已读</button>
+            <button
+              class="delete-msg-btn"
+              @click.stop="deleteMessage(m)"
+              title="删除"
+            >×</button>
           </div>
         </div>
       </div>
@@ -202,6 +291,7 @@ onUnmounted(() => { unsubMsg?.() })
   display: flex; align-items: flex-start; justify-content: space-between;
   margin-bottom: 18px; gap: 12px;
 }
+.header-btns { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
 .page-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--foreground); }
 .page-desc { margin: 4px 0 0; font-size: 13px; color: var(--muted-foreground); }
 .unread-tip {
@@ -254,6 +344,9 @@ onUnmounted(() => { unsubMsg?.() })
 .msg-body {
   margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted-foreground);
 }
+.msg-actions {
+  margin-top: 10px; display: flex; gap: 8px;
+}
 .msg-foot {
   margin-top: 10px; display: flex; align-items: center; gap: 12px;
   font-size: 12px; color: var(--muted-foreground);
@@ -267,6 +360,14 @@ onUnmounted(() => { unsubMsg?.() })
   cursor: pointer; transition: all var(--transition-fast);
 }
 .mark-btn:hover { color: var(--foreground); border-color: var(--ring); }
+.delete-msg-btn {
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted-foreground); font-size: 16px; font-weight: 700;
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast); line-height: 1; padding: 0;
+}
+.delete-msg-btn:hover { color: var(--danger); background: var(--danger-light); border-color: var(--danger); }
 
 /* ── Level dot ──────────────────────────────────────────────────────── */
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }

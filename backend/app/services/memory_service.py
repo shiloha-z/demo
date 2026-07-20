@@ -342,6 +342,49 @@ def _get_recent(collection_name: str, n: int) -> list[str]:
         return []
 
 
+def _list_recent(collection_name: str, n: int) -> list[dict]:
+    """Shared helper: return recent memories from any collection."""
+    if not _chromadb_available:
+        return []
+    try:
+        col = _get_or_create(collection_name)
+        if col is None:
+            return []
+        all_data = col.get()
+        if not all_data.get("documents"):
+            return []
+        ids = all_data["ids"]
+        docs = all_data["documents"]
+        metas = all_data.get("metadatas", [])
+        def _ts(m):
+            if isinstance(m, dict) and m.get("timestamp"):
+                return m["timestamp"]
+            return ""
+        pairs = sorted(zip(ids, docs, metas), key=lambda p: _ts(p[2]), reverse=True)
+        return [
+            {"id": pid, "document": doc[:500], "metadata": meta or {}}
+            for pid, doc, meta in pairs[:n]
+        ]
+    except Exception:
+        logger.exception("ChromaDB list_recent failed in %s", collection_name)
+        return []
+
+
+def list_global_memories(n: int = 50) -> list[dict]:
+    """Return recent global memories with id, doc, and metadata."""
+    return _list_recent(GLOBAL_COLLECTION, n)
+
+
+def list_project_memories(project_id: int, n: int = 50) -> list[dict]:
+    """Return recent project-scoped memories."""
+    return _list_recent(_project_collection(project_id), n)
+
+
+def list_agent_memories(agent_id: int, n: int = 50) -> list[dict]:
+    """Return recent agent-scoped memories."""
+    return _list_recent(_agent_collection(agent_id), n)
+
+
 # ── Lifecycle ────────────────────────────────────────────────────────────
 
 def delete_task_memory(task_id: int) -> None:

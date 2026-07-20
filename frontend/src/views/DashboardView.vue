@@ -12,6 +12,9 @@ const dialogVisible = ref(false)
 const newProject = ref({ name: '', description: '', workspace_name: '' })
 const creating = ref(false)
 
+const memoryDialogVisible = ref(false)
+const memoryDialogProject = ref<{ id: number; name: string } | null>(null)
+
 const memberDialogVisible = ref(false)
 const memberDialogProject = ref<{ id: number; name: string; projectCode: string | null } | null>(null)
 
@@ -54,6 +57,33 @@ const activeAgentCount = ref(0)
 const pendingReviewCount = ref(0)
 const approvalRate = ref<string | null>(null)
 
+// ── Project memory ──────────────────────────────────────────────────
+interface MemoryEntry { id: string; document: string; metadata: Record<string, any> }
+const projectMemories = ref<MemoryEntry[]>([])
+const memoryLoading = ref(false)
+
+function openProjectMemory(p: any) {
+  memoryDialogProject.value = { id: p.id, name: p.name }
+  memoryDialogVisible.value = true
+  loadProjectMemories(p.id)
+}
+
+async function loadProjectMemories(pid?: number) {
+  const targetId = pid ?? store.currentProject?.id
+  if (!targetId) { projectMemories.value = []; return }
+  memoryLoading.value = true
+  try {
+    const { data } = await api.get('/settings/project-memories', { params: { project_id: targetId, limit: 20 } })
+    projectMemories.value = data.memories || []
+  } catch { /* ChromaDB may not be available */ }
+  finally { memoryLoading.value = false }
+}
+
+function fmtTs(iso: string): string {
+  if (!iso) return ''
+  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+}
+
 onMounted(async () => {
   await store.fetchProjects()
   await loadStats()
@@ -81,16 +111,18 @@ async function loadStats() {
       api.get('/agents'),
       api.get('/reviews/pending-count'),
     ])
-    activeAgentCount.value = (agentRes.data || []).filter((a: any) => a.status === 'working').length
+    const agentList = agentRes.data?.items || agentRes.data || []
+    activeAgentCount.value = agentList.filter((a: any) => a.status === 'working').length
     pendingReviewCount.value = reviewRes.data?.count ?? 0
     // Approval rate: count approved vs total reviews across all projects
     let approved = 0; let total = 0
     for (const p of store.projects) {
       try {
         const { data } = await api.get(`/projects/${p.id}/reviews`)
-        if (Array.isArray(data)) {
-          total += data.length
-          approved += data.filter((r: any) => r.status === 'approved').length
+        const reviewList = data?.items || data
+        if (Array.isArray(reviewList)) {
+          total += reviewList.length
+          approved += reviewList.filter((r: any) => r.status === 'approved').length
         }
       } catch { /* skip projects with errors */ }
     }
@@ -265,8 +297,9 @@ async function handleJoinProject(p: any, event: Event) {
 
     <!-- Project Grid -->
     <div v-if="visibleProjects.length > 0" class="project-grid">
-      <article
-        v-for="p in visibleProjects"
+      <TransitionGroup name="list">
+        <article
+          v-for="p in visibleProjects"
         :key="p.id"
         class="project-card"
         @click="goProject(p)"
@@ -289,11 +322,15 @@ async function handleJoinProject(p: any, event: Event) {
         <button class="btn-members" @click.stop="openMembers(p)" title="成员管理">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         </button>
+        <button class="btn-memory" @click.stop="openProjectMemory(p)" title="项目记忆">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        </button>
         <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
         </button>
         <svg class="project-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
       </article>
+      </TransitionGroup>
     </div>
 
     <!-- Empty -->
@@ -358,6 +395,24 @@ async function handleJoinProject(p: any, event: Event) {
         </t-button>
       </template>
     </t-dialog>
+
+    <!-- Project memory dialog -->
+    <t-dialog v-model:visible="memoryDialogVisible" :header="`项目记忆 — ${memoryDialogProject?.name || ''}`" width="560px" :footer="false">
+      <div v-if="memoryLoading" class="memory-empty">加载中...</div>
+      <div v-else-if="projectMemories.length === 0" class="memory-empty">
+        <p>暂无项目记忆</p>
+        <p class="memory-hint">Agent 执行任务后会将审查经验、设计决策和错误教训记录在此。</p>
+      </div>
+      <div v-else class="memory-list">
+        <div v-for="m in projectMemories" :key="m.id" class="memory-item">
+          <div class="memory-doc">{{ m.document }}</div>
+          <div class="memory-meta">
+            <span v-if="m.metadata.type" class="memory-tag">{{ m.metadata.type }}</span>
+            <span v-if="m.metadata.timestamp">{{ fmtTs(m.metadata.timestamp) }}</span>
+          </div>
+        </div>
+      </div>
+    </t-dialog>
   </div>
 </template>
 
@@ -421,7 +476,7 @@ async function handleJoinProject(p: any, event: Event) {
 }
 
 /* ── Project grid ───────────────────────────────────────────────── */
-.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
 .project-card {
   display: flex; align-items: center; gap: 14px;
   background: var(--surface); border: 1px solid var(--surface-border);
@@ -464,6 +519,15 @@ async function handleJoinProject(p: any, event: Event) {
 .project-card:hover .btn-members { opacity: 1; }
 .btn-members:hover { background: var(--primary-light); color: var(--primary); }
 
+.btn-memory {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
+}
+.project-card:hover .btn-memory { opacity: 1; }
+.btn-memory:hover { background: var(--info-light); color: var(--info); }
+
 .btn-join {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
@@ -477,5 +541,23 @@ async function handleJoinProject(p: any, event: Event) {
 .field-hint {
   font-size: 11px; color: var(--muted-foreground);
   margin: 2px 0 0; line-height: 1.4;
+}
+
+/* ── Project memory dialog ─────────────────────────────────────────── */
+.memory-empty { padding: 24px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
+.memory-hint { font-size: 12px; margin-top: 4px; opacity: 0.7; }
+.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
+.memory-item {
+  padding: 10px 12px;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  background: var(--page-canvas);
+}
+.memory-doc { font-size: 13px; line-height: 1.5; color: var(--foreground); word-break: break-word; white-space: pre-wrap; }
+.memory-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
+.memory-tag {
+  padding: 1px 6px; border-radius: 999px;
+  background: var(--primary-light); color: var(--primary);
+  font-size: 10px; font-weight: 600;
 }
 </style>

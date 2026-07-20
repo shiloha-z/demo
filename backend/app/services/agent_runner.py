@@ -81,9 +81,36 @@ def _pipeline_stage(task_id: int, project_id: int, stage_key: str, status: str):
 
 # ── Runner callbacks ────────────────────────────────────────────────────
 
+class _TaskPaused(Exception):
+    """Raised inside a runner callback when the user has paused the task."""
+
+
 def _make_progress_cb(task_id: int, project_id: int):
-    """Create a progress callback wired to WebSocket + memory."""
-    return lambda msg, step: _progress(task_id, project_id, msg, step)
+    """Create a progress callback that also checks for user-requested pause.
+
+    Every time the runner reports progress the callback queries the task
+    status.  When the user clicks pause the next progress report (which may
+    happen many times per second during agent execution) raises
+    ``_TaskPaused``, which causes the pipeline to bail out cleanly instead
+    of running to the next coarse-grained checkpoint.
+    """
+    def _on_progress(msg: str, step: str = ""):
+        _progress(task_id, project_id, msg, step)
+        # Check pause only every ~2 seconds to avoid hammering the DB on
+        # high-frequency progress callbacks.
+        now = time.time()
+        if now - getattr(_on_progress, "_last_check", 0) < 2:
+            return
+        _on_progress._last_check = now  # type: ignore[attr-defined]
+        db = SessionLocal()
+        try:
+            task = db.get(Task, task_id)
+            if task and task.status == TaskStatus.PAUSED:
+                raise _TaskPaused()
+        finally:
+            db.close()
+
+    return _on_progress
 
 
 def _make_stage_cb(task_id: int, project_id: int):
@@ -260,6 +287,19 @@ def _run_agent_pipeline(
 
         # Dispatch to runner
         runner = get_runner(runner_type)
+
+        # Resolve project-configured reviewer / security agent prompts.
+        reviewer_prompt = None
+        security_prompt = None
+        if task.reviewer_agent_id:
+            rev_agent = db.get(Agent, task.reviewer_agent_id)
+            if rev_agent and rev_agent.system_prompt:
+                reviewer_prompt = rev_agent.system_prompt
+        if task.security_agent_id:
+            sec_agent = db.get(Agent, task.security_agent_id)
+            if sec_agent and sec_agent.system_prompt:
+                security_prompt = sec_agent.system_prompt
+
         start_ts = time.time()
         result = runner.run(
             task_description=task_desc,
@@ -270,6 +310,8 @@ def _run_agent_pipeline(
             agent_id=task.agent_id,
             on_progress=on_progress,
             on_stage=on_stage,
+            reviewer_prompt=reviewer_prompt,
+            security_prompt=security_prompt,
         )
         elapsed = time.time() - start_ts
 
@@ -484,6 +526,18 @@ def _run_agent_pipeline(
 
         logger.info(f"Task {task_id} [{runner_type}] reviewing, review #{review.id} stored")
 
+    except _TaskPaused:
+        # User requested pause during execution.  Refresh the DB row to
+        # confirm it's still PAUSED and leave the worktree + agent state
+        # intact so the task can be resumed later.
+        db.refresh(task)
+        if task.status == TaskStatus.PAUSED:
+            _progress(task_id, project_id, "⏸️ 任务已暂停，工作分支已保留", "paused")
+            logger.info(f"Task {task_id} paused by user mid-execution")
+        else:
+            # Race: pause was set but something else flipped the status.
+            # Treat as a normal failure so the task doesn't get stuck.
+            _fail_task(db, task, "任务状态不一致：暂停请求后状态已变更")
     except Exception as e:
         logger.exception(f"Task {task_id} failed")
         try:

@@ -194,18 +194,17 @@ const kpiCards = computed<KpiCard[]>(() => {
 /* ── Stat grid — 5 columns for 10 cards ──────────────────────────── */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
 }
 
-@media (max-width: 1200px) {
-  .stat-grid { grid-template-columns: repeat(4, 1fr); }
-}
+.stat-card { padding: 22px 24px; }
+
 @media (max-width: 900px) {
-  .stat-grid { grid-template-columns: repeat(3, 1fr); }
-}
-@media (max-width: 640px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 560px) {
+  .stat-grid { grid-template-columns: 1fr; }
 }
 
 .stat-card {

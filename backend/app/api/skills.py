@@ -1,12 +1,13 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
+from app.core.pagination import paginate
 from app.models.models import User, Skill
 from app.services import skillhub_service
 
@@ -78,10 +79,16 @@ def _skillhub_error(exc: skillhub_service.SkillHubError) -> HTTPException:
 
 # ── Endpoints ─────────────────────────────────────────────────────────
 
-@router.get("", response_model=list[SkillResponse])
-def list_skills(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    skills = db.query(Skill).filter(Skill.creator_id == user.id).order_by(Skill.updated_at.desc()).all()
-    return skills
+@router.get("")
+def list_skills(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    q = db.query(Skill).filter(Skill.creator_id == user.id).order_by(Skill.updated_at.desc())
+    skills, paging = paginate(q, page, page_size)
+    return {"items": skills, **paging}
 
 
 @router.get("/skillhub/status")
