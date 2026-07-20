@@ -1,17 +1,42 @@
 import secrets
+import sqlite3
 import string
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from .config import settings
 
 engine = create_engine(
     settings.DATABASE_URL,
-    connect_args={"check_same_thread": False},  # SQLite
+    # `check_same_thread=False` is required because FastAPI serves synchronous
+    # `def` endpoints (e.g. skill creation) from a worker thread-pool, so a single
+    # SQLite connection is touched by multiple threads.
+    # `timeout` makes the driver *wait* for the write lock instead of failing
+    # immediately with "database is locked", which previously surfaced as a bare
+    # HTTP 500 on concurrent writes (list + create skill racing for the lock).
+    connect_args={"check_same_thread": False, "timeout": 30},  # SQLite
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+# Apply per-connection SQLite pragmas. `busy_timeout` is *not* persisted by SQLite,
+# so it must be set on every new connection. WAL lets concurrent readers proceed
+# without blocking the single writer, drastically reducing lock contention.
+@event.listens_for(engine, "connect")
+def _configure_sqlite_connection(dbapi_connection, connection_record):
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA busy_timeout = 30000")
+        try:
+            cursor.execute("PRAGMA journal_mode = WAL")
+        except Exception:
+            # journal_mode is a database-level setting; if it cannot be switched
+            # (e.g. another connection already holds a non-WAL lock) ignore and
+            # keep the safer default rather than crashing startup.
+            pass
+        cursor.close()
 
 
 class Base(DeclarativeBase):
@@ -79,6 +104,17 @@ def _migrate_schema():
                 UPDATE tasks SET approval_percent = 50
                 WHERE approval_percent IS NULL
             """))
+
+        # Legacy skill rows created before the source columns existed hold NULL in
+        # the additive-migration columns (source/source_id/source_url) and possibly
+        # in description/prompt_content. Populate the ORM defaults so the list API
+        # returns well-formed strings instead of tripping a 500 on serialization.
+        if "skills" in existing_tables:
+            conn.execute(text("UPDATE skills SET source = 'local' WHERE source IS NULL"))
+            conn.execute(text("UPDATE skills SET source_id = '' WHERE source_id IS NULL"))
+            conn.execute(text("UPDATE skills SET source_url = '' WHERE source_url IS NULL"))
+            conn.execute(text("UPDATE skills SET description = '' WHERE description IS NULL"))
+            conn.execute(text("UPDATE skills SET prompt_content = '' WHERE prompt_content IS NULL"))
 
 
 def _repair_project_memberships(conn, existing_tables: set[str]) -> None:

@@ -1,7 +1,8 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -29,8 +30,8 @@ class SkillUpdate(BaseModel):
 class SkillResponse(BaseModel):
     id: int
     name: str
-    description: str
-    prompt_content: str
+    description: str = ""
+    prompt_content: str = ""
     source: str = "local"
     source_id: str = ""
     source_url: str = ""
@@ -39,6 +40,20 @@ class SkillResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @field_validator("source_id", "source_url", "description", "prompt_content", mode="before")
+    @classmethod
+    def _empty_string_default(cls, v: object) -> object:
+        # Legacy rows migrated via additive ALTER TABLE can hold NULL in columns
+        # that the ORM declares as non-nullable strings. Pydantic's `from_attributes`
+        # would otherwise surface a ResponseValidationError -> HTTP 500 on the list
+        # endpoint. Normalise NULL to the safe default so the API never 500s on data.
+        return v if v is not None else ""
+
+    @field_validator("source", mode="before")
+    @classmethod
+    def _source_default(cls, v: object) -> object:
+        return v if v is not None else "local"
 
 
 class SkillHubSearchRequest(BaseModel):
@@ -140,9 +155,16 @@ def import_skillhub_skill(
         source_id=req.source_id,
         source_url=req.source_url,
     )
-    db.add(skill)
-    db.commit()
-    db.refresh(skill)
+    try:
+        db.add(skill)
+        db.commit()
+        db.refresh(skill)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导入技能失败：{exc}",
+        )
     return skill
 
 
@@ -170,9 +192,16 @@ def create_skill(
         description=req.description,
         prompt_content=req.prompt_content,
     )
-    db.add(skill)
-    db.commit()
-    db.refresh(skill)
+    try:
+        db.add(skill)
+        db.commit()
+        db.refresh(skill)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"创建技能失败：{exc}",
+        )
     return skill
 
 
@@ -190,8 +219,15 @@ def update_skill(
     skill.name = req.name
     skill.description = req.description
     skill.prompt_content = req.prompt_content
-    db.commit()
-    db.refresh(skill)
+    try:
+        db.commit()
+        db.refresh(skill)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"更新技能失败：{exc}",
+        )
     return skill
 
 
@@ -204,6 +240,13 @@ def delete_skill(
     skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    db.delete(skill)
-    db.commit()
+    try:
+        db.delete(skill)
+        db.commit()
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"删除技能失败：{exc}",
+        )
     return {"message": "Deleted"}
