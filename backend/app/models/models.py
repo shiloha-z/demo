@@ -192,6 +192,11 @@ class Task(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     agent_id = Column(Integer, ForeignKey("agents.id"), nullable=False)
+    # Optional overrides for the runner's built-in reviewer / security
+    # sub-agents.  When NULL the runner uses its own defaults; when set
+    # the corresponding Agent's system_prompt is injected.
+    reviewer_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
+    security_agent_id = Column(Integer, ForeignKey("agents.id"), nullable=True)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     title = Column(String(200), nullable=False)
     description = Column(Text, default="")
@@ -212,7 +217,9 @@ class Task(Base):
     completed_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=_now)
 
-    agent = relationship("Agent")
+    agent = relationship("Agent", foreign_keys=[agent_id])
+    reviewer_agent = relationship("Agent", foreign_keys=[reviewer_agent_id])
+    security_agent = relationship("Agent", foreign_keys=[security_agent_id])
     project = relationship("Project")
 
 
@@ -300,6 +307,7 @@ class ChatMessage(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     username = Column(String(50), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=True)
+    recipient_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # null = team chat
     message = Column(Text, nullable=False, default="")
     file_url = Column(String(500), default="")
     file_name = Column(String(200), default="")
