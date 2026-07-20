@@ -59,13 +59,36 @@ class ProjectListResponse(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────
 
 def _sanitize_dirname(name: str) -> str:
-    """Convert a display name into a safe directory name."""
-    # Replace spaces & special chars with underscore, collapse runs
-    safe = re.sub(r'[\\/:*?"<>| ]+', '_', name.strip())
-    # Deduplicate underscores
-    safe = re.sub(r'_+', '_', safe)
-    # Strip leading/trailing underscores
-    safe = safe.strip('_')
+    """Convert a display name into a safe ASCII directory name.
+
+    Chinese characters are transliterated to pinyin via ``pypinyin`` so that
+    directory names stay portable across operating systems and shell encodings.
+    When ``pypinyin`` is unavailable, CJK characters are stripped as a
+    conservative fallback.
+    """
+    # If the name is already pure ASCII, just sanitize it directly.
+    if name.isascii():
+        safe = re.sub(r'[\\/:*?"<>| ]+', '_', name.strip())
+        safe = re.sub(r'_+', '_', safe).strip('_')
+        return safe or 'project'
+
+    # ── Pinyin transliteration for Chinese / CJK names ──────────────────
+    try:
+        from pypinyin import lazy_pinyin, Style  # noqa: PLC0415
+    except ImportError:
+        # Fallback: strip non-ASCII characters and keep what remains.
+        ascii_only = name.encode('ascii', errors='ignore').decode('ascii')
+        safe = re.sub(r'[\\/:*?"<>| ]+', '_', ascii_only.strip())
+        safe = re.sub(r'_+', '_', safe).strip('_')
+        return safe or 'project'
+
+    syllables = lazy_pinyin(name.strip(), style=Style.NORMAL, errors='ignore')
+    pinyin = '_'.join(s for s in syllables if s)
+    if not pinyin:
+        pinyin = 'project'
+    # pinyin may still contain stray punctuation; re-sanitize.
+    safe = re.sub(r'[\\/:*?"<>| ]+', '_', pinyin)
+    safe = re.sub(r'_+', '_', safe).strip('_')
     return safe or 'project'
 
 
@@ -572,7 +595,7 @@ def apply_join_project(
     db.commit()
     db.refresh(join_req)
 
-    # Notify project members in real-time
+    # Notify project admins in real-time via WebSocket
     try:
         from app.api.ws import broadcast_sync_to_project
         broadcast_sync_to_project(project.id, "join_request", {
@@ -581,6 +604,22 @@ def apply_join_project(
             "username": user.username,
             "status": "pending",
         })
+    except Exception:
+        pass
+
+    # Push a persistent message to the project owner's message centre
+    try:
+        from app.services import message_service as msg
+        from app.models.models import MessageCategory, MessageLevel
+        msg.push(
+            title="新的加入申请",
+            body=f"{user.username} 申请加入项目「{project.name}」",
+            category=MessageCategory.MEMBER,
+            level=MessageLevel.INFO,
+            project_id=project.id,
+            recipient_id=project.owner_id,
+            link=f"/dashboard",
+        )
     except Exception:
         pass
 

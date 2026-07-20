@@ -35,6 +35,7 @@ def init_db():
     import app.models.models  # noqa: F401
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
+    _seed_builtin_skills()
 
 
 def _migrate_schema():
@@ -155,3 +156,49 @@ def _backfill_project_codes(conn, existing_tables: set[str]) -> None:
         conn.execute(text(
             "UPDATE projects SET project_id = :code WHERE id = :id"
         ), {"code": code, "id": project_id})
+
+
+def _seed_builtin_skills():
+    """Pre-populate banking-standard skills on first startup.
+
+    Idempotent — skips creation when builtin skills already exist for at least
+    one user, so repeated restarts don't duplicate or overwrite user edits.
+    """
+    import json
+    from pathlib import Path
+
+    from app.models.models import Skill, User
+
+    seed_file = Path(__file__).resolve().parent.parent / "seed_data" / "banking_skills.json"
+    if not seed_file.exists():
+        return
+
+    db = SessionLocal()
+    try:
+        # Quick guard: skip if any user already has builtin skills.
+        existing = db.query(Skill).filter(Skill.source == "builtin").first()
+        if existing:
+            return
+
+        first_user = db.query(User).order_by(User.id.asc()).first()
+        if not first_user:
+            return
+
+        with open(seed_file, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+
+        for entry in data:
+            skill = Skill(
+                creator_id=first_user.id,
+                name=entry["name"],
+                description=entry["description"],
+                prompt_content=entry["prompt_content"],
+                source="builtin",
+            )
+            db.add(skill)
+
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()

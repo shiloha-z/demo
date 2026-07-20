@@ -391,6 +391,10 @@ def _run_agent_pipeline(
                 "ℹ️ 确定性门禁已关闭，跳过检查，直接进入人工审批",
                 "quality_gate",
             )
+            # Synthesise a dummy passed gate so the downstream flow
+            # (status message, broadcast, review → reviewing transition)
+            # works without referencing an undefined gate_run variable.
+            gate_run = type("_DummyGate", (), {"status": "passed"})()
 
         # ── Save reusable task outcome to Agent + project memory ─────
         if mem:
