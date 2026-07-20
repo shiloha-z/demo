@@ -15,6 +15,7 @@ from app.services import git_service as git
 from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
+from app.core.config import settings
 
 # Lazy import — memory_service may fail if chromadb not installed
 try:
@@ -286,6 +287,25 @@ def rerun_review_quality_gate(
     commit_hash = git.head_commit(task.worktree_path)
     if not commit_hash:
         raise HTTPException(status_code=409, detail="无法读取任务分支提交，不能重新检查")
+    if not settings.QUALITY_GATE_ENABLED:
+        # Gate disabled — synthesise a passed run so approval can proceed.
+        attempt = db.query(QualityGateRun).filter(
+            QualityGateRun.review_id == review.id
+        ).count() + 1
+        run = QualityGateRun(
+            task_id=task.id,
+            review_id=review.id,
+            attempt=attempt,
+            commit_hash=commit_hash,
+            status="passed",
+            results_json="[]",
+            summary="确定性门禁已关闭，跳过全部检查",
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return get_review_quality_gate(review_id, db, user)
     changed_files = sorted(git.changed_files_vs_base(task.worktree_path, commit_hash))
     run = quality_gates.execute_and_persist(
         db,

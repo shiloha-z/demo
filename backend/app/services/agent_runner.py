@@ -433,10 +433,35 @@ def _run_agent_pipeline(
                 "ℹ️ 确定性门禁已关闭，跳过检查，直接进入人工审批",
                 "quality_gate",
             )
-            # Synthesise a dummy passed gate so the downstream flow
-            # (status message, broadcast, review → reviewing transition)
-            # works without referencing an undefined gate_run variable.
-            gate_run = type("_DummyGate", (), {"status": "passed"})()
+            # Persist a synthetic passed gate run so the downstream approval
+            # flow (which queries the latest QualityGateRun from the DB) works
+            # even when the gate is disabled.
+            from app.api.ws import broadcast_sync
+
+            attempt = db.query(QualityGateRun).filter(
+                QualityGateRun.task_id == task.id
+            ).count() + 1
+            gate_run = QualityGateRun(
+                task_id=task.id,
+                review_id=review.id,
+                attempt=attempt,
+                commit_hash=commit_hash or git.head_commit(workspace),
+                status="passed",
+                results_json="[]",
+                summary="确定性门禁已关闭，跳过全部检查",
+                completed_at=datetime.now(timezone.utc),
+            )
+            db.add(gate_run)
+            db.commit()
+            db.refresh(gate_run)
+            broadcast_sync("quality_gate_update", {
+                "id": gate_run.id,
+                "task_id": task.id,
+                "project_id": project_id,
+                "review_id": review.id,
+                "status": "passed",
+                "checks": [],
+            })
 
         # ── Save reusable task outcome to Agent + project memory ─────
         if mem:
