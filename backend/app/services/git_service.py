@@ -278,13 +278,34 @@ def prepare_conflict_resolution(task_workspace: str, base_workspace: str, branch
             return False, [], str(exc)
 
 
+_GENERATED_ARTIFACT_PARTS = {
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "node_modules", "dist", "build", "coverage",
+}
+_GENERATED_ARTIFACT_NAMES = {".coverage"}
+
+
+def _stage_agent_changes(repo: Repo) -> None:
+    """Stage workspace changes while keeping test/build artifacts out of commits."""
+    repo.git.add(A=True)
+    staged = repo.git.diff("--cached", "--name-only").splitlines()
+    generated = [
+        path for path in staged
+        if Path(path).name in _GENERATED_ARTIFACT_NAMES
+        or any(part in _GENERATED_ARTIFACT_PARTS for part in Path(path).parts)
+        or Path(path).suffix in {".pyc", ".pyo"}
+    ]
+    if generated:
+        repo.git.reset("--", *generated)
+
+
 @_workspace_locked
 def commit(workspace: str, message: str) -> str | None:
     """Stage all, commit, return commit hash. None if nothing to commit."""
     repo = get_repo(workspace)
     if not repo:
         return None
-    repo.git.add(A=True)
+    _stage_agent_changes(repo)
     if not repo.is_dirty(index=True, working_tree=False, untracked_files=True):
         return None
     c = repo.index.commit(message)
@@ -542,8 +563,9 @@ def diff_vs_master(workspace: str) -> str:
         except GitCommandError:
             return get_diff(workspace)
     try:
-        # Stage everything first so new files show up in diff
-        repo.git.add(A=True)
+        # Stage agent-authored changes first so new files show up in diff.
+        # Test/build artifacts are deliberately kept out of the review.
+        _stage_agent_changes(repo)
         return repo.git.diff("--cached", base)
     except GitCommandError:
         return get_diff(workspace)

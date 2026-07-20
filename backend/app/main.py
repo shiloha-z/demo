@@ -33,6 +33,7 @@ from app.api.chat import router as chat_router
 from app.api.members import router as members_router
 from app.api.messages import router as messages_router
 from app.api.audit import router as audit_router
+from app.api.risk_dashboard import router as risk_dashboard_router
 from app.api.admin import router as admin_router  # 调试用管理后台（无鉴权，仅本地）
 
 
@@ -75,6 +76,7 @@ app.include_router(chat_router)
 app.include_router(members_router)
 app.include_router(messages_router)
 app.include_router(audit_router)
+app.include_router(risk_dashboard_router)
 # 调试用管理后台（无鉴权，仅本地调试使用，生产需移除或加访问控制）
 app.include_router(admin_router)
 app.include_router(ws_router)

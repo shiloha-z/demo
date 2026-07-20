@@ -15,8 +15,10 @@ import time
 import math
 from datetime import datetime, timezone
 from app.core.database import SessionLocal
-from app.models.models import Task, TaskStatus, Agent, AgentStatus, Review, ReviewRound, ReviewReviewer, ReviewVote, Project, ProjectMember
+from app.core.config import settings
+from app.models.models import Task, TaskStatus, Agent, AgentStatus, QualityGateRun, Review, ReviewRound, ReviewReviewer, ReviewVote, Project, ProjectMember
 from app.services import git_service as git
+from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 
 
@@ -350,6 +352,46 @@ def _run_agent_pipeline(
         db.add_all([ReviewReviewer(review_id=review.id, user_id=user_id) for user_id in reviewer_ids])
         db.commit()
 
+        # ── Deterministic quality gates before human approval ───────
+        if settings.QUALITY_GATE_ENABLED:
+            checked_commit = commit_hash or git.head_commit(workspace)
+            changed_files = sorted(git.changed_files_vs_base(workspace, checked_commit))
+            _progress(
+                task_id,
+                project_id,
+                "🛡️ 正在执行人工审批前确定性检查...",
+                "quality_gate",
+            )
+            gate_run = quality_gates.execute_and_persist(
+                db,
+                task=task,
+                review=review,
+                workspace=workspace,
+                commit_hash=checked_commit,
+                changed_files=changed_files,
+            )
+            if gate_run.status == "passed":
+                _progress(
+                    task_id,
+                    project_id,
+                    "✅ 七项确定性检查全部通过，可以开始人工审批",
+                    "quality_gate_passed",
+                )
+            else:
+                _progress(
+                    task_id,
+                    project_id,
+                    f"⛔ {gate_run.summary}，请打回 Agent 修改",
+                    "quality_gate_failed",
+                )
+        else:
+            _progress(
+                task_id,
+                project_id,
+                "ℹ️ 确定性门禁已关闭，跳过检查，直接进入人工审批",
+                "quality_gate",
+            )
+
         # ── Save reusable task outcome to Agent + project memory ─────
         if mem:
             try:
@@ -381,6 +423,7 @@ def _run_agent_pipeline(
         # Check if task was paused while pipeline was running
         db.refresh(task)
         if task.status == TaskStatus.PAUSED:
+            db.query(QualityGateRun).filter(QualityGateRun.review_id == review.id).delete()
             db.query(ReviewVote).filter(ReviewVote.review_id == review.id).delete()
             db.query(ReviewReviewer).filter(ReviewReviewer.review_id == review.id).delete()
             db.query(ReviewRound).filter(ReviewRound.review_id == review.id).delete()
@@ -398,7 +441,12 @@ def _run_agent_pipeline(
             agent.status = AgentStatus.DONE
         db.commit()
 
-        _progress(task_id, project_id, "🎉 执行完毕，等待人工审查", "done")
+        final_message = (
+            "🎉 执行完毕，门禁已通过，等待人工审查"
+            if gate_run.status == "passed"
+            else "⚠️ 执行完毕，门禁未通过，等待人工打回修改"
+        )
+        _progress(task_id, project_id, final_message, "done")
 
         broadcast_sync("task_update", {
             "id": task.id, "project_id": project_id, "status": "reviewing",
@@ -414,11 +462,16 @@ def _run_agent_pipeline(
         try:
             from app.services import message_service as msg
             from app.models.models import MessageCategory, MessageLevel
+            gate_passed = gate_run.status == "passed"
             msg.push(
-                title="任务待审核",
-                body=f"任务 #{task_id}（{task.title}）已生成代码，等待人工审查。",
+                title="任务待审核" if gate_passed else "任务门禁未通过",
+                body=(
+                    f"任务 #{task_id}（{task.title}）门禁已通过，等待人工审查。"
+                    if gate_passed
+                    else f"任务 #{task_id}（{task.title}）确定性检查未通过，请查看失败项并打回 Agent 修改。"
+                ),
                 category=MessageCategory.REVIEW,
-                level=MessageLevel.WARNING,
+                level=MessageLevel.WARNING if gate_passed else MessageLevel.ERROR,
                 project_id=project_id,
                 link=f"/reviews?task_id={task_id}",
             )

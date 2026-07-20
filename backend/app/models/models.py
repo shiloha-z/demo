@@ -47,6 +47,10 @@ class AuditAction(str, Enum):
     JOIN_REJECT = "join_reject"
     # 配置
     CONFIG_UPDATE = "config_update"
+    # 确定性质量门禁
+    QUALITY_GATE_START = "quality_gate_start"
+    QUALITY_GATE_PASS = "quality_gate_pass"
+    QUALITY_GATE_FAIL = "quality_gate_fail"
     # 对项目的影响（AI 自动行为）
     MERGE_DONE = "merge_done"
     CONFLICT_AUTO_RESOLVED = "conflict_auto_resolved"
@@ -210,6 +214,23 @@ class Task(Base):
 
     agent = relationship("Agent")
     project = relationship("Project")
+
+
+class QualityGateRun(Base):
+    """One immutable deterministic pre-merge quality-gate execution."""
+
+    __tablename__ = "quality_gate_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False, index=True)
+    review_id = Column(Integer, ForeignKey("reviews.id"), nullable=True, index=True)
+    attempt = Column(Integer, default=1, nullable=False)
+    commit_hash = Column(String(40), default="", nullable=False)
+    status = Column(String(20), default="running", nullable=False)  # running / passed / failed
+    results_json = Column(Text, default="[]", nullable=False)
+    summary = Column(Text, default="")
+    started_at = Column(DateTime, default=_now, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
 
 
 class Review(Base):

@@ -23,10 +23,12 @@ from app.models.models import (
     Project,
     ProjectMember,
     ProjectRole,
+    QualityGateRun,
     Review,
     ReviewReviewer,
     ReviewRound,
     ReviewStatus,
+    ReviewVote,
     Task,
     TaskStatus,
     User,
@@ -165,6 +167,37 @@ class MessageReadTests(DatabaseTestCase):
 
 class ReviewThresholdTests(DatabaseTestCase):
     @patch("app.api.ws.broadcast_sync_to_project")
+    def test_approve_vote_is_blocked_until_quality_gate_passes(self, _broadcast) -> None:
+        task = self.add_task(TaskStatus.REVIEWING)
+        task.worktree_path = "task-worktree"
+        self.db.commit()
+        review = Review(
+            task_id=task.id,
+            project_id=self.project.id,
+            status=ReviewStatus.PENDING,
+        )
+        self.db.add(review)
+        self.db.flush()
+        self.db.add(ReviewRound(review_id=review.id, required_approvals=1))
+        self.db.add(ReviewReviewer(review_id=review.id, user_id=self.owner.id))
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            cast_review_vote(
+                review.id,
+                VoteRequest(decision="approve"),
+                BackgroundTasks(),
+                self.db,
+                self.owner,
+            )
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertIn("确定性检查", raised.exception.detail)
+        self.assertEqual(self.db.query(ReviewVote).filter(
+            ReviewVote.review_id == review.id
+        ).count(), 0)
+
+    @patch("app.api.ws.broadcast_sync_to_project")
     def test_owner_vote_does_not_bypass_required_approvals(self, _broadcast) -> None:
         reviewer = User(username="reviewer", password_hash="x", display_name="Reviewer")
         self.db.add(reviewer)
@@ -175,6 +208,8 @@ class ReviewThresholdTests(DatabaseTestCase):
             role=ProjectRole.MEMBER,
         ))
         task = self.add_task(TaskStatus.REVIEWING)
+        task.worktree_path = "task-worktree"
+        self.db.commit()
         review = Review(
             task_id=task.id,
             project_id=self.project.id,
@@ -183,19 +218,27 @@ class ReviewThresholdTests(DatabaseTestCase):
         self.db.add(review)
         self.db.flush()
         self.db.add(ReviewRound(review_id=review.id, required_approvals=2))
+        self.db.add(QualityGateRun(
+            task_id=task.id,
+            review_id=review.id,
+            status="passed",
+            commit_hash="a" * 40,
+            results_json="[]",
+        ))
         self.db.add_all([
             ReviewReviewer(review_id=review.id, user_id=self.owner.id),
             ReviewReviewer(review_id=review.id, user_id=reviewer.id),
         ])
         self.db.commit()
 
-        result = cast_review_vote(
-            review.id,
-            VoteRequest(decision="approve"),
-            BackgroundTasks(),
-            self.db,
-            self.owner,
-        )
+        with patch("app.api.reviews.git.head_commit", return_value="a" * 40):
+            result = cast_review_vote(
+                review.id,
+                VoteRequest(decision="approve"),
+                BackgroundTasks(),
+                self.db,
+                self.owner,
+            )
 
         self.assertEqual(result["approve_count"], 1)
         self.assertEqual(result["required_approvals"], 2)

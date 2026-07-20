@@ -10,7 +10,7 @@ from sqlalchemy import desc, asc
 from app.core.database import get_db
 from app.core.config import settings
 from app.core.auth import get_current_user
-from app.models.models import User, Project, Task, TaskStatus, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, MessageRead, ReviewVote, ReviewReviewer, ReviewRound
+from app.models.models import User, Project, Task, TaskStatus, QualityGateRun, Review, Version, Agent, AgentStatus, ProjectMember, ProjectRole, JoinRequest, JoinStatus, ChatMessage, Message, MessageRead, ReviewVote, ReviewReviewer, ReviewRound
 from app.services import git_service as git
 
 router = APIRouter(prefix="/api/projects", tags=["Projects"])
@@ -444,6 +444,13 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
         db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
+    task_ids = [
+        row[0] for row in db.query(Task.id).filter(Task.project_id == project_id).all()
+    ]
+    if task_ids:
+        db.query(QualityGateRun).filter(
+            QualityGateRun.task_id.in_(task_ids)
+        ).delete(synchronize_session=False)
     db.query(Review).filter(Review.project_id == project_id).delete()
     db.query(Version).filter(Version.project_id == project_id).delete()
     db.query(Task).filter(Task.project_id == project_id).delete()

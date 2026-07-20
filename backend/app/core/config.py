@@ -21,6 +21,18 @@ class Settings(BaseSettings):
     MERGE_MAX_CONCURRENCY: int = 2
     MERGE_TEST_COMMAND: str = ""
     MERGE_TEST_TIMEOUT_SECONDS: int = 300
+    # Deterministic pre-merge quality gates. Command-based gates are
+    # intentionally fail-closed: an empty required command blocks the merge.
+    QUALITY_GATE_UNIT_TEST_COMMAND: str = ""
+    QUALITY_GATE_STYLE_COMMAND: str = ""
+    QUALITY_GATE_STATIC_SCAN_COMMAND: str = ""
+    QUALITY_GATE_SECRET_SCAN_COMMAND: str = ""
+    QUALITY_GATE_DEPENDENCY_AUDIT_COMMAND: str = ""
+    QUALITY_GATE_COVERAGE_COMMAND: str = ""
+    QUALITY_GATE_BANK_RULE_COMMAND: str = ""
+    QUALITY_GATE_FORBIDDEN_PATTERNS: str = "TODO,FIXME"
+    QUALITY_GATE_TIMEOUT_SECONDS: int = 300
+    QUALITY_GATE_ENABLED: bool = True  # 设为 false 可跳过全部确定性门禁检查
     # Audit trail — append-only ledger recording human actions, AI dispatch
     # intents, and their impact on the project. Defaults on; never blocks the
     # main flow (the recorder swallows its own exceptions).

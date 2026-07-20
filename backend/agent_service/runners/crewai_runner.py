@@ -12,6 +12,7 @@ from app.services import git_service as git
 from agent_service.tools.file_tools import FileReadTool, FileWriteTool
 from agent_service.tools.git_tools import GitDiffTool
 from agent_service.tools.memory_tools import MemorySearchTool, MemoryRecordTool
+from agent_service.tools.quality_gate_tools import QualityGateTool
 
 from .base import BaseRunner, RunResult, ProgressCallback, StageCallback
 
@@ -154,6 +155,10 @@ class CrewAIRunner(BaseRunner):
         read_tool = FileReadTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
         write_tool = FileWriteTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
         diff_tool = GitDiffTool(workspace=workspace, max_usage_count=MAX_TOOL_CALLS_PER_AGENT)
+        quality_gate_tool = QualityGateTool(
+            workspace=workspace,
+            max_usage_count=MAX_TOOL_CALLS_PER_AGENT,
+        )
         mem_search = MemorySearchTool(
             task_id=task_id, agent_id=agent_id, project_id=project_id,
             max_usage_count=MAX_TOOL_CALLS_PER_AGENT,
@@ -211,7 +216,7 @@ class CrewAIRunner(BaseRunner):
                 "编写代码前，先用 MemorySearch 查找项目中是否有相关的经验和模式。"
                 "完成后，用 MemoryRecord 记录重要的设计决策供后续参考。"
             ),
-            tools=[read_tool, write_tool, diff_tool, mem_search, mem_record],
+            tools=[read_tool, write_tool, diff_tool, quality_gate_tool, mem_search, mem_record],
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
@@ -280,12 +285,16 @@ class CrewAIRunner(BaseRunner):
                 "代码只能通过 FileWrite 落盘，禁止只在回答里贴代码而不调用工具\n"
                 "5. 用 GitDiff 工具确认你的改动——逐一核对任务要求的每个核心文件"
                 "是否都已出现在 diff 中且内容非空。若有遗漏或为空，立即用 FileWrite 补写后再次 GitDiff 确认\n"
-                "6. 用 MemoryRecord 记录重要的设计决策（scope: project）\n\n"
+                "6. 用 DeterministicQualityGate 运行审批前七项检查。若提示“可由 Agent 修复”，"
+                "必须继续修改代码或测试并再次运行；不得只解释失败原因。"
+                "若提示“需平台管理员处理”，记录该项但不要伪造依赖或测试结果\n"
+                "7. 用 MemoryRecord 记录重要的设计决策（scope: project）\n\n"
                 "硬性要求：\n"
                 "- 生成的代码必须完整可运行，包含所有必要导入、完整函数体，"
                 "不允许 TODO / pass 占位 / 省略号代替真实实现\n"
                 "- 不要生成任务范围之外的任何文件\n"
-                "- 结束前必须通过 GitDiff 确认所有核心文件已真实落盘"
+                "- 结束前必须通过 GitDiff 确认所有核心文件已真实落盘，并至少运行一次 "
+                "DeterministicQualityGate"
             ),
             expected_output=(
                 "一份说明，包含：(1) 实际通过 FileWrite 写入的文件路径列表；"

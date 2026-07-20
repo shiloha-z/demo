@@ -3,9 +3,18 @@
 from datetime import datetime, timezone
 
 from app.api.ws import broadcast_sync
-from app.core.config import settings
 from app.core.database import SessionLocal
-from app.models.models import Agent, AgentStatus, Project, Review, ReviewStatus, Task, TaskStatus, Version
+from app.models.models import (
+    Agent,
+    AgentStatus,
+    Project,
+    QualityGateRun,
+    Review,
+    ReviewStatus,
+    Task,
+    TaskStatus,
+    Version,
+)
 from app.services import git_service as git
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
@@ -38,6 +47,22 @@ def integrate_task(task_id: int) -> None:
             db.commit()
             _broadcast(task)
             return
+        review = db.query(Review).filter(
+            Review.task_id == task.id,
+        ).order_by(Review.id.desc()).first()
+        if (
+            not review
+            or review.status != ReviewStatus.APPROVED
+            or not (review.agent_review_summary or "").strip()
+        ):
+            _update_task(
+                task,
+                TaskStatus.MERGE_BLOCKED,
+                "AI 审查报告和人工审批尚未同时满足，禁止执行合并",
+            )
+            db.commit()
+            _broadcast(task)
+            return
         branch_name = task.branch_name or f"task/{task.id}"
         if not task.worktree_path:
             worktree_path = git.default_task_worktree_path(project.workspace_path, task.id)
@@ -50,6 +75,24 @@ def integrate_task(task_id: int) -> None:
             task.worktree_path = worktree_path
             task.branch_name = branch_name
             db.commit()
+        gate_run = db.query(QualityGateRun).filter(
+            QualityGateRun.review_id == review.id,
+        ).order_by(QualityGateRun.id.desc()).first()
+        branch_commit = git.head_commit(task.worktree_path)
+        if (
+            not gate_run
+            or gate_run.status != "passed"
+            or not gate_run.commit_hash
+            or gate_run.commit_hash != branch_commit
+        ):
+            _update_task(
+                task,
+                TaskStatus.MERGE_BLOCKED,
+                "确定性门禁未通过，或门禁通过后的代码版本已发生变化，禁止合并",
+            )
+            db.commit()
+            _broadcast(task)
+            return
         task.status = TaskStatus.INTEGRATING
         task.merge_attempts = (task.merge_attempts or 0) + 1
         task.merge_error = ""
@@ -61,17 +104,6 @@ def integrate_task(task_id: int) -> None:
         with git.workspace_lock(project.workspace_path):
             result = git.begin_integration(project.workspace_path, branch_name)
             if result["status"] == "ready":
-                ok, check_output = git.run_integration_checks(
-                    project.workspace_path,
-                    settings.MERGE_TEST_COMMAND,
-                    settings.MERGE_TEST_TIMEOUT_SECONDS,
-                )
-                if not ok:
-                    git.abort_integration(project.workspace_path)
-                    _update_task(task, TaskStatus.MERGE_BLOCKED, check_output)
-                    db.commit()
-                    _broadcast(task)
-                    return
                 merged, commit_or_error = git.finish_integration(
                     project.workspace_path,
                     f"Merge task #{task.id}: {task.title}",
@@ -83,9 +115,6 @@ def integrate_task(task_id: int) -> None:
                     _broadcast(task)
                     return
 
-                review = db.query(Review).filter(
-                    Review.task_id == task.id, Review.status == ReviewStatus.APPROVED
-                ).order_by(Review.id.desc()).first()
                 db.add(Version(
                     project_id=project.id,
                     commit_hash=commit_or_error,

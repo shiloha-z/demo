@@ -18,6 +18,7 @@ _agent_executor = ThreadPoolExecutor(max_workers=max(1, settings.AGENT_MAX_CONCU
 _merge_executor = ThreadPoolExecutor(max_workers=max(1, settings.MERGE_MAX_CONCURRENCY))
 _lock = RLock()
 _active_agent_tasks: set[int] = set()
+_pending_agent_runs: dict[int, tuple[str, bool, bool]] = {}
 _active_merge_projects: set[int] = set()
 
 
@@ -26,10 +27,20 @@ def enqueue_agent_run(
     feedback: str = "",
     resume: bool = False,
     conflict_resolution: bool = False,
+    queue_if_active: bool = False,
 ) -> bool:
-    """Queue one execution per task; duplicate UI requests are harmless."""
+    """Queue one execution per task.
+
+    A review rejection is a deliberate follow-up run, not a duplicate click.
+    With ``queue_if_active`` it is retained until the finishing pipeline has
+    released the task, closing the short race between its final WebSocket
+    update and executor cleanup.
+    """
     with _lock:
         if task_id in _active_agent_tasks:
+            if queue_if_active:
+                _pending_agent_runs[task_id] = (feedback, resume, conflict_resolution)
+                return True
             return False
         _active_agent_tasks.add(task_id)
     try:
@@ -97,6 +108,7 @@ def _release_paused_agent(task_id: int) -> None:
 
 
 def _run_agent(task_id: int, feedback: str, resume: bool, conflict_resolution: bool) -> None:
+    pending: tuple[str, bool, bool] | None = None
     try:
         from app.services.agent_runner import run_agent_pipeline
         run_agent_pipeline(task_id, feedback, resume, conflict_resolution)
@@ -109,6 +121,9 @@ def _run_agent(task_id: int, feedback: str, resume: bool, conflict_resolution: b
         finally:
             with _lock:
                 _active_agent_tasks.discard(task_id)
+                pending = _pending_agent_runs.pop(task_id, None)
+    if pending:
+        enqueue_agent_run(task_id, *pending)
 
 
 def enqueue_merge(task_id: int) -> bool:

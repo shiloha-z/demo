@@ -49,6 +49,10 @@ ACTION_REGISTRY: dict[str, dict] = {
     AuditAction.JOIN_REJECT.value:    {"label": "驳回加入", "group": "member"},
     # ── 配置 ──
     AuditAction.CONFIG_UPDATE.value:  {"label": "配置变更", "group": "config"},
+    # ── 确定性质量门禁 ──
+    AuditAction.QUALITY_GATE_START.value: {"label": "门禁开始", "group": "review"},
+    AuditAction.QUALITY_GATE_PASS.value:  {"label": "门禁通过", "group": "review"},
+    AuditAction.QUALITY_GATE_FAIL.value:  {"label": "门禁拦截", "group": "review"},
     # ── 对项目的影响（AI 自动行为）──
     AuditAction.MERGE_DONE.value:             {"label": "合并完成", "group": "merge"},
     AuditAction.CONFLICT_AUTO_RESOLVED.value: {"label": "冲突自动解决", "group": "merge"},

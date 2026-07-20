@@ -7,7 +7,7 @@ from sqlalchemy import func
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, Agent, AgentStatus, Task, TaskStatus, Review, ReviewStatus, ReviewVote, ReviewReviewer, ReviewRound, Version
+from app.models.models import User, Agent, AgentStatus, Task, TaskStatus, QualityGateRun, Review, ReviewStatus, ReviewVote, ReviewReviewer, ReviewRound, Version
 
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
@@ -265,6 +265,9 @@ def delete_agent(
         db.query(Task.id).filter(Task.agent_id == agent_id).all()
     ]
     if task_ids:
+        db.query(QualityGateRun).filter(
+            QualityGateRun.task_id.in_(task_ids)
+        ).delete(synchronize_session=False)
         review_ids = [
             row[0] for row in
             db.query(Review.id).filter(Review.task_id.in_(task_ids)).all()

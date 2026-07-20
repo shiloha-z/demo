@@ -6,6 +6,7 @@ import { useWebSocketStore } from '../stores/websocket'
 import { useAuthStore } from '../stores/auth'
 import DiffViewer from '../components/DiffViewer.vue'
 import AuditChainPanel from '../components/AuditChainPanel.vue'
+import QualityGatePanel from '../components/QualityGatePanel.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -23,6 +24,9 @@ const selectedReview = ref<any>(null)
 const loading = ref(false)
 const voteSummary = ref<any>(null)
 const voteComment = ref('')
+const qualityGate = ref<any>(null)
+const rejectingGate = ref(false)
+const retryingGate = ref(false)
 
 const statusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
@@ -32,6 +36,7 @@ const statusColors: Record<string, string> = {
 }
 
 let unsubReview: (() => void) | null = null
+let unsubGate: (() => void) | null = null
 
 onMounted(() => {
   unsubReview = wsStore.on('review_update', (data: any) => {
@@ -43,10 +48,14 @@ onMounted(() => {
   wsStore.on('review_vote_update', (data: any) => {
     if (selectedReview.value?.id === data.review_id) voteSummary.value = data
   })
+  unsubGate = wsStore.on('quality_gate_update', (data: any) => {
+    if (selectedReview.value?.task_id === data.task_id) qualityGate.value = data
+  })
 })
 
 onUnmounted(() => {
   if (unsubReview) unsubReview()
+  if (unsubGate) unsubGate()
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
@@ -57,10 +66,15 @@ watch(() => store.currentProject?.id, async (pid) => {
 watch(() => selectedReview.value?.id, async (reviewId) => {
   voteSummary.value = null
   voteComment.value = ''
+  qualityGate.value = null
   if (!reviewId) return
   try {
-    const { data } = await api.get(`/reviews/${reviewId}/votes`)
-    voteSummary.value = data
+    const [votes, gate] = await Promise.all([
+      api.get(`/reviews/${reviewId}/votes`),
+      api.get(`/reviews/${reviewId}/quality-gate`),
+    ])
+    voteSummary.value = votes.data
+    qualityGate.value = gate.data
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '加载投票信息失败')) }
 })
 
@@ -105,6 +119,35 @@ async function castVote(decision: 'approve' | 'reject') {
     MessagePlugin.success(decision === 'approve' ? '已投通过票' : '已投驳回票')
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '投票失败')) }
   finally { loading.value = false }
+}
+
+async function rejectFailedQualityGate() {
+  if (!selectedReview.value) return
+  rejectingGate.value = true
+  try {
+    await api.post(`/reviews/${selectedReview.value.id}/reject-quality-gate`)
+    MessagePlugin.warning('已将门禁失败明细打回，Agent 正在修改')
+    await loadReviews()
+    selectedReview.value = null
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '打回 Agent 失败'))
+  } finally {
+    rejectingGate.value = false
+  }
+}
+
+async function rerunQualityGate() {
+  if (!selectedReview.value) return
+  retryingGate.value = true
+  try {
+    const response = await api.post(`/reviews/${selectedReview.value.id}/rerun-quality-gate`)
+    qualityGate.value = response.data
+    MessagePlugin.success('确定性门禁已重新执行')
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '重新执行门禁失败'))
+  } finally {
+    retryingGate.value = false
+  }
 }
 
 const feedbackDialogVisible = ref(false)
@@ -220,6 +263,22 @@ function formatDate(d: string) {
             </div>
           </div>
 
+          <div
+            v-if="qualityGate || selectedReview.status === 'approved'"
+            class="detail-section"
+          >
+            <h4 class="detail-label">审批前确定性门禁</h4>
+            <QualityGatePanel
+              :gate="qualityGate"
+              :can-reject="selectedReview.status === 'pending' && qualityGate?.status === 'failed'"
+              :can-retry="selectedReview.status === 'pending' && qualityGate?.status === 'failed'"
+              :rejecting="rejectingGate"
+              :retrying="retryingGate"
+              @reject="rejectFailedQualityGate"
+              @retry="rerunQualityGate"
+            />
+          </div>
+
           <section v-if="voteSummary" class="vote-panel">
             <div class="vote-panel-header">
               <strong>多人投票</strong>
@@ -238,7 +297,13 @@ function formatDate(d: string) {
             <div v-if="selectedReview.status === 'pending' && canVote" class="vote-actions">
               <t-textarea v-model="voteComment" placeholder="投票意见；驳回时必填" :autosize="{ minRows: 2, maxRows: 4 }" />
               <div class="vote-buttons">
-                <t-button size="small" theme="success" variant="outline" :disabled="loading" @click="castVote('approve')">投通过票</t-button>
+                <t-button
+                  size="small"
+                  theme="success"
+                  variant="outline"
+                  :disabled="loading || qualityGate?.status !== 'passed'"
+                  @click="castVote('approve')"
+                >投通过票</t-button>
                 <t-button size="small" theme="warning" variant="outline" :disabled="loading" @click="castVote('reject')">投驳回票</t-button>
               </div>
             </div>

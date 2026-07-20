@@ -3,7 +3,6 @@ import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import AuditChainPanel from '../components/AuditChainPanel.vue'
 import api from '../api'
 
 const store = useProjectStore()

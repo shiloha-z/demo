@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -7,8 +8,9 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.core.permissions import require_project_admin, require_project_member
-from app.models.models import User, Review, ReviewStatus, ReviewRound, ReviewReviewer, ReviewVote, ProjectMember, Task, TaskStatus, Version, Agent, AgentStatus
+from app.models.models import User, QualityGateRun, Review, ReviewStatus, ReviewRound, ReviewReviewer, ReviewVote, ProjectMember, Task, TaskStatus, Version, Agent, AgentStatus
 from app.services import git_service as git
+from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
 
@@ -98,8 +100,34 @@ def _vote_summary(review: Review, db: Session) -> dict:
     }
 
 
+def _latest_quality_gate(review_id: int, db: Session) -> QualityGateRun | None:
+    return db.query(QualityGateRun).filter(
+        QualityGateRun.review_id == review_id
+    ).order_by(QualityGateRun.id.desc()).first()
+
+
+def _require_passed_quality_gate(review: Review, db: Session) -> QualityGateRun:
+    run = _latest_quality_gate(review.id, db)
+    if not run or run.status != "passed":
+        raise HTTPException(
+            status_code=409,
+            detail="确定性检查尚未全部通过，不能批准；请先按失败项打回 Agent 修改",
+        )
+    task = db.get(Task, review.task_id)
+    if not task or not task.worktree_path:
+        raise HTTPException(status_code=409, detail="任务工作区不存在，无法验证门禁版本")
+    current_commit = git.head_commit(task.worktree_path)
+    if not run.commit_hash or current_commit != run.commit_hash:
+        raise HTTPException(
+            status_code=409,
+            detail="门禁通过后的代码版本已发生变化，必须重新执行 Agent 和确定性检查",
+        )
+    return run
+
+
 def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
     """Persist approval first, then let the project merge worker serialize it."""
+    gate_run = _require_passed_quality_gate(review, db)
     review.status = ReviewStatus.APPROVED
     task.status = TaskStatus.MERGE_QUEUED
     task.merge_queued_at = datetime.now(timezone.utc)
@@ -132,7 +160,11 @@ def _queue_review_merge(review: Review, task: Task, db: Session) -> dict:
         target_type="review",
         target_id=review.id,
         intent="审查达到法定批准票数",
-        payload={"required_approvals": _ensure_vote_round(review, db).required_approvals},
+        payload={
+            "required_approvals": _ensure_vote_round(review, db).required_approvals,
+            "quality_gate_run_id": gate_run.id,
+            "quality_gate_commit": gate_run.commit_hash,
+        },
     )
     return {"message": "Approved and queued for merge"}
 
@@ -162,6 +194,75 @@ def get_review_votes(review_id: int, db: Session = Depends(get_db), user: User =
         raise HTTPException(status_code=404, detail="Review not found")
     require_project_member(review.project_id, user, db)
     return _vote_summary(review, db)
+
+
+@router.get("/reviews/{review_id}/quality-gate")
+def get_review_quality_gate(
+    review_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_member(review.project_id, user, db)
+    run = _latest_quality_gate(review.id, db)
+    if not run:
+        return None
+    try:
+        checks = json.loads(run.results_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        checks = []
+    if isinstance(checks, list):
+        for check in checks:
+            if isinstance(check, dict) and check.get("status") == "failed":
+                check["agent_actionable"] = quality_gates.is_agent_actionable_failure(check)
+    return {
+        "id": run.id,
+        "task_id": run.task_id,
+        "review_id": run.review_id,
+        "attempt": run.attempt,
+        "commit_hash": run.commit_hash or "",
+        "status": run.status,
+        "summary": run.summary or "",
+        "checks": checks if isinstance(checks, list) else [],
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+    }
+
+
+@router.post("/reviews/{review_id}/rerun-quality-gate")
+def rerun_review_quality_gate(
+    review_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-run checks on the unchanged review commit after platform remediation."""
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be checked again")
+    task = db.get(Task, review.task_id)
+    if not task or task.status != TaskStatus.REVIEWING or not task.worktree_path:
+        raise HTTPException(status_code=409, detail="Task is not awaiting review")
+    latest = _latest_quality_gate(review.id, db)
+    if latest and latest.status == "running":
+        raise HTTPException(status_code=409, detail="Quality gate is already running")
+    commit_hash = git.head_commit(task.worktree_path)
+    if not commit_hash:
+        raise HTTPException(status_code=409, detail="无法读取任务分支提交，不能重新检查")
+    changed_files = sorted(git.changed_files_vs_base(task.worktree_path, commit_hash))
+    run = quality_gates.execute_and_persist(
+        db,
+        task=task,
+        review=review,
+        workspace=task.worktree_path,
+        commit_hash=commit_hash,
+        changed_files=changed_files,
+    )
+    return get_review_quality_gate(review_id, db, user)
 
 
 @router.post("/reviews/{review_id}/reviewers")
@@ -231,6 +332,8 @@ def cast_review_vote(
     require_project_member(review.project_id, user, db)
     if review.status != ReviewStatus.PENDING:
         raise HTTPException(status_code=409, detail="Voting is closed")
+    if body.decision == "approve":
+        _require_passed_quality_gate(review, db)
     _ensure_vote_round(review, db)
     assignment = db.query(ReviewReviewer).filter(
         ReviewReviewer.review_id == review.id,
@@ -534,9 +637,77 @@ def reject_review(
     # Trigger agent re-run with feedback via BackgroundTasks for safe shutdown
     # The pipeline will create the real Review with actual diff and summary
     from app.services.execution_service import enqueue_agent_run
-    enqueue_agent_run(task.id, feedback=feedback)
+    queued = enqueue_agent_run(task.id, feedback=feedback, queue_if_active=True)
+    if not queued:
+        task.status = TaskStatus.FAILED
+        task.merge_error = "Agent 修改任务未能进入执行队列，请稍后手动重试"
+        if agent:
+            agent.status = AgentStatus.ERROR
+        db.commit()
+        raise HTTPException(status_code=503, detail=task.merge_error)
 
     return {"message": "Rejected — agent will re-run with feedback"}
+
+
+@router.post("/reviews/{review_id}/reject-quality-gate")
+def reject_failed_quality_gate(
+    review_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return a failed deterministic gate to the Agent with exact findings."""
+    review = db.query(Review).filter(Review.id == review_id).first()
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    require_project_admin(review.project_id, user, db)
+    if review.status != ReviewStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending reviews can be rejected")
+    run = _latest_quality_gate(review.id, db)
+    if not run or run.status != "failed":
+        raise HTTPException(status_code=409, detail="The latest quality gate is not failed")
+    try:
+        checks = json.loads(run.results_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        checks = []
+    failed = [
+        check for check in checks
+        if isinstance(check, dict) and check.get("status") == "failed"
+    ]
+    platform_failed = [
+        check for check in failed
+        if not quality_gates.is_agent_actionable_failure(check)
+    ]
+    if platform_failed:
+        labels = "、".join(
+            str(check.get("label") or check.get("key") or "未知检查项")
+            for check in platform_failed
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"以下失败属于门禁执行环境问题，Agent 修改代码无法解决：{labels}。"
+                "请平台管理员先安装检查工具或修正 backend/.env 中的门禁命令"
+            ),
+        )
+    details = "\n\n".join(
+        f"【{check.get('label') or check.get('key') or '检查项'}】\n"
+        f"复现命令：{check.get('command') or '内置扫描'}\n"
+        f"{str(check.get('output') or '未提供失败详情')[:2000]}"
+        for check in failed
+    )
+    feedback = (
+        "确定性合并门禁未通过。你正在处理修订任务，必须直接修改工作区文件，"
+        "不能只解释原因或输出建议。请逐项修复、补充测试，并在结束前检查 Git diff "
+        "确认本轮产生了针对失败项的实际代码变更：\n\n"
+        f"{details or run.summary or '门禁执行失败，请检查项目测试和安全配置。'}"
+    )
+    return reject_review(
+        review_id,
+        RejectRequest(feedback=feedback),
+        BackgroundTasks(),
+        db,
+        user,
+    )
 
 
 @router.post("/reviews/{review_id}/close")

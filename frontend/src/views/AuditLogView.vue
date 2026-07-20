@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
-import api from '../api'
 import { useAuditStore, type AuditEntry } from '../stores/audit'
 import { useProjectStore } from '../stores/project'
 
@@ -16,7 +15,7 @@ const filters = ref({
 })
 // `actions` now carries registry metadata (value/label/token) from the backend
 // — new audit actions appear automatically, no hard-coded map here.
-const actions = ref<ReturnType<typeof audit.fetchActions> extends Promise<infer R> ? R['actions'] : any[]>([])
+const actions = ref<{ value: string; label: string; token?: string }[]>([])
 const actorTypes = ref<string[]>([])
 const showChain = ref(false)
 const chainTaskId = ref<number | null>(null)

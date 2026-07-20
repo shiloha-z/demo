@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
@@ -8,8 +9,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.core.permissions import require_project_member
-from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
+from app.models.models import User, Project, ProjectMember, Agent, Task, TaskStatus, AgentStatus, QualityGateRun, Review, ReviewVote, ReviewReviewer, ReviewRound, Version
 from app.services import git_service as git
+from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
 
@@ -90,6 +92,7 @@ class TaskDetailResponse(BaseModel):
     agent_runner_type: str | None = None
     project_name: str | None = None
     review: dict | None = None
+    quality_gate: dict | None = None
 
     class Config:
         from_attributes = True
@@ -122,6 +125,31 @@ def _task_to_response(t: Task) -> TaskResponse:
         agent_role=t.agent.role if t.agent else None,
         project_name=t.project.name if t.project else None,
     )
+
+
+def _quality_gate_to_dict(run: QualityGateRun | None) -> dict | None:
+    if not run:
+        return None
+    try:
+        checks = json.loads(run.results_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        checks = []
+    if isinstance(checks, list):
+        for check in checks:
+            if isinstance(check, dict) and check.get("status") == "failed":
+                check["agent_actionable"] = quality_gates.is_agent_actionable_failure(check)
+    return {
+        "id": run.id,
+        "task_id": run.task_id,
+        "review_id": run.review_id,
+        "attempt": run.attempt,
+        "commit_hash": run.commit_hash or "",
+        "status": run.status,
+        "summary": run.summary or "",
+        "checks": checks if isinstance(checks, list) else [],
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+    }
 
 
 
@@ -192,6 +220,9 @@ def get_task_detail(
 
     # Find associated review
     review = db.query(Review).filter(Review.task_id == task.id).order_by(Review.id.desc()).first()
+    quality_gate = db.query(QualityGateRun).filter(
+        QualityGateRun.task_id == task.id
+    ).order_by(QualityGateRun.id.desc()).first()
 
     return TaskDetailResponse(
         id=task.id,
@@ -219,7 +250,27 @@ def get_task_detail(
             "human_feedback": review.human_feedback,
             "created_at": review.created_at.isoformat() if review.created_at else None,
         } if review else None,
+        quality_gate=_quality_gate_to_dict(quality_gate),
     )
+
+
+@router.get("/{task_id}/quality-gate")
+def get_quality_gate(
+    project_id: int,
+    task_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    require_project_member(project_id, user, db)
+    task = db.query(Task).filter(
+        Task.id == task_id, Task.project_id == project_id
+    ).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    run = db.query(QualityGateRun).filter(
+        QualityGateRun.task_id == task.id
+    ).order_by(QualityGateRun.id.desc()).first()
+    return _quality_gate_to_dict(run)
 
 
 @router.post("", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
@@ -581,6 +632,9 @@ def delete_task(
         row[0] for row in
         db.query(Review.id).filter(Review.task_id == task_id).all()
     ]
+    db.query(QualityGateRun).filter(
+        QualityGateRun.task_id == task_id
+    ).delete(synchronize_session=False)
     if review_ids:
         db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
@@ -627,6 +681,9 @@ def batch_delete_tasks(
         row[0] for row in
         db.query(Review.id).filter(Review.task_id.in_(task_ids)).all()
     ]
+    db.query(QualityGateRun).filter(
+        QualityGateRun.task_id.in_(task_ids)
+    ).delete(synchronize_session=False)
     if review_ids:
         db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)

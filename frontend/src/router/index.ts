@@ -19,6 +19,11 @@ const router = createRouter({
       component: () => import('../views/DashboardView.vue'),
     },
     {
+      path: '/risk-dashboard',
+      name: 'RiskDashboard',
+      component: () => import('../views/RiskDashboardView.vue'),
+    },
+    {
       path: '/files',
       name: 'FileManager',
       component: () => import('../views/FileManagerView.vue'),

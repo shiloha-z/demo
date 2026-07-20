@@ -20,7 +20,7 @@ from app.core.database import get_db
 from app.models.models import (
     User, Project, ProjectMember, JoinRequest, Agent, AgentStatus, Skill,
     Task, TaskStatus, Review, ReviewStatus, ReviewVote, ReviewReviewer,
-    ReviewRound, Version, ChatMessage, Message, MessageRead, AuditLog,
+    ReviewRound, QualityGateRun, Version, ChatMessage, Message, MessageRead, AuditLog,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["AdminDebug"])
@@ -210,6 +210,13 @@ def _delete_project_record(project, db: Session) -> None:
         db.query(ReviewVote).filter(ReviewVote.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewReviewer).filter(ReviewReviewer.review_id.in_(review_ids)).delete(synchronize_session=False)
         db.query(ReviewRound).filter(ReviewRound.review_id.in_(review_ids)).delete(synchronize_session=False)
+    task_ids = [
+        row[0] for row in db.query(Task.id).filter(Task.project_id == project_id).all()
+    ]
+    if task_ids:
+        db.query(QualityGateRun).filter(
+            QualityGateRun.task_id.in_(task_ids)
+        ).delete(synchronize_session=False)
     db.query(Review).filter(Review.project_id == project_id).delete()
     db.query(Version).filter(Version.project_id == project_id).delete()
     db.query(Task).filter(Task.project_id == project_id).delete()
@@ -319,6 +326,9 @@ def _delete_agent_record(agent, db: Session) -> None:
         row[0] for row in db.query(Task.id).filter(Task.agent_id == agent_id).all()
     ]
     if task_ids:
+        db.query(QualityGateRun).filter(
+            QualityGateRun.task_id.in_(task_ids)
+        ).delete(synchronize_session=False)
         review_ids = [
             row[0] for row in db.query(Review.id).filter(Review.task_id.in_(task_ids)).all()
         ]

@@ -6,6 +6,7 @@ import { useWebSocketStore } from '../stores/websocket'
 import PipelineStepper from '../components/PipelineStepper.vue'
 import TaskTimeline from '../components/TaskTimeline.vue'
 import AuditChainPanel from '../components/AuditChainPanel.vue'
+import QualityGatePanel from '../components/QualityGatePanel.vue'
 import type { StageState } from '../components/PipelineStepper.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
@@ -141,6 +142,7 @@ const timelineTasks = computed(() => {
 let unsubTask: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
 let unsubStage: (() => void) | null = null
+let unsubGate: (() => void) | null = null
 
 onMounted(() => {
   unsubTask = wsStore.on('task_update', (data: any) => {
@@ -174,12 +176,18 @@ onMounted(() => {
       }
     }
   })
+  unsubGate = wsStore.on('quality_gate_update', (data: any) => {
+    if (selectedTask.value?.id === data.task_id && taskDetail.value) {
+      taskDetail.value.quality_gate = data
+    }
+  })
 })
 
 onUnmounted(() => {
   if (unsubTask) unsubTask()
   if (unsubProgress) unsubProgress()
   if (unsubStage) unsubStage()
+  if (unsubGate) unsubGate()
 })
 
 watch(() => store.currentProject?.id, async (pid) => {
@@ -336,6 +344,37 @@ async function approveReview() {
     if (selectedTask.value) await selectTask(selectedTask.value)
     await loadTasks()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '操作失败')) }
+}
+
+const rejectingGate = ref(false)
+const retryingGate = ref(false)
+async function rejectFailedQualityGate() {
+  if (!taskDetail.value?.review) return
+  rejectingGate.value = true
+  try {
+    await api.post(`/reviews/${taskDetail.value.review.id}/reject-quality-gate`)
+    MessagePlugin.warning('已将门禁失败明细打回，Agent 正在修改')
+    await selectTask(selectedTask.value)
+    await loadTasks()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '打回 Agent 失败'))
+  } finally {
+    rejectingGate.value = false
+  }
+}
+
+async function rerunQualityGate() {
+  if (!taskDetail.value?.review) return
+  retryingGate.value = true
+  try {
+    await api.post(`/reviews/${taskDetail.value.review.id}/rerun-quality-gate`)
+    MessagePlugin.success('确定性门禁已重新执行')
+    await selectTask(selectedTask.value)
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '重新执行门禁失败'))
+  } finally {
+    retryingGate.value = false
+  }
 }
 
 const feedbackDialogVisible = ref(false)
@@ -764,8 +803,23 @@ async function resumeTask(task: any, event: Event) {
           </div>
 
           <div v-if="taskDetail.merge_error" class="detail-section">
-            <h4 class="detail-label">合并信息</h4>
+            <h4 class="detail-label">门禁 / 合并信息</h4>
             <div class="desc-box">{{ taskDetail.merge_error }}</div>
+          </div>
+
+          <div
+            v-if="taskDetail.quality_gate || ['merge_queued','integrating','merge_blocked','approved'].includes(taskDetail.status)"
+            class="detail-section"
+          >
+            <QualityGatePanel
+              :gate="taskDetail.quality_gate"
+              :can-reject="taskDetail.review?.status === 'pending' && taskDetail.quality_gate?.status === 'failed'"
+              :can-retry="taskDetail.review?.status === 'pending' && taskDetail.quality_gate?.status === 'failed'"
+              :rejecting="rejectingGate"
+              :retrying="retryingGate"
+              @reject="rejectFailedQualityGate"
+              @retry="rerunQualityGate"
+            />
           </div>
 
           <div v-if="loadingDetail" class="loading-box">
@@ -807,7 +861,12 @@ async function resumeTask(task: any, event: Event) {
                 >{{ showReviewDiff ? '收起代码' : '展开代码' }}</button>
                 <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
                   <t-button size="small" theme="warning" variant="outline" @click="openRejectDialog">驳回并修改</t-button>
-                  <t-button size="small" theme="success" @click="approveReview">通过</t-button>
+                  <t-button
+                    size="small"
+                    theme="success"
+                    :disabled="taskDetail.quality_gate?.status !== 'passed'"
+                    @click="approveReview"
+                  >通过</t-button>
                   <t-button size="small" theme="default" variant="text" @click="closeReview">结束</t-button>
                 </div>
               </div>

@@ -8,6 +8,10 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.9
 httpx==0.28.1
 gitpython==3.1.43
+# Deterministic quality-gate runtime
+pytest>=8.0,<9.0
+pytest-cov>=5.0,<8.0
+pip-audit==2.7.3
 crewai==0.80.0
 chromadb==0.5.0
 # Optional: Claude Code runner (Anthropic official SDK)
