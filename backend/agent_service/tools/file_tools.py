@@ -1,8 +1,48 @@
 """Custom CrewAI tools for file operations inside a workspace."""
 
+import os
+import re
+
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from app.services import git_service as git
+
+# Characters that are illegal in file/dir names on Windows (and undesirable
+# elsewhere). Control characters are covered by the regex as well.
+_INVALID_FS_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitize_write_path(path: str) -> str:
+    """Normalize a model-supplied filepath so it cannot land on disk as an
+    odd/garbage path such as ``/347/231/report.md``.
+
+    Models sometimes emit numeric or empty path segments (e.g. when they treat
+    section/step ids as directory names). We:
+      * collapse back-slashes to forward slashes and drop empty/``.``/``..`` segments
+      * replace filesystem-illegal characters with ``_``
+      * strip trailing dots/spaces (illegal on Windows)
+      * drop pure-numeric intermediate segments (almost never a real directory,
+        usually model noise) — the final filename segment is kept even if it is
+        numeric so a legitimate ``notes.md``-style file is preserved
+    """
+    raw = (path or "").strip().replace("\\", "/")
+    segments = [s for s in raw.split("/") if s not in ("", ".", "..")]
+    cleaned: list[str] = []
+    for seg in segments:
+        seg = _INVALID_FS_CHARS.sub("_", seg).strip().rstrip(".")
+        if not seg:
+            continue
+        # Drop pure-numeric segments except when it is the final filename part.
+        if seg.isdigit() and len(cleaned) > 0:
+            continue
+        cleaned.append(seg)
+    if not cleaned:
+        # Everything was dropped — fall back to a safe default, preserving the
+        # intended extension if one was present.
+        ext = (path or "").rsplit(".", 1)[-1].lower()
+        fallback = f"untitled.{ext}" if "." in (path or "") else "untitled"
+        return fallback
+    return "/".join(cleaned)
 
 
 class FileReadInput(BaseModel):
@@ -59,5 +99,6 @@ class FileWriteTool(BaseTool):
     workspace: str = ""
 
     def _run(self, path: str, content: str) -> str:
-        target = git.write_file(self.workspace, path, content)
+        safe_path = _sanitize_write_path(path)
+        target = git.write_file(self.workspace, safe_path, content)
         return f"File written: {target}"

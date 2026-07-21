@@ -1,4 +1,4 @@
-import sys
+import sys, io
 
 # ── Windows UTF-8 safeguard ──────────────────────────────────────────────
 # On Windows the default console encoding is GBK, which cannot encode many
@@ -6,13 +6,23 @@ import sys
 # raises UnicodeEncodeError and aborts the whole agent pipeline. Force UTF-8
 # for stdout/stderr so third-party output (CrewAI, rich, etc.) never crashes,
 # regardless of how uvicorn is launched.
-try:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    if hasattr(sys.stderr, "reconfigure"):
-        sys.stderr.reconfigure(encoding="utf-8")
-except Exception:
-    pass
+#
+# NOTE: sys.stdout.reconfigure(encoding="utf-8") raises UnsupportedOperation on
+# a Windows console, so we instead wrap the underlying binary buffer with a
+# UTF-8 TextIOWrapper. This works on every launch method (uvicorn, start.ps1,
+# debuggers) and never crashes on emoji/unicode output.
+def _force_utf8(stream):
+    try:
+        return io.TextIOWrapper(stream.buffer, encoding="utf-8", errors="replace")
+    except Exception:
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        return stream
+
+sys.stdout = _force_utf8(sys.stdout)
+sys.stderr = _force_utf8(sys.stderr)
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI

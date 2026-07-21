@@ -207,6 +207,7 @@ def _run_agent_pipeline(
 
         # Resolve the parent task (if this task is a child in a planning tree).
         parent = db.get(Task, task.parent_task_id) if task.parent_task_id else None
+        child = parent is not None
 
         if parent is not None:
             # CHILD TASK: every child reuses the parent's single worktree and
@@ -214,11 +215,11 @@ def _run_agent_pipeline(
             # the parent later aggregates into a single review.
             workspace = parent.worktree_path or git.default_task_worktree_path(project.workspace_path, parent.id)
             branch_name = parent.branch_name or f"task/{parent.id}"
+            ok, error = git.ensure_worktree(project.workspace_path, workspace, branch_name)
+            if not ok:
+                _fail_task_child_aware(db, task, f"无法创建/修复父任务工作树：{error}", project_id)
+                return
             if not parent.worktree_path:
-                created, error = git.create_task_worktree(project.workspace_path, workspace, branch_name)
-                if not created:
-                    _fail_task_child_aware(db, task, f"无法创建父任务工作树：{error}", project_id)
-                    return
                 parent.worktree_path = workspace
                 parent.branch_name = branch_name
                 parent.base_commit = git.head_commit(project.workspace_path, git.get_base_branch(project.workspace_path))
@@ -234,15 +235,16 @@ def _run_agent_pipeline(
             if conflict_resolution and not git.get_repo(workspace):
                 _fail_task_child_aware(db, task, "Conflict worktree not found", project_id)
                 return
-            if not conflict_resolution and not task.worktree_path:
-                created, error = git.create_task_worktree(project.workspace_path, workspace, branch_name)
-                if not created:
+            if not conflict_resolution:
+                ok, error = git.ensure_worktree(project.workspace_path, workspace, branch_name)
+                if not ok:
                     _fail_task_child_aware(db, task, f"Could not create task worktree: {error}", project_id)
                     return
-                task.worktree_path = workspace
-                task.branch_name = branch_name
-                task.base_commit = git.head_commit(project.workspace_path, git.get_base_branch(project.workspace_path))
-                db.commit()
+                if not task.worktree_path:
+                    task.worktree_path = workspace
+                    task.branch_name = branch_name
+                    task.base_commit = git.head_commit(project.workspace_path, git.get_base_branch(project.workspace_path))
+                    db.commit()
             if not conflict_resolution:
                 _progress(task_id, project_id, f"🌿 切换到已有工作分支：{branch_name}", "branch")
                 git.switch_branch(workspace, branch_name)
@@ -559,6 +561,7 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
     """Create the Review + voting round + quality gate for *task* and move it
     to REVIEWING.  Shared by top-level tasks and the parent of a planning tree.
     """
+    from app.api.ws import broadcast_sync
     project_id = task.project_id
 
     review = Review(

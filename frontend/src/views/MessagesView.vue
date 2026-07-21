@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import api from '../api'
 import { useMessageStore } from '../stores/message'
+import { useNotificationStore } from '../stores/notification'
 
 interface MessageItem {
   id: number
@@ -22,10 +23,12 @@ type TabKey = 'all' | 'system' | 'task' | 'review' | 'member' | 'version'
 
 const router = useRouter()
 const msgStore = useMessageStore()
+const notifStore = useNotificationStore()
 const messages = ref<MessageItem[]>([])
 const loading = ref(false)
 const activeTab = ref<TabKey>('all')
 const unreadTotal = ref(0)
+const mounted = ref(false)
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -88,6 +91,24 @@ async function markAllRead() {
     MessagePlugin.success('已全部标为已读')
   } catch {
     MessagePlugin.error('操作失败')
+  }
+}
+
+async function markAllSeen() {
+  // 进入消息中心即视为已读，静默清除统一通知红点，避免“看过仍提示”的反复红点。
+  const hadUnread = unreadTotal.value > 0 || notifStore.chatUnread > 0
+  // 乐观更新：无论后端 read-all 是否成功，本地先清零，确保红点不会因接口
+  // 偶发失败（如“服务暂时不可用”那类 5xx）而残留不消失。
+  messages.value.forEach((m) => (m.read = true))
+  unreadTotal.value = 0
+  notifStore.resetChatUnread()
+  msgStore.unreadCount = 0
+  if (!hadUnread) return
+  try {
+    await api.post('/messages/read-all')
+    await msgStore.refresh()
+  } catch {
+    /* ignore: 本地已乐观清零，红点不会卡住 */
   }
 }
 
@@ -158,8 +179,9 @@ async function handleJoinAction(msg: MessageItem, action: 'approve' | 'reject') 
   }
 }
 
-function openLink(link: string) {
-  if (link) router.push(link)
+function openLink(m: MessageItem) {
+  if (m && !m.read) markRead(m.id)
+  if (m.link) router.push(m.link)
 }
 
 function fmtTime(iso: string | null): string {
@@ -177,17 +199,26 @@ watch(
   () => wsStore.connected,
   (ok) => {
     if (ok && !unsubMsg) {
-      unsubMsg = wsStore.on('message_new', () => {
-        load()
-        msgStore.refresh()
+      unsubMsg = wsStore.on('message_new', async () => {
+        await load()
+        // 用户在消息中心查看期间，新消息立即视为已读，红点不会重新亮起
+        if (mounted.value) markAllSeen()
       })
     }
   },
   { immediate: true },
 )
 
-onMounted(load)
-onUnmounted(() => { unsubMsg?.() })
+onMounted(async () => {
+  mounted.value = true
+  await load()
+  // 进入消息中心即视为已读，清除统一通知红点（提示消息“看过即消失”）
+  await markAllSeen()
+})
+onUnmounted(() => {
+  mounted.value = false
+  unsubMsg?.()
+})
 </script>
 
 <template>
@@ -249,7 +280,7 @@ onUnmounted(() => { unsubMsg?.() })
         :key="m.id"
         class="msg-card"
         :class="{ unread: !m.read, clickable: !!m.link && !parseJoinRequest(m.link) }"
-        @click="m.link && !parseJoinRequest(m.link) ? openLink(m.link) : null"
+        @click="m.link && !parseJoinRequest(m.link) ? openLink(m) : null"
       >
         <div class="msg-main">
           <div class="msg-top">

@@ -96,6 +96,8 @@ class CrewAIRunner(BaseRunner):
         max_subtasks: int = 6,
         on_progress: ProgressCallback | None = None,
         on_stage: StageCallback | None = None,
+        reviewer_prompt: str | None = None,
+        security_prompt: str | None = None,
     ) -> RunResult:
         """Build and execute the CrewAI review DAG.
 
@@ -131,10 +133,12 @@ class CrewAIRunner(BaseRunner):
                 crew = self._build_planned_crew(
                     plan_steps, workspace, model_name, task_id, project_id, agent_id,
                     on_progress, on_stage, stage_state,
+                    reviewer_prompt, security_prompt,
                 )
             else:
                 crew = self._build_crew(workspace, model_name, task_id, project_id, agent_id,
-                                         on_progress, on_stage, stage_state)
+                                         on_progress, on_stage, stage_state,
+                                         reviewer_prompt, security_prompt)
             if on_progress and not plan_steps:
                 on_progress("⚙️  第 1/4 步：代码工程师正在生成代码...", "step_1_codegen")
                 on_progress("🔍 Agent 正在查看现有代码结构，分析需求...", "step_1_detail")
@@ -182,13 +186,16 @@ class CrewAIRunner(BaseRunner):
                     task_id: int, project_id: int, agent_id: int,
                     on_progress: ProgressCallback | None,
                     on_stage: StageCallback | None,
-                    stage_state: dict[str, str]) -> Crew:
+                    stage_state: dict[str, str],
+                    reviewer_prompt: str | None = None,
+                    security_prompt: str | None = None) -> Crew:
         """Build code generation → parallel reviews → summary."""
 
         # Tools
         tools = self._make_tools(workspace, task_id, project_id, agent_id)
         llm_kwargs = self._make_llm_kwargs(model_name)
-        code_gen, reviewer, security, summarizer = self._make_agents(llm_kwargs, tools)
+        code_gen, reviewer, security, summarizer = self._make_agents(
+            llm_kwargs, tools, reviewer_prompt, security_prompt)
 
         # ── Tasks ───────────────────────────────────────────────────
 
@@ -417,7 +424,9 @@ class CrewAIRunner(BaseRunner):
             }
         return llm_kwargs
 
-    def _make_agents(self, llm_kwargs: dict, tools: dict):
+    def _make_agents(self, llm_kwargs: dict, tools: dict,
+                     reviewer_prompt: str | None = None,
+                     security_prompt: str | None = None):
         """Build the four role agents (code-gen + 3 reviewers)."""
         code_gen = Agent(
             role="代码工程师",
@@ -447,7 +456,7 @@ class CrewAIRunner(BaseRunner):
 
         reviewer = Agent(
             role="代码审查员",
-            goal="审查代码质量：检查逻辑错误、命名规范、潜在bug和代码风格",
+            goal=reviewer_prompt if reviewer_prompt else "审查代码质量：检查逻辑错误、命名规范、潜在bug和代码风格",
             backstory=(
                 "你是一位严格的代码审查专家，有10年以上的代码审查经验。"
                 "你会仔细检查每一行代码，关注：逻辑是否正确、命名是否清晰、"
@@ -463,7 +472,7 @@ class CrewAIRunner(BaseRunner):
 
         security = Agent(
             role="安全审查员",
-            goal="检查代码中的安全漏洞：注入攻击、越权访问、敏感信息泄露、不安全加密",
+            goal=security_prompt if security_prompt else "检查代码中的安全漏洞：注入攻击、越权访问、敏感信息泄露、不安全加密",
             backstory=(
                 "你是一位资深安全工程师，精通OWASP十大安全风险。"
                 "你会检查：SQL注入、XSS、命令注入、路径遍历、硬编码密钥、"
@@ -501,6 +510,7 @@ class CrewAIRunner(BaseRunner):
         task_id: int, project_id: int, agent_id: int,
         on_progress: ProgressCallback | None, on_stage: StageCallback | None,
         stage_state: dict[str, str],
+        reviewer_prompt: str | None = None, security_prompt: str | None = None,
     ) -> Crew:
         """Drive the model-produced ``plan_steps`` with the same review DAG.
 
@@ -511,7 +521,8 @@ class CrewAIRunner(BaseRunner):
         """
         tools = self._make_tools(workspace, task_id, project_id, agent_id)
         llm_kwargs = self._make_llm_kwargs(model_name)
-        code_gen, reviewer, security, summarizer = self._make_agents(llm_kwargs, tools)
+        code_gen, reviewer, security, summarizer = self._make_agents(
+            llm_kwargs, tools, reviewer_prompt, security_prompt)
 
         plan_overview = "\n".join(f"{s.id}. {s.title} —— {s.goal}" for s in plan_steps)
 

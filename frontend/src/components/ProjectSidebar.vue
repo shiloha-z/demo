@@ -139,11 +139,9 @@ const icons: Record<string, string> = {
         <span class="nav-icon-wrap">
           <span class="nav-icon" v-html="icons[item.icon]"></span>
           <span v-if="item.badge && pendingCount > 0 && collapsed" class="nav-badge-dot"></span>
-          <span v-if="item.path === '/messages' && msgStore.unreadCount > 0 && collapsed" class="nav-badge-dot"></span>
         </span>
         <span class="nav-label" :class="{ 'fade-out': collapsed }">{{ item.label }}</span>
         <span v-if="item.badge && pendingCount > 0" class="nav-badge" :class="{ 'fade-out': collapsed }">{{ pendingCount }}</span>
-        <span v-if="item.path === '/messages' && msgStore.unreadCount > 0" class="nav-badge" :class="{ 'fade-out': collapsed }">{{ msgStore.unreadCount }}</span>
       </router-link>
     </div>
   </nav>

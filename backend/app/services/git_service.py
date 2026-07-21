@@ -6,7 +6,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from git import Repo, GitCommandError, InvalidGitRepositoryError
+from git import Repo, GitCommandError, InvalidGitRepositoryError, NoSuchPathError
 
 
 _WORKSPACE_LOCKS: dict[str, RLock] = {}
@@ -78,10 +78,19 @@ def init_repo(path: str) -> Repo:
 
 
 def get_repo(workspace: str) -> Repo | None:
-    """Get Repo object, or None if not found."""
+    """Get Repo object, or None if not found / not a valid, usable repository.
+
+    Catches InvalidGitRepositoryError too, so an "orphaned" worktree (working
+    directory present but its gitdir pruned) is treated as missing rather than
+    raising and crashing the caller.  We also run a real Git command because
+    GitPython constructs a Repo object for an orphaned worktree without error,
+    yet every actual command then fails with "not a git repository".
+    """
     try:
-        return Repo(workspace)
-    except GitCommandError:
+        repo = Repo(workspace)
+        repo.git.rev_parse("--is-inside-work-tree")
+        return repo
+    except (GitCommandError, InvalidGitRepositoryError, NoSuchPathError, OSError):
         return None
 
 
@@ -150,6 +159,60 @@ def create_task_worktree(base_workspace: str, worktree_path: str, branch_name: s
             return True, ""
         except GitCommandError as exc:
             return False, str(exc)
+
+
+def ensure_worktree(base_workspace: str, worktree_path: str, branch_name: str) -> tuple[bool, str]:
+    """Ensure *worktree_path* is a usable Git worktree for *branch_name*.
+
+    Unlike ``create_task_worktree`` this also *repairs* worktrees whose Git
+    metadata (gitdir) was pruned/removed while the working directory is still
+    present on disk -- an "orphaned" worktree.  Repairing preserves any files
+    already written into the worktree so no agent work is lost.
+
+    Returns ``(ok, error)``.
+    """
+    import shutil
+
+    path = Path(worktree_path)
+    # Already a valid, registered worktree -> nothing to do.
+    if path.exists() and get_repo(str(path)):
+        return True, ""
+    if not path.exists():
+        return create_task_worktree(base_workspace, worktree_path, branch_name)
+
+    # Orphaned worktree: working dir present but gitdir pruned.  Back up the
+    # working files, recreate the worktree cleanly, then restore the files.
+    backup = path.parent / (path.name + ".repair.bak")
+    if backup.exists():
+        shutil.rmtree(str(backup), ignore_errors=True)
+    try:
+        shutil.move(str(path), str(backup))
+    except OSError as exc:
+        return False, f"无法备份损坏的工作树：{exc}"
+    ok, err = create_task_worktree(base_workspace, worktree_path, branch_name)
+    if not ok:
+        # Restore the backup so agent work is not lost.
+        if not path.exists():
+            try:
+                shutil.move(str(backup), str(path))
+            except OSError:
+                pass
+        return False, err
+    # Restore working files (skip the freshly-created .git link).
+    for entry in os.listdir(str(backup)):
+        if entry == ".git":
+            continue
+        src = os.path.join(str(backup), entry)
+        dst = os.path.join(str(path), entry)
+        try:
+            if os.path.isdir(src):
+                shutil.copytree(src, dst)
+            else:
+                shutil.copy2(src, dst)
+        except OSError:
+            pass
+    shutil.rmtree(str(backup), ignore_errors=True)
+    return True, ""
 
 
 def remove_task_worktree(base_workspace: str, worktree_path: str) -> bool:
