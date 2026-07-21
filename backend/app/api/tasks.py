@@ -15,7 +15,7 @@ from app.services import git_service as git
 from app.services import quality_gate_service as quality_gates
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
-from agent_service.planner import plan_task
+from agent_service.planner import plan_task, collect_project_context
 
 
 router = APIRouter(prefix="/api/projects/{project_id}/tasks", tags=["Tasks"])
@@ -461,6 +461,7 @@ def plan_task_endpoint(
         settings.DEEPSEEK_API_KEY,
         settings.DEEPSEEK_BASE_URL,
         int(agent.max_subtasks) if agent.max_subtasks else 6,
+        project_context=collect_project_context(project.workspace_path),
     )
     if not steps:
         raise HTTPException(status_code=422, detail="规划模型未能生成可用子任务，请稍后重试或手动创建子任务")

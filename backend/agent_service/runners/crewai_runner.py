@@ -16,7 +16,7 @@ from agent_service.tools.memory_tools import MemorySearchTool, MemoryRecordTool
 from agent_service.tools.quality_gate_tools import QualityGateTool
 
 from .base import BaseRunner, RunResult, ProgressCallback, StageCallback
-from agent_service.planner import plan_task, PlanStep
+from agent_service.planner import plan_task, collect_project_context, PlanStep
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,7 @@ class CrewAIRunner(BaseRunner):
                     task_description, model_name,
                     settings.DEEPSEEK_API_KEY, settings.DEEPSEEK_BASE_URL,
                     max_subtasks,
+                    project_context=collect_project_context(workspace),
                 )
                 if plan_steps:
                     if on_progress:

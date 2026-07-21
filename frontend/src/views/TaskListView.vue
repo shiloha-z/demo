@@ -140,7 +140,13 @@ async function planTask(t: any, ev?: Event) {
       planning.value = new Set(planning.value).add(t.id)
       dialog.hide()
       try {
-        await api.post(`/projects/${filterProjectId.value}/tasks/${t.id}/plan`, { auto_start: true })
+        // 规划是后端同步调用模型，慢模型可能需 1~2 分钟；放宽该请求的超时，
+        // 避免前端全局 30s 限制抢先断开而误报 "规划失败：timeout of 30000ms"。
+        await api.post(
+          `/projects/${filterProjectId.value}/tasks/${t.id}/plan`,
+          { auto_start: true },
+          { timeout: 180000 },
+        )
         MessagePlugin.success('已生成子任务并开始执行')
         await loadTasks()
         const parent = tasks.value.find((x) => x.id === t.id)

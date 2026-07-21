@@ -19,16 +19,119 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 # Planning uses a thinking-disabled, non-reasoning call to stay fast and cheap.
-PLANNER_REQUEST_TIMEOUT_SECONDS = 40
+# Bounded higher than the frontend's per-request timeout so the backend gets to
+# decide (success, or a clear 422 fallback) instead of the client disconnecting
+# first with a bare "timeout of 30000ms exceeded".
+PLANNER_REQUEST_TIMEOUT_SECONDS = 150
+
+# Directories that are never worth showing the planner (deps, caches, VCS).
+_IGNORE_DIRS = {
+    ".git", "node_modules", "__pycache__", ".venv", "venv", "env",
+    "dist", "build", ".codebuddy", ".idea", ".vscode", ".mypy_cache",
+    ".pytest_cache", "target", "bin", "obj", "out", ".next", ".nuxt",
+    "coverage", ".turbo", "site-packages", ".gradle",
+}
+# Files we skip in the structure tree (lockfiles / OS noise).
+_IGNORE_FILES = {".DS_Store", "thumbs.db", "package-lock.json", "yarn.lock"}
+# Only surface source-like files so the tree stays a meaningful, bounded signal.
+_CODE_EXT = {
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".cpp",
+    ".c", ".h", ".cs", ".rb", ".php", ".vue", ".svelte", ".kt", ".swift",
+    ".scala", ".sh", ".sql", ".html", ".css", ".scss", ".less", ".md",
+    ".json", ".yaml", ".yml", ".toml", ".txt", ".cfg", ".ini", ".xml",
+    ".gradle", ".r", ".lua", ".dart",
+}
+# Marker files whose presence names the project's tech stack.
+_STACK_MARKERS = (
+    "package.json", "requirements.txt", "pyproject.toml", "go.mod",
+    "Cargo.toml", "pom.xml", "build.gradle", "composer.json",
+)
+
+
+def collect_project_context(workspace: str, *, max_entries: int = 130, max_depth: int = 4) -> str:
+    """Build a compact, bounded view of ``workspace`` for the planner.
+
+    Returns a tree of source-relevant files plus a one-line tech-stack hint.
+    An empty string is returned when the path is missing, so callers can pass
+    it straight into :func:`plan_task` without branching.  The output is capped
+    on both depth and entry count to keep the planner's input prompt bounded.
+    """
+    root = Path(workspace)
+    if not root.exists() or not root.is_dir():
+        return ""
+
+    tree_lines: list[str] = []
+    count = 0
+
+    def walk(d: Path, depth: int, prefix: str) -> None:
+        nonlocal count
+        if depth > max_depth or count >= max_entries:
+            return
+        try:
+            items = sorted(d.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+        except (PermissionError, OSError):
+            return
+        dirs = [p for p in items if p.is_dir() and p.name not in _IGNORE_DIRS]
+        files = [
+            p for p in items
+            if p.is_file() and p.suffix.lower() in _CODE_EXT and p.name not in _IGNORE_FILES
+        ]
+        rendered = [(p, True) for p in dirs] + [(p, False) for p in files]
+        for i, (p, is_dir) in enumerate(rendered):
+            if count >= max_entries:
+                tree_lines.append(f"{prefix}… (更多文件已省略)")
+                return
+            last = i == len(rendered) - 1
+            connector = "└── " if last else "├── "
+            tree_lines.append(f"{prefix}{connector}{p.name}/" if is_dir else f"{prefix}{connector}{p.name}")
+            count += 1
+            if is_dir:
+                walk(p, depth + 1, prefix + ("    " if last else "│   "))
+
+    walk(root, 0, "")
+    if not tree_lines:
+        return ""
+
+    tree = "\n".join(tree_lines)
+    hint_parts: list[str] = []
+    detected = [m for m in _STACK_MARKERS if (root / m).exists()]
+    if detected:
+        hint_parts.append("检测到：" + ", ".join(detected))
+        # Pull a few dependency names so the planner knows the framework.
+        try:
+            pkg = root / "package.json"
+            if pkg.exists():
+                data = json.loads(pkg.read_text(encoding="utf-8", errors="ignore"))
+                deps = list((data.get("dependencies") or {}).keys())
+                if deps:
+                    hint_parts.append("前端依赖(部分)：" + ", ".join(deps[:12]))
+        except (ValueError, OSError):
+            pass
+        try:
+            req = root / "requirements.txt"
+            if req.exists():
+                libs = [
+                    line.strip().split("==")[0].split(">=")[0]
+                    for line in req.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    if line.strip() and not line.startswith("#")
+                ]
+                if libs:
+                    hint_parts.append("Python依赖(部分)：" + ", ".join(libs[:12]))
+        except OSError:
+            pass
+    hint = ("\n[技术栈线索] " + "；".join(hint_parts)) if hint_parts else ""
+    return f"[项目结构]\n{tree}{hint}"
 
 
 @dataclass(slots=True)
@@ -74,8 +177,14 @@ def plan_task(
     api_key: str,
     base_url: str,
     max_subtasks: int = 6,
+    project_context: str = "",
 ) -> Optional[list[PlanStep]]:
     """Ask the model to decompose ``task_description`` into ordered subtasks.
+
+    When ``project_context`` (produced by :func:`collect_project_context`) is
+    supplied, the model decomposes the task against the *actual* project
+    structure instead of from scratch, yielding steps that name concrete
+    files/modules and avoid redundant discovery work.
 
     Returns a dependency-ordered list of :class:`PlanStep`, or ``None`` when the
     model could not produce a usable plan (caller should fall back).
@@ -84,26 +193,37 @@ def plan_task(
         return None
 
     system_prompt = (
-        "你是一个任务规划助手。用户会给你一个软件开发任务，你需要把它拆解成"
-        "若干个相互独立、可逐步验证的子步骤。\n"
+        "你是一个资深软件架构师的助手。用户会给你一个软件开发任务，并可能附带"
+        "项目结构。请把它拆解成若干个相互独立、可逐步验证、且能落到具体代码上的子步骤。\n"
         "只输出 JSON，不要输出任何解释文字。JSON 结构必须严格为：\n"
-        "{\"steps\": [ {\"id\": 1, \"title\": \"步骤标题\", \"goal\": \"该步骤要达成的具体目标\", "
+        "{\"steps\": [ {\"id\": 1, \"title\": \"步骤标题\", \"goal\": \"该步骤要达成的具体目标（写明要新建/修改的文件或模块与预期产物）\", "
         "\"deps\": []} ]}\n"
         "要求：\n"
         "1. id 从 1 开始连续递增，且每个 id 在 steps 中唯一；\n"
         "2. deps 是该步骤依赖的其他步骤 id 数组（空数组表示无依赖，可最先执行）；"
         "不要引用不存在的 id；\n"
-        "3. 步骤数量控制在 2 到上限之间，先调研/理解现状，再实现，最后自检；\n"
-        "4. 每个步骤都应是 Agent 可以通过写文件、运行命令来完成的真实工作，不要拆解成"
-        "过度细碎的元步骤。\n"
-        "5. 不要包含任何需要人工确认或外部系统审批才能继续的步骤。"
+        "3. 步骤数量控制在 2 到上限之间；\n"
+        "4. 每个步骤必须是「会产生代码改动」的工作：在 goal 中明确要新建或修改哪些"
+        "文件/模块，以及完成后应有的产物（例如“在 src/api/auth.py 新增登录接口，并补充单元测试”）。"
+        "不要拆出没有代码产物的纯调研/讨论步骤——若必须先了解现状，请把调研压缩进实现步骤"
+        "（例如“阅读 src/db.py 后，在其基础上新增 User 模型”），而不是单独作为一个步骤；\n"
+        "5. 步骤之间尽量解耦；当一个步骤的产物是下一步的输入（如先建模型再写接口）时，"
+        "用 deps 表达依赖。不要出现循环依赖；\n"
+        "6. 若项目结构中能看出相关文件，优先复用/扩展现有文件与约定，避免重复造轮子；\n"
+        "7. 不要包含任何需要人工确认或外部系统审批才能继续的步骤。"
     )
 
+    user_content = (
+        f"请基于下面的项目结构拆解任务（若未提供结构，则按任务描述合理拆解）：\n\n"
+        f"{project_context}\n\n【任务】\n{task_description}"
+        if project_context else
+        f"请拆解以下任务：\n{task_description}"
+    )
     payload = {
         "model": model_name,
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"请拆解以下任务：\n{task_description}"},
+            {"role": "user", "content": user_content},
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
