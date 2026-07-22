@@ -58,3 +58,10 @@ backend/server_log.txt
 frontend/frontend_err.txt
 frontend/frontend_log.txt
 frontend/ftsc.txt
+
+# Agent plans / local metadata (keep locally, never commit)
+.codebuddy/plans/
+
+# Build test artifacts
+backend/_buildtest.txt
+_buildtest.txt

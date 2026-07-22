@@ -140,6 +140,7 @@ async function submit() {
   padding: 60px;
   max-width: 460px;
   color: #fff;
+  animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) both;
 }
 
 .brand-logo {
@@ -231,6 +232,12 @@ async function submit() {
   width: 100%;
   max-width: 340px;
   padding: 40px;
+  animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
 }
 
 .login-header {

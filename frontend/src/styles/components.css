@@ -227,3 +227,38 @@
 }
 .list-enter-from { opacity: 0; transform: translateY(12px); }
 .list-leave-to { opacity: 0; transform: translateX(-16px); }
+
+/* ── Themed scrollbars ─────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--surface-border);
+  border-radius: 99px;
+  border: 2px solid var(--surface);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--muted-foreground);
+}
+
+/* ── Text selection ────────────────────────────────────────────── */
+::selection {
+  background: var(--primary-light);
+  color: var(--foreground);
+}
+
+/* ── Smooth theme toggle ───────────────────────────────────────── */
+/* Active only during a dark/light switch so normal hover states stay snappy. */
+html.theme-anim,
+html.theme-anim * {
+  transition: background-color 0.32s ease, border-color 0.32s ease,
+    color 0.32s ease, fill 0.32s ease, box-shadow 0.32s ease !important;
+}
