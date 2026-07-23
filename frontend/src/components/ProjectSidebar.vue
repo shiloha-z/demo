@@ -92,12 +92,6 @@ const sections = [
       { path: '/risk-dashboard', icon: 'chart', label: '风险驾驶舱' },
     ],
   },
-  {
-    label: '系统',
-    items: [
-      { path: '/messages', icon: 'bell', label: '消息中心', badge: true },
-    ],
-  },
 ]
 
 const activePath = computed(() => route.path)
