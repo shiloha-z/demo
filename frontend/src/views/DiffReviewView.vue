@@ -38,6 +38,7 @@ const statusColors: Record<string, string> = {
 }
 
 let unsubReview: (() => void) | null = null
+let unsubVote: (() => void) | null = null
 let unsubGate: (() => void) | null = null
 
 onMounted(() => {
@@ -47,7 +48,7 @@ onMounted(() => {
       loadReviews()
     }
   })
-  wsStore.on('review_vote_update', (data: any) => {
+  unsubVote = wsStore.on('review_vote_update', (data: any) => {
     if (selectedReview.value?.id === data.review_id) voteSummary.value = data
   })
   unsubGate = wsStore.on('quality_gate_update', (data: any) => {
@@ -57,6 +58,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (unsubReview) unsubReview()
+  if (unsubVote) unsubVote()
   if (unsubGate) unsubGate()
 })
 

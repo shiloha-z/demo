@@ -436,16 +436,16 @@ def _run_agent_pipeline(
         logger.exception(f"Task {task_id} failed")
         try:
             _fail_task_child_aware(db, task, str(e), project_id)
-        except Exception:
-            pass
+        except Exception as fail_err:
+            logger.warning("Failed to propagate task failure to parent/children", exc_info=fail_err)
     finally:
         # Clean up the per-task (ephemeral) memory collection so ChromaDB does
         # not accumulate orphaned collections after every run.
         if mem:
             try:
                 mem.delete_task_memory(task_id)
-            except Exception:
-                pass
+            except Exception as mem_err:
+                logger.warning("Failed to clean up task memory after failure", exc_info=mem_err)
         db.close()
 
 
@@ -707,8 +707,8 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
             project_id=project_id,
             link=f"/reviews?task_id={task.id}",
         )
-    except Exception:
-        pass
+    except Exception as msg_err:
+        logger.warning("Failed to push review notification message", exc_info=msg_err)
 
     logger.info(f"Task {task.id} [{runner_type}] reviewing, review #{review.id} stored")
 
@@ -717,8 +717,8 @@ def _free_child_agents(db, children):
     for c in children:
         try:
             _maybe_idle_agent(db, c.agent_id)
-        except Exception:
-            pass
+        except Exception as free_err:
+            logger.warning("Failed to release child agent after parent failure", exc_info=free_err)
 
 
 def _maybe_idle_agent(db, agent_id: int) -> None:
@@ -735,8 +735,8 @@ def _maybe_idle_agent(db, agent_id: int) -> None:
         try:
             from app.api.ws import broadcast_sync
             broadcast_sync("agent_update", {"id": agent_id, "status": "idle"})
-        except Exception:
-            pass
+        except Exception as bcast_err:
+            logger.warning("Failed to broadcast agent idle update", exc_info=bcast_err)
 
 
 def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
@@ -799,5 +799,5 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
             project_id=project_id,
             link=f"/tasks",
         )
-    except Exception:
-        pass
+    except Exception as msg_err:
+        logger.warning("Failed to push task-failure notification message", exc_info=msg_err)

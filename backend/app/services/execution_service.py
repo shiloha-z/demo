@@ -12,6 +12,10 @@ from threading import BoundedSemaphore, RLock
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.models.models import Agent, AgentStatus, Task, TaskStatus
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 
 _agent_executor = ThreadPoolExecutor(max_workers=max(1, settings.AGENT_MAX_CONCURRENCY))
@@ -87,8 +91,8 @@ def enqueue_agent_run(
                 )
         finally:
             adb.close()
-    except Exception:
-        pass
+    except Exception as audit_err:
+        logger.warning("Failed to record agent-dispatch audit entry", exc_info=audit_err)
     return True
 
 
@@ -117,8 +121,8 @@ def _release_paused_agent(task_id: int) -> None:
             try:
                 from app.api.ws import broadcast_sync
                 broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
-            except Exception:
-                pass
+            except Exception as bcast_err:
+                logger.warning("Failed to broadcast agent idle update", exc_info=bcast_err)
     finally:
         db.close()
 
