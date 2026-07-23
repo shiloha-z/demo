@@ -45,7 +45,8 @@ def _request(method: str, path: str, **kwargs: Any) -> dict[str, Any]:
         except ValueError:
             detail = ""
         if response.status_code == 401:
-            raise SkillHubError("SkillHub API Key was rejected")
+            msg = detail or "the API key was rejected by SkillHub"
+            raise SkillHubError(f"SkillHub API Key was rejected: {msg}")
         if response.status_code == 429:
             raise SkillHubError("SkillHub rate limit reached; please retry shortly")
         raise SkillHubError(detail or f"SkillHub returned HTTP {response.status_code}")
