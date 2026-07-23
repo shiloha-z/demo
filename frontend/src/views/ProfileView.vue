@@ -102,6 +102,7 @@ function handleAvatarLoadError() {
         <label class="profile-avatar-wrap" :class="{ uploading: avatarUploading }">
           <img
             v-if="profile.avatar_url"
+            v-image-loading="profile.avatar_url"
             :src="profile.avatar_url"
             class="profile-avatar-img"
             @error="handleAvatarLoadError"

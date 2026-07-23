@@ -206,17 +206,82 @@
 
 /* ── Route transition ──────────────────────────────────────────── */
 .fade-slide-enter-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
 }
 .fade-slide-leave-active {
-  transition: opacity 0.15s ease;
+  transition:
+    opacity 90ms var(--motion-ease-exit),
+    transform 90ms var(--motion-ease-exit);
 }
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translateY(5px) scale(0.997);
 }
 .fade-slide-leave-to {
   opacity: 0;
+  transform: translateY(-2px);
+}
+
+.overlay-fade-enter-active,
+.overlay-fade-leave-active {
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
+}
+.overlay-fade-enter-from,
+.overlay-fade-leave-to {
+  opacity: 0;
+}
+
+.menu-pop-enter-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
+}
+.menu-pop-leave-active {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.menu-pop-enter-from,
+.menu-pop-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+}
+
+.inline-rise-enter-active,
+.inline-rise-leave-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-base) var(--motion-ease-standard);
+}
+.inline-rise-enter-from,
+.inline-rise-leave-to {
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+.drawer-slide-enter-active,
+.drawer-slide-leave-active {
+  transition: background-color var(--motion-slow) var(--motion-ease-standard);
+}
+.drawer-slide-enter-active > :last-child,
+.drawer-slide-leave-active > :last-child {
+  transition:
+    transform var(--motion-slow) var(--motion-ease-enter),
+    opacity var(--motion-base) var(--motion-ease-standard);
+}
+.drawer-slide-leave-active > :last-child {
+  transition-timing-function: var(--motion-ease-exit);
+}
+.drawer-slide-enter-from,
+.drawer-slide-leave-to {
+  background-color: transparent !important;
+}
+.drawer-slide-enter-from > :last-child,
+.drawer-slide-leave-to > :last-child {
+  opacity: 0.7;
+  transform: translateX(32px);
 }
 
 /* ── Responsive ────────────────────────────────────────────────── */
@@ -247,14 +312,22 @@
 }
 
 /* ── List item transitions ────────────────────────────────────── */
-.list-move { transition: transform 0.3s ease; }
-.list-enter-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.list-move {
+  transition: transform var(--motion-slow) var(--motion-ease-standard);
+}
+.list-enter-active {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
+}
 .list-leave-active {
-  transition: opacity 0.2s ease, transform 0.2s ease;
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
   position: absolute;
 }
-.list-enter-from { opacity: 0; transform: translateY(12px); }
-.list-leave-to { opacity: 0; transform: translateX(-16px); }
+.list-enter-from { opacity: 0; transform: translateY(6px) scale(0.99); }
+.list-leave-to { opacity: 0; transform: translateY(-4px) scale(0.99); }
 
 /* ── Themed scrollbars ─────────────────────────────────────────── */
 * {

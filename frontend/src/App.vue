@@ -10,6 +10,7 @@ import { useMessageStore } from './stores/message'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
 import NotificationDropdown from './components/NotificationDropdown.vue'
+import GlobalLoadingBar from './components/GlobalLoadingBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -125,17 +126,21 @@ function handleLogout() {
 </script>
 
 <template>
+  <GlobalLoadingBar />
+
   <!-- Login page: full-screen, no chrome -->
   <router-view v-if="isLoginPage" />
 
   <!-- Main app: sidebar + top bar + content -->
   <div v-else class="app-root">
-    <button
-      v-if="mobileSidebarOpen"
-      class="mobile-sidebar-backdrop"
-      aria-label="关闭导航"
-      @click="mobileSidebarOpen = false"
-    />
+    <Transition name="overlay-fade">
+      <button
+        v-if="mobileSidebarOpen"
+        class="mobile-sidebar-backdrop"
+        aria-label="关闭导航"
+        @click="mobileSidebarOpen = false"
+      />
+    </Transition>
     <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileSidebarOpen }">
       <div class="sidebar-header">
         <div class="sidebar-logo">
@@ -167,7 +172,12 @@ function handleLogout() {
       <!-- Footer — always clickable, user info fades on collapse -->
       <div class="sidebar-footer">
         <div class="sidebar-user" @click="toggleUserMenu">
-          <img v-if="auth.avatarUrl" :src="auth.avatarUrl" class="user-avatar-img" />
+          <img
+            v-if="auth.avatarUrl"
+            v-image-loading="auth.avatarUrl"
+            :src="auth.avatarUrl"
+            class="user-avatar-img"
+          />
           <span v-else class="user-avatar">{{ auth.displayName?.charAt(0) || '?' }}</span>
           <div class="user-info">
             <div class="user-name">{{ auth.displayName }}</div>
@@ -178,23 +188,27 @@ function handleLogout() {
 
         <!-- Dropdown menu -->
         <Teleport to="body">
-          <div v-if="showUserMenu" class="user-menu-backdrop" @click="closeUserMenu" />
+          <Transition name="overlay-fade">
+            <div v-if="showUserMenu" class="user-menu-backdrop" @click="closeUserMenu" />
+          </Transition>
         </Teleport>
-        <div v-if="showUserMenu" class="user-dropdown">
-          <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/profile')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            <span>个人资料设置</span>
-          </button>
-          <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/settings')">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <span>系统设置</span>
-          </button>
-          <div class="user-dropdown-divider"></div>
-          <button class="user-dropdown-item danger" @click="handleLogout">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-            <span>退出登录</span>
-          </button>
-        </div>
+        <Transition name="menu-pop">
+          <div v-if="showUserMenu" class="user-dropdown">
+            <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/profile')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              <span>个人资料设置</span>
+            </button>
+            <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/settings')">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
+              <span>系统设置</span>
+            </button>
+            <div class="user-dropdown-divider"></div>
+            <button class="user-dropdown-item danger" @click="handleLogout">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <span>退出登录</span>
+            </button>
+          </div>
+        </Transition>
       </div>
     </aside>
 
@@ -257,7 +271,7 @@ function handleLogout() {
     </div>
 
     <ChatSidebar v-model:visible="chatVisible" @unread-count="notifStore.incrementChatUnread()" />
-    <NotificationDropdown v-if="notifDropdownVisible" @close="notifDropdownVisible = false" />
+    <NotificationDropdown :visible="notifDropdownVisible" @close="notifDropdownVisible = false" />
   </div>
 </template>
 
@@ -282,7 +296,8 @@ function handleLogout() {
   backdrop-filter: blur(18px);
   border-right: 1px solid var(--surface-border);
   user-select: none;
-  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width var(--motion-slow) var(--motion-ease-standard);
+  will-change: width;
   overflow: hidden;
 }
 
@@ -308,7 +323,7 @@ function handleLogout() {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
   border-radius: 10px;
   background: var(--primary-gradient);
   box-shadow: 0 7px 18px var(--primary-glow);
@@ -320,7 +335,9 @@ function handleLogout() {
   color: var(--foreground);
   letter-spacing: -0.3px;
   white-space: nowrap;
-  transition: opacity 0.2s ease;
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-slow) var(--motion-ease-standard);
 }
 
 .app-sidebar.collapsed .sidebar-header {
@@ -391,7 +408,10 @@ function handleLogout() {
   min-width: 0;
   padding: 12px 14px;
   cursor: pointer;
-  transition: background var(--transition-fast), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), gap 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    background-color var(--transition-fast),
+    padding var(--motion-slow) var(--motion-ease-standard),
+    gap var(--motion-slow) var(--motion-ease-standard);
 }
 
 .sidebar-user:hover {
@@ -431,7 +451,9 @@ function handleLogout() {
   flex: 1;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity 0.2s ease, flex 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    flex var(--motion-slow) var(--motion-ease-standard);
 }
 
 .app-sidebar.collapsed .user-info {
@@ -459,7 +481,9 @@ function handleLogout() {
 .user-menu-arrow {
   flex-shrink: 0;
   color: var(--muted-foreground);
-  transition: transform var(--transition-fast), opacity 0.2s ease;
+  transition:
+    transform var(--transition-fast),
+    opacity var(--motion-base) var(--motion-ease-standard);
 }
 
 .user-menu-arrow.open {
@@ -491,6 +515,7 @@ function handleLogout() {
   padding: 6px;
   display: flex;
   flex-direction: column;
+  transform-origin: left bottom;
 }
 
 .user-dropdown-item {
@@ -505,7 +530,9 @@ function handleLogout() {
   font-family: var(--font-sans);
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast);
   text-align: left;
 }
 
@@ -608,7 +635,10 @@ function handleLogout() {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .topbar-icon-btn:hover {
@@ -658,7 +688,8 @@ function handleLogout() {
     width: min(86vw, 280px);
     transform: translateX(-102%);
     box-shadow: var(--shadow-floating);
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: transform var(--motion-slow) var(--motion-ease-enter);
+    will-change: transform;
   }
 
   .app-sidebar.collapsed {
@@ -695,7 +726,6 @@ function handleLogout() {
     border: 0;
     background: rgb(15 23 42 / 0.42);
     backdrop-filter: blur(3px);
-    animation: backdropIn 0.2s ease both;
   }
 
   .mobile-menu-btn {
@@ -716,10 +746,6 @@ function handleLogout() {
     padding: 22px 18px 40px;
   }
 
-  @keyframes backdropIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
-  }
 }
 
 @media (max-width: 480px) {

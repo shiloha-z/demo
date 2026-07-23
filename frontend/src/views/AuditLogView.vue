@@ -114,30 +114,32 @@ onMounted(async () => {
     </div>
 
     <!-- Chain drawer -->
-    <div v-if="showChain" class="drawer-mask" @click="showChain = false">
-      <div class="drawer" @click.stop>
-        <div class="drawer-head">
-          <h2>责任链 · 任务 #{{ chainTaskId }}</h2>
-          <button class="drawer-close" @click="showChain = false">×</button>
-        </div>
-        <div v-if="!chainData" class="empty-card"><p>加载中…</p></div>
-        <div v-else class="chain">
-          <div v-if="chainData.timeline.length === 0" class="empty-card"><p>该任务暂无审计记录</p></div>
-          <div v-for="e in chainData.timeline" :key="e.id" class="chain-item">
-            <span class="chain-dot" :class="actionClass(e.action)"></span>
-            <div class="chain-body">
-              <div class="chain-top">
-                <span class="act-badge" :class="actionClass(e.action)">{{ actionLabel(e.action) }}</span>
-                <span class="audit-actor">{{ e.actor_name || e.actor_type }}</span>
-                <span class="audit-time">{{ fmtTime(e.created_at) }}</span>
+    <Transition name="drawer-slide">
+      <div v-if="showChain" class="drawer-mask" @click="showChain = false">
+        <div class="drawer" @click.stop>
+          <div class="drawer-head">
+            <h2>责任链 · 任务 #{{ chainTaskId }}</h2>
+            <button class="drawer-close" @click="showChain = false">×</button>
+          </div>
+          <div v-if="!chainData" class="empty-card"><p>加载中…</p></div>
+          <div v-else class="chain">
+            <div v-if="chainData.timeline.length === 0" class="empty-card"><p>该任务暂无审计记录</p></div>
+            <div v-for="e in chainData.timeline" :key="e.id" class="chain-item">
+              <span class="chain-dot" :class="actionClass(e.action)"></span>
+              <div class="chain-body">
+                <div class="chain-top">
+                  <span class="act-badge" :class="actionClass(e.action)">{{ actionLabel(e.action) }}</span>
+                  <span class="audit-actor">{{ e.actor_name || e.actor_type }}</span>
+                  <span class="audit-time">{{ fmtTime(e.created_at) }}</span>
+                </div>
+                <p v-if="e.intent" class="audit-intent">{{ e.intent }}</p>
+                <p v-if="e.impact" class="audit-impact">{{ e.impact }}</p>
               </div>
-              <p v-if="e.intent" class="audit-intent">{{ e.intent }}</p>
-              <p v-if="e.impact" class="audit-impact">{{ e.impact }}</p>
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </div>
 </template>
 
@@ -195,9 +197,7 @@ onMounted(async () => {
 .drawer {
   width: 460px; max-width: 92vw; height: 100%; background: var(--app-shell);
   border-left: 1px solid var(--surface-border); display: flex; flex-direction: column;
-  animation: slideIn 0.25s cubic-bezier(0.4,0,0.2,1);
 }
-@keyframes slideIn { from { transform: translateX(30px); opacity: 0.6; } to { transform: none; opacity: 1; } }
 .drawer-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 18px; border-bottom: 1px solid var(--surface-border);

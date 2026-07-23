@@ -89,32 +89,13 @@ const router = createRouter({
   ],
 })
 
-// Auth guard + global loading bar
-let _loadingTimer: ReturnType<typeof setTimeout> | null = null
-
 router.beforeEach((to) => {
-  // Show loading bar after a short delay (skip flash on instant nav)
-  if (_loadingTimer) clearTimeout(_loadingTimer)
-  _loadingTimer = setTimeout(() => {
-    document.body.classList.add('router-loading')
-  }, 200)
-
   const token = localStorage.getItem('token')
   if (to.meta.guest) {
     if (token) return '/dashboard'
   } else {
     if (!token) return '/login'
   }
-})
-
-router.afterEach(() => {
-  if (_loadingTimer) clearTimeout(_loadingTimer)
-  document.body.classList.remove('router-loading')
-})
-
-router.onError(() => {
-  if (_loadingTimer) clearTimeout(_loadingTimer)
-  document.body.classList.remove('router-loading')
 })
 
 export default router

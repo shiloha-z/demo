@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { MessagePlugin } from 'tdesign-vue-next'
 import api from '../api'
 import { useMessageStore } from '../stores/message'
-import { useNotificationStore } from '../stores/notification'
 import { useWebSocketStore } from '../stores/websocket'
 
+const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 interface MessageItem {
@@ -27,7 +26,6 @@ type TabKey = 'all' | 'task' | 'review' | 'member' | 'version' | 'system'
 
 const router = useRouter()
 const msgStore = useMessageStore()
-const notifStore = useNotificationStore()
 const wsStore = useWebSocketStore()
 
 const messages = ref<MessageItem[]>([])
@@ -114,7 +112,7 @@ function fmtTime(iso: string | null): string {
 }
 
 // ── Mark all as seen on open ────────────────────────────────────
-onMounted(async () => {
+async function refreshOnOpen() {
   await load()
   // Silently mark all as seen so the red dot clears immediately.
   const hadUnread = messages.value.some(m => !m.read)
@@ -123,13 +121,19 @@ onMounted(async () => {
     messages.value.forEach(m => (m.read = true))
     await msgStore.refresh()
   }
-})
+}
+
+watch(() => props.visible, (visible) => {
+  if (visible) refreshOnOpen()
+}, { immediate: true })
 
 // ── Refresh on new message ──────────────────────────────────────
 let unsubMsg: (() => void) | null = null
 watch(() => wsStore.connected, (ok) => {
   if (ok && !unsubMsg) {
-    unsubMsg = wsStore.on('message_new', () => load())
+    unsubMsg = wsStore.on('message_new', () => {
+      if (props.visible) load()
+    })
   }
 }, { immediate: true })
 
@@ -145,8 +149,9 @@ function onBackdropClick(e: MouseEvent) {
 
 <template>
   <Teleport to="body">
-    <div class="notif-dropdown-backdrop" @click="onBackdropClick">
-      <div class="notif-dropdown" @click.stop>
+    <Transition name="notification-pop">
+      <div v-if="visible" class="notif-dropdown-backdrop" @click="onBackdropClick">
+        <div class="notif-dropdown" @click.stop>
         <!-- Header -->
         <div class="nd-header">
           <span class="nd-title">消息中心</span>
@@ -195,8 +200,9 @@ function onBackdropClick(e: MouseEvent) {
             </div>
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -215,12 +221,23 @@ function onBackdropClick(e: MouseEvent) {
   border-radius: var(--radius-lg);
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
   display: flex; flex-direction: column;
-  animation: nd-slide-in 120ms ease-out;
+  transform-origin: right top;
   z-index: 201;
 }
-@keyframes nd-slide-in {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: none; }
+.notification-pop-enter-active .notif-dropdown {
+  transition:
+    opacity var(--motion-base) var(--motion-ease-enter),
+    transform var(--motion-base) var(--motion-ease-enter);
+}
+.notification-pop-leave-active .notif-dropdown {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.notification-pop-enter-from .notif-dropdown,
+.notification-pop-leave-to .notif-dropdown {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.98);
 }
 
 /* ── Header ────────────────────────────────────────────────────── */

@@ -1061,8 +1061,9 @@ async function resumeTask(task: any, event: Event) {
 
           <!-- Workspace file panel -->
           <Teleport to="body">
-            <div v-if="showWorkspace" class="workspace-backdrop" @click.self="showWorkspace = false">
-          <div class="workspace-panel" role="dialog" aria-modal="true" aria-label="任务工作空间">
+            <Transition name="drawer-slide">
+              <div v-if="showWorkspace" class="workspace-backdrop" @click.self="showWorkspace = false">
+                <div class="workspace-panel" role="dialog" aria-modal="true" aria-label="任务工作空间">
             <div class="workspace-panel-header">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
               <span>工作空间 · 任务 #{{ workspaceTaskId }}</span>
@@ -1100,8 +1101,9 @@ async function resumeTask(task: any, event: Event) {
               </div>
               <pre class="workspace-file-code">{{ selectedTaskFile.content }}</pre>
             </div>
-          </div>
-            </div>
+                </div>
+              </div>
+            </Transition>
           </Teleport>
         </div>
 
@@ -1320,11 +1322,6 @@ async function resumeTask(task: any, event: Event) {
   background: var(--page-canvas);
   border-left: 1px solid var(--surface-border);
   box-shadow: -8px 0 28px rgb(15 23 42 / 0.18);
-  animation: workspace-slide-in 160ms ease-out;
-}
-@keyframes workspace-slide-in {
-  from { transform: translateX(100%); }
-  to { transform: translateX(0); }
 }
 .workspace-panel-header {
   grid-column: 1 / -1;

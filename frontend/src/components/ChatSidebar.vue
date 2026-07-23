@@ -662,6 +662,7 @@ watch(() => props.visible, (v) => {
               <!-- Image attachment -->
               <div class="msg-attachment" v-if="msg.file_type === 'image' && msg.file_url">
                 <img
+                  v-image-loading="msg.file_url"
                   :src="msg.file_url"
                   :alt="msg.file_name"
                   class="msg-image"
@@ -688,30 +689,36 @@ watch(() => props.visible, (v) => {
     </div>
 
     <!-- ── Typing indicator ──────────────── -->
-    <div class="chat-typing" v-if="typingText">
-      <span class="typing-dots"><span></span><span></span><span></span></span>
-      {{ typingText }}
-    </div>
+    <Transition name="inline-rise">
+      <div class="chat-typing" v-if="typingText">
+        <span class="typing-dots"><span></span><span></span><span></span></span>
+        {{ typingText }}
+      </div>
+    </Transition>
 
     <!-- ── Upload indicator ──────────────── -->
-    <div class="chat-uploading" v-if="uploading">
-      <span class="mini-spinner"></span> 上传文件中...
-    </div>
+    <Transition name="inline-rise">
+      <div class="chat-uploading" v-if="uploading">
+        <span class="mini-spinner"></span> 上传文件中...
+      </div>
+    </Transition>
 
     <!-- ── @mention dropdown ──────────────── -->
-    <div class="mention-dropdown" v-if="mentionActive && filteredMembers.length > 0">
-      <button
-        v-for="(m, i) in filteredMembers" :key="m.id"
-        class="mention-item"
-        :class="{ active: i === mentionIndex }"
-        @click="insertMention(m)"
-        @mouseenter="mentionIndex = i"
-      >
-        <span class="mention-name">{{ m.display_name }}</span>
-        <span class="mention-username">@{{ m.username }}</span>
-        <span class="mention-online-dot" v-if="onlineUsers.some(u => u.user_id === m.id)"></span>
-      </button>
-    </div>
+    <Transition name="menu-pop">
+      <div class="mention-dropdown" v-if="mentionActive && filteredMembers.length > 0">
+        <button
+          v-for="(m, i) in filteredMembers" :key="m.id"
+          class="mention-item"
+          :class="{ active: i === mentionIndex }"
+          @click="insertMention(m)"
+          @mouseenter="mentionIndex = i"
+        >
+          <span class="mention-name">{{ m.display_name }}</span>
+          <span class="mention-username">@{{ m.username }}</span>
+          <span class="mention-online-dot" v-if="onlineUsers.some(u => u.user_id === m.id)"></span>
+        </button>
+      </div>
+    </Transition>
 
     <!-- ── Input ──────────────────────────── -->
     <div class="chat-input-area">
@@ -751,12 +758,19 @@ watch(() => props.visible, (v) => {
 
     <!-- ── Lightbox ──────────────────────── -->
     <Teleport to="body">
-      <div class="lightbox-backdrop" v-if="lightboxImage" @click="closeLightbox">
-        <img :src="lightboxImage" class="lightbox-img" @click.stop />
-        <button class="lightbox-close" @click="closeLightbox" title="关闭">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </div>
+      <Transition name="lightbox-fade">
+        <div class="lightbox-backdrop" v-if="lightboxImage" @click="closeLightbox">
+          <img
+            v-image-loading="lightboxImage"
+            :src="lightboxImage"
+            class="lightbox-img"
+            @click.stop
+          />
+          <button class="lightbox-close" @click="closeLightbox" title="关闭">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </Transition>
     </Teleport>
   </aside>
 </template>
@@ -769,14 +783,27 @@ watch(() => props.visible, (v) => {
   flex-direction: column;
   background: var(--surface);
   border-left: 1px solid var(--surface-border);
-  transition: width var(--transition-base), opacity var(--transition-base);
+  transition:
+    width var(--motion-slow) var(--motion-ease-standard),
+    opacity var(--motion-base) var(--motion-ease-standard),
+    visibility 0s linear;
   overflow: hidden;
   position: relative;
+  will-change: width, opacity;
 }
 .chat-panel:not(.open) {
   width: 0;
   border-left: none;
   opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    width var(--motion-slow) var(--motion-ease-standard),
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    visibility 0s linear var(--motion-slow);
+}
+.chat-panel > * {
+  min-width: 360px;
 }
 
 /* ── Header ─────────────────────────── */
@@ -864,6 +891,10 @@ watch(() => props.visible, (v) => {
   transition: transform var(--transition-fast), box-shadow var(--transition-fast);
   object-fit: cover;
 }
+.msg-image.is-image-loading {
+  width: 180px;
+  height: 120px;
+}
 .msg-image:hover {
   transform: scale(1.02);
   box-shadow: 0 2px 12px rgba(0,0,0,0.15);
@@ -899,11 +930,43 @@ watch(() => props.visible, (v) => {
   display: flex; align-items: center; justify-content: center;
   cursor: zoom-out;
 }
+.lightbox-fade-enter-active,
+.lightbox-fade-leave-active {
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
+}
+.lightbox-fade-enter-active .lightbox-img,
+.lightbox-fade-enter-active .lightbox-close {
+  transition:
+    opacity var(--motion-slow) var(--motion-ease-enter),
+    transform var(--motion-slow) var(--motion-ease-enter);
+}
+.lightbox-fade-leave-active .lightbox-img,
+.lightbox-fade-leave-active .lightbox-close {
+  transition:
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+}
+.lightbox-fade-enter-from,
+.lightbox-fade-leave-to,
+.lightbox-fade-enter-from .lightbox-img,
+.lightbox-fade-leave-to .lightbox-img,
+.lightbox-fade-enter-from .lightbox-close,
+.lightbox-fade-leave-to .lightbox-close {
+  opacity: 0;
+}
+.lightbox-fade-enter-from .lightbox-img,
+.lightbox-fade-leave-to .lightbox-img {
+  transform: scale(0.975);
+}
 .lightbox-img {
   max-width: 90vw; max-height: 90vh;
   border-radius: var(--radius-lg);
   object-fit: contain;
   cursor: default;
+}
+.lightbox-img.is-image-loading {
+  width: min(70vw, 720px);
+  height: min(60vh, 520px);
 }
 .lightbox-close {
   position: fixed; top: 16px; right: 16px;

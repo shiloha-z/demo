@@ -17,6 +17,7 @@ import 'tdesign-vue-next/es/style/index.css'
 import { createPinia } from 'pinia'
 import router from './router'
 import App from './App.vue'
+import { imageLoadingDirective } from './directives/imageLoading'
 import jsonWorkerUrl from 'monaco-editor/esm/vs/language/json/json.worker?worker&url'
 import './styles/tokens.css'
 import './styles/components.css'
@@ -46,6 +47,7 @@ Object.entries(tdesignComponents).forEach(([name, component]) => {
 
 app.use(createPinia())
 app.use(router)
+app.directive('image-loading', imageLoadingDirective)
 
 // Initialize theme before mount to avoid flash
 import { useThemeStore } from './stores/theme'

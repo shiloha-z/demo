@@ -148,7 +148,7 @@ const icons: Record<string, string> = {
 .fade-out {
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
 }
 
 /* ── Global project picker ─────────────────────────────────────── */
@@ -158,7 +158,10 @@ const icons: Record<string, string> = {
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   overflow: hidden;
-  transition: border-color var(--transition-fast), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    border-color var(--transition-fast),
+    padding var(--motion-slow) var(--motion-ease-standard),
+    margin var(--motion-slow) var(--motion-ease-standard);
 }
 
 .project-picker.collapsed {
@@ -208,7 +211,10 @@ const icons: Record<string, string> = {
   padding: 6px 10px 4px;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity 0.2s ease, max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    max-height var(--motion-slow) var(--motion-ease-standard),
+    padding var(--motion-slow) var(--motion-ease-standard);
 }
 
 .sidebar-nav.collapsed .nav-section-label {
@@ -227,8 +233,8 @@ const icons: Record<string, string> = {
   text-decoration: none;
   font-size: 13.5px;
   font-weight: 500;
-  transition: padding 0.25s cubic-bezier(0.4, 0, 0.2, 1),
-              gap 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+  transition: padding var(--motion-slow) var(--motion-ease-standard),
+              gap var(--motion-slow) var(--motion-ease-standard),
               background var(--transition-fast),
               color var(--transition-fast);
   cursor: pointer;
@@ -262,7 +268,7 @@ const icons: Record<string, string> = {
   justify-content: center;
   flex-shrink: 0;
   opacity: 0.7;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
 }
 
 .nav-item.active .nav-icon {
@@ -274,7 +280,9 @@ const icons: Record<string, string> = {
   white-space: nowrap;
   overflow: hidden;
   max-width: 200px;
-  transition: opacity 0.2s ease, max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    max-width var(--motion-slow) var(--motion-ease-standard);
 }
 
 .sidebar-nav.collapsed .nav-label {
@@ -290,7 +298,11 @@ const icons: Record<string, string> = {
   color: #fff;
   font-size: 10px; font-weight: 700; line-height: 1;
   border-radius: 9px; padding: 0 5px;
-  transition: opacity 0.2s ease, max-width 0.25s cubic-bezier(0.4, 0, 0.2, 1), padding 0.25s cubic-bezier(0.4, 0, 0.2, 1), margin 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    max-width var(--motion-slow) var(--motion-ease-standard),
+    padding var(--motion-slow) var(--motion-ease-standard),
+    margin var(--motion-slow) var(--motion-ease-standard);
   overflow: hidden;
   animation: badgePulse 2s ease-in-out infinite;
 }
