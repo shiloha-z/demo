@@ -9,6 +9,7 @@ import { useNotificationStore } from './stores/notification'
 import { useMessageStore } from './stores/message'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
+import NotificationDropdown from './components/NotificationDropdown.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,6 +20,7 @@ const projectStore = useProjectStore()
 
 const isLoginPage = computed(() => route.meta.guest === true)
 const chatVisible = ref(false)
+const notifDropdownVisible = ref(false)
 const notifStore = useNotificationStore()
 const msgStore = useMessageStore()
 const sidebarCollapsed = ref(false)
@@ -83,6 +85,9 @@ watch(isLoginPage, (isLogin) => {
 })
 
 watch([() => ws.connected, () => projectStore.currentProject?.id], joinCurrentProject, { immediate: true })
+
+// Close notification dropdown on route change
+watch(() => route.fullPath, () => { notifDropdownVisible.value = false })
 
 onUnmounted(() => {
   unsubProject?.()
@@ -176,7 +181,7 @@ function handleLogout() {
           <button
             class="topbar-icon-btn notif-toggle-btn"
             :title="`通知 (${notifStore.total})`"
-            @click="router.push('/messages')"
+            @click="notifDropdownVisible = !notifDropdownVisible"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
             <span class="notif-badge" v-if="notifStore.total > 0">{{ notifStore.total > 99 ? '99+' : notifStore.total }}</span>
@@ -206,6 +211,7 @@ function handleLogout() {
     </div>
 
     <ChatSidebar v-model:visible="chatVisible" @unread-count="notifStore.incrementChatUnread()" />
+    <NotificationDropdown v-if="notifDropdownVisible" @close="notifDropdownVisible = false" />
   </div>
 </template>
 
