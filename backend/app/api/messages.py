@@ -58,10 +58,7 @@ def list_messages(
         read_message_ids = db.query(MessageRead.message_id).filter(
             MessageRead.user_id == user.id
         )
-        q = q.filter(
-            Message.read == False,  # noqa: E712
-            ~Message.id.in_(read_message_ids),
-        )
+        q = q.filter(~Message.id.in_(read_message_ids))
     if category:
         q = q.filter(Message.category == category)
     messages = q.order_by(Message.created_at.desc()).limit(limit).all()
@@ -84,7 +81,7 @@ def list_messages(
             title=m.title,
             body=m.body,
             link=m.link,
-            read=bool(m.read) or m.id in read_ids,
+            read=m.id in read_ids,
             resolved=bool(m.resolved),
             created_at=m.created_at.isoformat() if m.created_at else None,
         )
@@ -173,7 +170,11 @@ def mark_all_read(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    q = db.query(Message).filter(Message.read == False)  # noqa: E712
+    # Find messages the current user has NOT read yet (per-user receipts).
+    already_read = db.query(MessageRead.message_id).filter(
+        MessageRead.user_id == user.id
+    )
+    q = db.query(Message).filter(~Message.id.in_(already_read))
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
     message_ids = [row[0] for row in q.with_entities(Message.id).all()]

@@ -96,10 +96,13 @@ def unread_count(
     recipient_id: int | None = None,
     user_id: int | None = None,
 ) -> int:
-    q = db.query(Message).filter(
-        Message.read == False,       # noqa: E712
-        Message.resolved == False,  # noqa: E712
-    )
+    """Count messages not yet read by *user_id* and not resolved.
+
+    Uses per-user ``MessageRead`` receipts exclusively — the legacy global
+    ``Message.read`` column is intentionally ignored here so one user's
+    read-action never affects another user's badge.
+    """
+    q = db.query(Message).filter(Message.resolved == False)  # noqa: E712
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
     if recipient_id is not None:
@@ -107,10 +110,10 @@ def unread_count(
             (Message.recipient_id == recipient_id) | (Message.recipient_id.is_(None))
         )
     if user_id is not None:
-        read_message_ids = db.query(MessageRead.message_id).filter(
+        read_ids = db.query(MessageRead.message_id).filter(
             MessageRead.user_id == user_id
         )
-        q = q.filter(~Message.id.in_(read_message_ids))
+        q = q.filter(~Message.id.in_(read_ids))
     return q.count()
 
 
