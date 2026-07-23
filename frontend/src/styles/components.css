@@ -117,17 +117,18 @@
 }
 .field-textarea {
   width: 100%;
-  padding: 8px 12px;
+  padding: 6px 10px;
   border: 1px solid var(--input);
   border-radius: var(--radius-md);
-  font-size: 13.5px;
+  font-size: 13px;
   font-family: var(--font-sans);
   color: var(--foreground);
   background: var(--surface);
   outline: none;
   box-sizing: border-box;
   resize: vertical;
-  min-height: 60px;
+  min-height: 44px;
+  line-height: 1.4;
   transition: border-color var(--transition-fast);
 }
 .field-textarea:focus {

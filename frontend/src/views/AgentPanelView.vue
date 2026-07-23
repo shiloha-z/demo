@@ -400,60 +400,59 @@ function fmtTs(iso: string): string {
     </div>
 
     <!-- Create Agent Dialog -->
-    <t-dialog v-model:visible="showCreateAgent" header="创建 Agent" width="480px">
+    <t-dialog v-model:visible="showCreateAgent" header="创建 Agent" width="460px">
       <div class="dialog-form">
-        <label class="field-label">名称</label>
-        <t-input v-model="newAgent.name" placeholder="例如：小码" />
-        <label class="field-label">角色</label>
-        <t-select v-model="newAgent.role">
-          <t-option value="code_gen" label="代码工程师" />
-          <t-option value="reviewer" label="代码审查员" />
-          <t-option value="security" label="安全审查员" />
-        </t-select>
-        <label class="field-label">执行框架</label>
-        <t-select v-model="newAgent.runner_type" @change="(v: string) => { loadModels(v); checkRunnerAvailability(v) }">
-          <t-option value="crewai" label="CrewAI — 多 Agent 流水线" />
-          <t-option value="claude_code" label="Claude Code — Anthropic 官方 SDK" />
-          <t-option value="opencode" label="OpenCode — 开源通用框架" />
-        </t-select>
-        <!-- Runner CLI not found warning -->
-        <div v-if="runnerCheckResult && runnerCheckResult.checked && !runnerCheckResult.available" class="runner-warning">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          <div class="runner-warning-body">
-            <strong>未检测到 {{ runnerCheckResult.cli_name }} CLI</strong>
-            <p>{{ runnerCheckResult.hint }}</p>
+        <div class="dialog-form-row">
+          <div class="dialog-form-col" style="flex:2">
+            <label class="field-label">名称 <span style="color:var(--danger)">*</span></label>
+            <t-input v-model="newAgent.name" placeholder="例如：小码" size="small" />
+          </div>
+          <div class="dialog-form-col" style="flex:1">
+            <label class="field-label">角色</label>
+            <t-select v-model="newAgent.role" size="small">
+              <t-option value="code_gen" label="代码工程师" />
+              <t-option value="reviewer" label="代码审查员" />
+              <t-option value="security" label="安全审查员" />
+            </t-select>
           </div>
         </div>
-        <div class="model-label-row">
-          <label class="field-label">模型</label>
-          <t-button
-            size="small"
-            variant="text"
-            :loading="modelsLoading"
-            @click="loadModels(newAgent.runner_type)"
-          >
-            <template #icon>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            </template>
-            检测模型
-          </t-button>
+        <div class="dialog-form-row">
+          <div class="dialog-form-col">
+            <label class="field-label">执行框架</label>
+            <t-select v-model="newAgent.runner_type" size="small" @change="(v: string) => { loadModels(v); checkRunnerAvailability(v) }">
+              <t-option value="crewai" label="CrewAI" />
+              <t-option value="claude_code" label="Claude Code" />
+              <t-option value="opencode" label="OpenCode" />
+            </t-select>
+          </div>
+          <div class="dialog-form-col">
+            <label class="field-label">模型</label>
+            <t-select v-model="newAgent.model" size="small">
+              <t-option v-if="modelsLoading" value="" label="检测中..." />
+              <t-option v-else-if="availableModels.length === 0" value="" label="无可用模型" />
+              <t-option v-for="m in availableModels" :key="m.id" :value="m.id" :label="m.name || m.id" />
+            </t-select>
+          </div>
         </div>
-        <t-select v-model="newAgent.model">
-          <t-option v-if="modelsLoading" value="" label="检测中..." />
-          <t-option v-else-if="availableModels.length === 0" value="" label="暂无可用模型，点击上方按钮检测" />
-          <t-option v-for="m in availableModels" :key="m.id" :value="m.id" :label="m.name || m.id" />
-        </t-select>
-        <label class="field-label switch-label">
-          启用自主任务规划
-          <t-switch v-model="newAgent.enable_planning" />
-        </label>
-        <p class="field-hint">开启后，Agent 执行任务前会先让模型把目标拆解为多个子步骤，自动增强完成任务的能力。</p>
-        <label v-if="newAgent.enable_planning" class="field-label">最大子任务数</label>
-        <t-input-number v-if="newAgent.enable_planning" v-model="newAgent.max_subtasks" :min="1" :max="20" theme="column" />
-        <label class="field-label">系统提示词（选填）</label>
-        <textarea v-model="newAgent.system_prompt" class="field-textarea" rows="3" placeholder="自定义 Agent 行为..." />
-        <label class="field-label">从技能模板加载（可选）</label>
-        <t-select v-model="newAgent.skill_id" :options="skillOptions" placeholder="选择已有技能模板..." clearable @change="onSkillSelect" />
+        <!-- Runner CLI not found warning -->
+        <div v-if="runnerCheckResult && runnerCheckResult.checked && !runnerCheckResult.available" class="runner-warning">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>未检测到 {{ runnerCheckResult.cli_name }} CLI — {{ runnerCheckResult.hint }}</span>
+        </div>
+        <div class="dialog-form-row">
+          <div class="dialog-form-col">
+            <label class="field-label">启用自主任务规划</label>
+            <t-switch v-model="newAgent.enable_planning" size="small" />
+          </div>
+          <div class="dialog-form-col" v-if="newAgent.enable_planning">
+            <label class="field-label">最大子任务数</label>
+            <t-input-number v-model="newAgent.max_subtasks" :min="1" :max="20" theme="normal" size="small" />
+          </div>
+        </div>
+        <label class="field-label">系统提示词</label>
+        <textarea v-model="newAgent.system_prompt" class="field-textarea" rows="2" placeholder="自定义 Agent 行为（选填）..." />
+        <label class="field-label">技能模板</label>
+        <t-select v-model="newAgent.skill_id" :options="skillOptions" placeholder="选择已有技能模板（可选）" clearable size="small" @change="onSkillSelect" />
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateAgent = false">取消</t-button>
