@@ -63,11 +63,22 @@ api.interceptors.response.use(
           MessagePlugin.warning(detail || '请求的资源不存在')
           break
         case 409:
-          MessagePlugin.warning(detail || '操作冲突，请稍后重试')
+          // Let individual components handle 409 with their own UI
+          // (e.g. confirm dialogs for duplicate-project-name warnings).
           break
-        case 422:
-          MessagePlugin.warning(detail || '提交的数据格式不正确')
+        case 422: {
+          // FastAPI 422 detail is an array of field errors; extract a readable message.
+          let msg = '提交的数据格式不正确'
+          if (typeof detail === 'string' && detail) {
+            msg = detail
+          } else if (Array.isArray(detail) && detail.length > 0) {
+            const first = detail[0]
+            const loc = (first?.loc || []).filter((s: string) => s !== 'body').join('.')
+            msg = loc ? `${loc}: ${first.msg}` : first.msg
+          }
+          MessagePlugin.warning(msg)
           break
+        }
         case 500:
         case 502:
         case 503:
