@@ -377,7 +377,7 @@ async function handleJoinProject(p: any, event: Event) {
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="dialogVisible = false">取消</t-button>
-        <t-button theme="primary" :disabled="!newProject.name || creating" @click="handleCreate">
+        <t-button theme="primary" :disabled="!newProject.name || creating" @click="handleCreate()">
           {{ creating ? '创建中...' : '创建' }}
         </t-button>
       </template>
