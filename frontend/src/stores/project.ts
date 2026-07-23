@@ -23,19 +23,35 @@ export const useProjectStore = defineStore('project', () => {
   const switchableProjects = ref<Project[]>([])
   const sortBy = ref<string>('created_desc')
   const filterBy = ref<string>('all')
+  let switchableRequest: Promise<void> | null = null
+  let projectsRequestVersion = 0
 
   async function fetchProjects(sort?: string, filter?: string) {
     const s = sort || sortBy.value
     const f = filter ?? filterBy.value
+    const requestVersion = ++projectsRequestVersion
     const { data } = await api.get<{ projects: Project[] }>('/projects', { params: { sort: s, filter: f } })
-    projects.value = data.projects
+    // A slower previous request must not overwrite a newer filter/sort result.
+    if (requestVersion === projectsRequestVersion) {
+      projects.value = data.projects
+    }
   }
 
   async function fetchSwitchableProjects() {
-    const { data } = await api.get<{ projects: Project[] }>('/projects', {
-      params: { sort: sortBy.value, filter: 'joined' },
-    })
-    switchableProjects.value = data.projects
+    // App shell and sidebar can request this list at the same time. Share the
+    // in-flight request instead of issuing duplicate network calls.
+    if (switchableRequest) return switchableRequest
+    switchableRequest = (async () => {
+      const { data } = await api.get<{ projects: Project[] }>('/projects', {
+        params: { sort: sortBy.value, filter: 'joined' },
+      })
+      switchableProjects.value = data.projects
+    })()
+    try {
+      await switchableRequest
+    } finally {
+      switchableRequest = null
+    }
   }
 
   async function createProject(name: string, description: string, workspace_name?: string, force = false): Promise<Project> {

@@ -7,16 +7,18 @@ from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from .config import settings
 
-engine = create_engine(
-    settings.DATABASE_URL,
+_engine_options: dict = {"pool_pre_ping": True}
+if settings.DATABASE_URL.startswith("sqlite"):
     # `check_same_thread=False` is required because FastAPI serves synchronous
-    # `def` endpoints (e.g. skill creation) from a worker thread-pool, so a single
-    # SQLite connection is touched by multiple threads.
-    # `timeout` makes the driver *wait* for the write lock instead of failing
-    # immediately with "database is locked", which previously surfaced as a bare
-    # HTTP 500 on concurrent writes (list + create skill racing for the lock).
-    connect_args={"check_same_thread": False, "timeout": 30},  # SQLite
-)
+    # endpoints from a worker thread-pool. `timeout` waits for a concurrent
+    # writer instead of immediately surfacing "database is locked".
+    _engine_options["connect_args"] = {"check_same_thread": False, "timeout": 30}
+else:
+    # Recycle long-lived pooled connections before common load-balancer /
+    # database idle timeouts. `pool_pre_ping` above rejects stale connections.
+    _engine_options["pool_recycle"] = 1800
+
+engine = create_engine(settings.DATABASE_URL, **_engine_options)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -47,6 +49,12 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        # Leave pooled connections in a clean transaction state. `close()` also
+        # rolls back for SQLAlchemy sessions, but doing it explicitly protects
+        # custom session implementations and makes the contract unambiguous.
+        db.rollback()
+        raise
     finally:
         db.close()
 

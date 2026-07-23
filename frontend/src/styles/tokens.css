@@ -5,13 +5,15 @@
   color-scheme: light;
 
   /* ── Surface system ────────────────────────────────────────────── */
-  --app-shell: oklch(0.965 0.002 280);
-  --page-canvas: oklch(0.988 0.001 280);
+  --app-shell: oklch(0.972 0.007 264);
+  --page-canvas: oklch(0.985 0.004 264);
   --surface: oklch(1 0 0);
   --surface-raised: oklch(1 0 0);
-  --surface-hover: oklch(0.965 0.002 280);
-  --surface-selected: oklch(0.948 0.004 280);
-  --surface-border: oklch(0.918 0.003 280);
+  --surface-subtle: oklch(0.975 0.006 264);
+  --surface-hover: oklch(0.962 0.009 264);
+  --surface-selected: oklch(0.944 0.016 264);
+  --surface-border: oklch(0.91 0.009 264);
+  --sidebar-bg: oklch(0.978 0.01 264 / 0.96);
 
   /* ── Foreground ────────────────────────────────────────────────── */
   --foreground: oklch(0.165 0.005 280);
@@ -25,6 +27,8 @@
   --primary-light: oklch(0.546 0.215 264 / 0.08);
   --primary-lighter: oklch(0.546 0.215 264 / 0.04);
   --primary-foreground: oklch(0.985 0 0);
+  --primary-gradient: linear-gradient(135deg, oklch(0.59 0.22 258), oklch(0.51 0.23 275));
+  --primary-glow: oklch(0.61 0.2 264 / 0.18);
 
   /* ── Semantic colors ───────────────────────────────────────────── */
   --success: oklch(0.627 0.170 150);
@@ -44,17 +48,17 @@
   --ring: oklch(0.546 0.215 264 / 0.4);
 
   /* ── Shadows ───────────────────────────────────────────────────── */
-  --shadow-surface: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03);
+  --shadow-surface: 0 1px 2px rgba(30, 41, 59, 0.04), 0 5px 16px rgba(30, 41, 59, 0.035);
   --shadow-floating: 0 12px 32px rgba(15, 23, 42, 0.10), 0 2px 8px rgba(15, 23, 42, 0.06);
   --shadow-menu: 0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
-  --shadow-card-hover: 0 8px 24px rgba(84, 110, 255, 0.12), 0 2px 8px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 14px 32px rgba(67, 79, 180, 0.11), 0 3px 10px rgba(15, 23, 42, 0.05);
 
   /* ── Radius ────────────────────────────────────────────────────── */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
 
   /* ── Transitions ───────────────────────────────────────────────── */
   --transition-base: 0.2s cubic-bezier(0.4, 0, 0.2, 1);
@@ -96,9 +100,11 @@
   --page-canvas: oklch(0.185 0.004 280);
   --surface: oklch(0.21 0.005 280);
   --surface-raised: oklch(0.24 0.006 280);
+  --surface-subtle: oklch(0.225 0.008 264);
   --surface-hover: oklch(0.25 0.005 280);
   --surface-selected: oklch(0.27 0.008 280);
   --surface-border: oklch(0.29 0.006 280);
+  --sidebar-bg: oklch(0.17 0.012 264 / 0.97);
 
   --foreground: oklch(0.935 0.003 280);
   --muted-foreground: oklch(0.66 0.01 280);
@@ -110,6 +116,8 @@
   --primary-light: oklch(0.62 0.2 264 / 0.15);
   --primary-lighter: oklch(0.62 0.2 264 / 0.08);
   --primary-foreground: oklch(0.12 0.005 280);
+  --primary-gradient: linear-gradient(135deg, oklch(0.66 0.2 258), oklch(0.58 0.21 275));
+  --primary-glow: oklch(0.62 0.2 264 / 0.24);
 
   --success: oklch(0.695 0.16 150);
   --warning: oklch(0.765 0.15 75);

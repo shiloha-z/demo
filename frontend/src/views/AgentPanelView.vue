@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -8,7 +7,6 @@ import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
-const route = useRoute()
 
 const agents = ref<any[]>([])
 const agentFilter = ref<'all' | 'mine'>('all')
@@ -61,6 +59,7 @@ const runnerColors: Record<string, string> = {
 }
 
 let unsubAgent: (() => void) | null = null
+let agentsLoadedAt = 0
 
 onMounted(async () => {
   if (store.projects.length === 0) await store.fetchProjects()
@@ -68,8 +67,12 @@ onMounted(async () => {
   unsubAgent = wsStore.on('agent_update', () => loadAgents())
 })
 
-watch(() => route.path, (path) => {
-  if (path === '/agents') loadAgents()
+// KeepAlive preserves this page. Only reconcile after a meaningful stale
+// window; WebSocket events keep normal navigation returns up to date.
+onActivated(() => {
+  if (agentsLoadedAt > 0 && Date.now() - agentsLoadedAt > 30_000) {
+    loadAgents()
+  }
 })
 
 onUnmounted(() => {
@@ -80,6 +83,7 @@ async function loadAgents() {
   try {
     const { data } = await api.get('/agents')
     agents.value = data.items || data
+    agentsLoadedAt = Date.now()
   } catch (e: any) {
     MessagePlugin.error(e?.response?.data?.detail || '加载 Agent 列表失败')
   }

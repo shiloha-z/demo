@@ -230,3 +230,41 @@ def recover_merge_queue() -> None:
         db.close()
     for task_id in task_ids:
         enqueue_merge(task_id)
+
+
+def recover_interrupted_agent_runs() -> int:
+    """Make process-local work resumable after an unclean restart.
+
+    Agent/model calls run in this process and cannot survive a restart. Leaving
+    their rows in a running state permanently blocks normal resume operations
+    and misreports Agent capacity. Persist them as PAUSED instead; the existing
+    resume endpoint continues from the task worktree.
+    """
+    volatile_statuses = (
+        TaskStatus.RUNNING,
+        TaskStatus.CONFLICT_RESOLUTION,
+        TaskStatus.PLANNING,
+        TaskStatus.SUBTASK_RUNNING,
+    )
+    db = SessionLocal()
+    try:
+        recovered = (
+            db.query(Task)
+            .filter(Task.status.in_(volatile_statuses))
+            .update({Task.status: TaskStatus.PAUSED}, synchronize_session=False)
+        )
+        # No executor thread survives process startup, so a persisted WORKING
+        # Agent is stale even when the task row was already repaired manually.
+        db.query(Agent).filter(Agent.status == AgentStatus.WORKING).update(
+            {Agent.status: AgentStatus.IDLE},
+            synchronize_session=False,
+        )
+        db.commit()
+        if recovered:
+            logger.warning("Recovered %s interrupted agent task(s) as paused", recovered)
+        return recovered
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

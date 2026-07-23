@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     MERGE_MAX_CONCURRENCY: int = 2
     MERGE_TEST_COMMAND: str = ""
     MERGE_TEST_TIMEOUT_SECONDS: int = 300
+    # HTTP diagnostics. Slow requests are logged with a correlation ID so
+    # production incidents can be traced without exposing stack traces.
+    SLOW_REQUEST_THRESHOLD_SECONDS: float = 2.0
     # Deterministic pre-merge quality gates. Command-based gates are
     # intentionally fail-closed: an empty required command blocks the merge.
     QUALITY_GATE_UNIT_TEST_COMMAND: str = ""

@@ -1,4 +1,17 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import LoginView from '../views/LoginView.vue'
+import DashboardView from '../views/DashboardView.vue'
+import RiskDashboardView from '../views/RiskDashboardView.vue'
+import FileManagerView from '../views/FileManagerView.vue'
+import AgentPanelView from '../views/AgentPanelView.vue'
+import TaskListView from '../views/TaskListView.vue'
+import DiffReviewView from '../views/DiffReviewView.vue'
+import VersionHistoryView from '../views/VersionHistoryView.vue'
+import ProfileView from '../views/ProfileView.vue'
+import SettingsView from '../views/SettingsView.vue'
+import MessagesView from '../views/MessagesView.vue'
+import SkillRepositoryView from '../views/SkillRepositoryView.vue'
+import AuditLogView from '../views/AuditLogView.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -6,7 +19,7 @@ const router = createRouter({
     {
       path: '/login',
       name: 'Login',
-      component: () => import('../views/LoginView.vue'),
+      component: LoginView,
       meta: { guest: true },
     },
     {
@@ -16,62 +29,62 @@ const router = createRouter({
     {
       path: '/dashboard',
       name: 'Dashboard',
-      component: () => import('../views/DashboardView.vue'),
+      component: DashboardView,
     },
     {
       path: '/risk-dashboard',
       name: 'RiskDashboard',
-      component: () => import('../views/RiskDashboardView.vue'),
+      component: RiskDashboardView,
     },
     {
       path: '/files',
       name: 'FileManager',
-      component: () => import('../views/FileManagerView.vue'),
+      component: FileManagerView,
     },
     {
       path: '/agents',
       name: 'AgentPanel',
-      component: () => import('../views/AgentPanelView.vue'),
+      component: AgentPanelView,
     },
     {
       path: '/tasks',
       name: 'TaskList',
-      component: () => import('../views/TaskListView.vue'),
+      component: TaskListView,
     },
     {
       path: '/reviews',
       name: 'DiffReview',
-      component: () => import('../views/DiffReviewView.vue'),
+      component: DiffReviewView,
     },
     {
       path: '/versions',
       name: 'VersionHistory',
-      component: () => import('../views/VersionHistoryView.vue'),
+      component: VersionHistoryView,
     },
     {
       path: '/profile',
       name: 'Profile',
-      component: () => import('../views/ProfileView.vue'),
+      component: ProfileView,
     },
     {
       path: '/settings',
       name: 'Settings',
-      component: () => import('../views/SettingsView.vue'),
+      component: SettingsView,
     },
     {
       path: '/messages',
       name: 'Messages',
-      component: () => import('../views/MessagesView.vue'),
+      component: MessagesView,
     },
     {
       path: '/skills',
       name: 'SkillRepository',
-      component: () => import('../views/SkillRepositoryView.vue'),
+      component: SkillRepositoryView,
     },
     {
       path: '/audit',
       name: 'AuditCenter',
-      component: () => import('../views/AuditLogView.vue'),
+      component: AuditLogView,
     },
   ],
 })

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onActivated, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -84,9 +84,31 @@ function fmtTs(iso: string): string {
   return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-onMounted(async () => {
-  await store.fetchProjects()
-  await loadStats()
+let dashboardLoadedAt = 0
+let dashboardLoad: Promise<void> | null = null
+
+async function loadDashboard() {
+  if (dashboardLoad) return dashboardLoad
+  dashboardLoad = (async () => {
+    await store.fetchProjects()
+    await loadStats()
+    dashboardLoadedAt = Date.now()
+  })()
+  try {
+    await dashboardLoad
+  } finally {
+    dashboardLoad = null
+  }
+}
+
+onMounted(loadDashboard)
+
+// Returning to a cached dashboard is instant. Reconcile only when its summary
+// has been inactive long enough to be meaningfully stale.
+onActivated(() => {
+  if (dashboardLoadedAt > 0 && Date.now() - dashboardLoadedAt > 60_000) {
+    loadDashboard()
+  }
 })
 
 watch(() => store.sortBy, () => { store.fetchProjects(); loadStats() })
@@ -221,28 +243,14 @@ async function handleJoinProject(p: any, event: Event) {
     <!-- Header -->
     <div class="page-header">
       <div>
+        <div class="page-eyebrow">
+          <span class="eyebrow-dot"></span>
+          COLLABORATION WORKSPACE
+        </div>
         <h1 class="page-title">项目看板</h1>
-        <p class="page-desc">管理你的项目和 Agent 工作区</p>
+        <p class="page-desc">集中管理项目、Agent 工作流与审查进度</p>
       </div>
       <div class="header-actions">
-        <t-input
-          v-model="searchKeyword"
-          clearable
-          size="medium"
-          style="width: 220px"
-          placeholder="搜索项目名称、描述或负责人"
-        />
-        <t-select
-          v-model="store.sortBy"
-          size="medium"
-          style="width: 140px"
-        >
-          <t-option value="created_desc" label="最新创建" />
-          <t-option value="created_asc" label="最早创建" />
-          <t-option value="updated_desc" label="最近修改" />
-          <t-option value="name_asc" label="名称 A-Z" />
-          <t-option value="name_desc" label="名称 Z-A" />
-        </t-select>
         <t-button theme="primary" @click="dialogVisible = true">
           <template #icon>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -299,14 +307,40 @@ async function handleJoinProject(p: any, event: Event) {
     </div>
 
     <!-- Filter tabs -->
-    <div class="filter-tabs">
-      <button
-        v-for="tab in filterTabs"
-        :key="tab.key"
-        class="filter-tab"
-        :class="{ active: store.filterBy === tab.key }"
-        @click="setFilter(tab.key)"
-      >{{ tab.label }}</button>
+    <div class="project-toolbar">
+      <div class="filter-tabs">
+        <button
+          v-for="tab in filterTabs"
+          :key="tab.key"
+          class="filter-tab"
+          :class="{ active: store.filterBy === tab.key }"
+          @click="setFilter(tab.key)"
+        >{{ tab.label }}</button>
+      </div>
+      <div class="project-tools">
+        <t-input
+          v-model="searchKeyword"
+          clearable
+          size="medium"
+          class="project-search"
+          placeholder="搜索项目"
+        >
+          <template #prefix-icon>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          </template>
+        </t-input>
+        <t-select
+          v-model="store.sortBy"
+          size="medium"
+          class="project-sort"
+        >
+          <t-option value="created_desc" label="最新创建" />
+          <t-option value="created_asc" label="最早创建" />
+          <t-option value="updated_desc" label="最近修改" />
+          <t-option value="name_asc" label="名称 A-Z" />
+          <t-option value="name_desc" label="名称 Z-A" />
+        </t-select>
+      </div>
     </div>
 
     <!-- Project Grid -->
@@ -322,7 +356,10 @@ async function handleJoinProject(p: any, event: Event) {
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
         </div>
         <div class="project-card-body">
-          <h3 class="project-card-title">{{ p.name }}</h3>
+          <div class="project-title-row">
+            <h3 class="project-card-title">{{ p.name }}</h3>
+            <span class="project-access" :class="{ joined: p.is_member }">{{ p.is_member ? '已加入' : '可申请' }}</span>
+          </div>
           <p class="project-card-desc">{{ p.description || '暂无描述' }}</p>
           <div class="project-card-meta">
             <span>{{ p.owner_name || '—' }}</span>
@@ -431,20 +468,62 @@ async function handleJoinProject(p: any, event: Event) {
 </template>
 
 <style scoped>
-.page-root { max-width: 1000px; }
+.page-root { max-width: 1240px; }
+
+.page-header {
+  align-items: flex-end;
+  margin-bottom: 26px;
+}
+
+.page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 1.25px;
+}
+
+.eyebrow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-light);
+}
+
+.page-title {
+  font-size: clamp(25px, 2.2vw, 32px);
+  font-weight: 750;
+  letter-spacing: -0.8px;
+}
 
 /* ── Stat cards ─────────────────────────────────────────────────── */
-.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 28px; }
+.stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 30px; }
 .stat-card {
   display: flex;
   align-items: center;
   gap: 14px;
   background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 18px 20px;
+  border-radius: var(--radius-lg); padding: 19px 20px;
   box-shadow: var(--shadow-surface);
-  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
-.stat-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); }
+.stat-card::after {
+  content: '';
+  position: absolute;
+  width: 70px;
+  height: 70px;
+  right: -32px;
+  top: -35px;
+  border-radius: 50%;
+  background: var(--primary-light);
+}
+.stat-card:hover { border-color: color-mix(in oklch, var(--primary) 35%, var(--surface-border)); box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
 
 .stat-icon {
   width: 42px; height: 42px; border-radius: var(--radius-md);
@@ -455,21 +534,34 @@ async function handleJoinProject(p: any, event: Event) {
 .stat-icon--warning { background: var(--warning-light); color: var(--warning); }
 .stat-icon--info { background: var(--info-light); color: var(--info); }
 
-.stat-value { font-size: 24px; font-weight: 700; color: var(--foreground); letter-spacing: -0.5px; line-height: 1.2; }
+.stat-value { font-size: 26px; font-weight: 750; color: var(--foreground); letter-spacing: -0.7px; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 12.5px; color: var(--muted-foreground); margin-top: 2px; }
 
 /* ── Filter tabs ────────────────────────────────────────────────── */
-.filter-tabs {
+.project-toolbar {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 18px;
 }
 
-.filter-tab {
-  padding: 6px 16px;
+.filter-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
   border: 1px solid var(--surface-border);
-  border-radius: 999px;
+  border-radius: 10px;
   background: var(--surface);
+  box-shadow: var(--shadow-surface);
+}
+
+.filter-tab {
+  padding: 6px 13px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
   color: var(--muted-foreground);
   font-size: 13px;
   font-weight: 500;
@@ -479,37 +571,62 @@ async function handleJoinProject(p: any, event: Event) {
 }
 
 .filter-tab:hover {
-  border-color: var(--primary);
+  background: var(--surface-hover);
   color: var(--foreground);
 }
 
 .filter-tab.active {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 14%, transparent);
+}
+
+.project-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-search { width: 200px; }
+.project-sort { width: 132px; }
+
+.project-search :deep(.t-input),
+.project-sort :deep(.t-input) {
+  background: var(--surface);
 }
 
 /* ── Project grid ───────────────────────────────────────────────── */
-.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 14px; }
 .project-card {
   display: flex; align-items: center; gap: 14px;
   background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 16px 18px;
+  border-radius: var(--radius-lg); padding: 17px 18px;
   box-shadow: var(--shadow-surface); cursor: pointer;
   transition: all var(--transition-base);
 }
 .project-card:hover {
-  border-color: var(--primary);
+  border-color: color-mix(in oklch, var(--primary) 40%, var(--surface-border));
   box-shadow: var(--shadow-card-hover);
   transform: translateY(-1px);
 }
 .project-card-icon {
-  width: 40px; height: 40px; border-radius: var(--radius-md);
-  background: var(--primary-light); color: var(--primary);
+  width: 42px; height: 42px; border-radius: 11px;
+  background: linear-gradient(145deg, var(--primary-light), var(--primary-lighter)); color: var(--primary);
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .project-card-body { flex: 1; min-width: 0; }
+.project-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .project-card-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--foreground); }
+.project-access {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--warning-light);
+  color: var(--warning);
+  font-size: 9px;
+  font-weight: 700;
+}
+.project-access.joined { background: var(--success-light); color: var(--success); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
 .project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all var(--transition-base); flex-shrink: 0; }
@@ -573,5 +690,76 @@ async function handleJoinProject(p: any, event: Event) {
   padding: 1px 6px; border-radius: 999px;
   background: var(--primary-light); color: var(--primary);
   font-size: 10px; font-weight: 600;
+}
+
+@media (max-width: 980px) {
+  .project-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .filter-tabs {
+    overflow-x: auto;
+  }
+  .filter-tab {
+    flex: 0 0 auto;
+  }
+  .project-tools {
+    width: 100%;
+  }
+  .project-search {
+    flex: 1;
+    width: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .page-header {
+    align-items: flex-start;
+  }
+  .header-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .header-actions :deep(.t-button) {
+    width: 100%;
+  }
+  .stat-grid {
+    gap: 10px;
+  }
+  .stat-card {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+    padding: 15px;
+  }
+  .stat-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .stat-value {
+    font-size: 22px;
+  }
+  .project-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .project-search,
+  .project-sort {
+    width: 100%;
+  }
+  .project-grid {
+    grid-template-columns: 1fr;
+  }
+  .project-card {
+    align-items: flex-start;
+  }
+  .project-card-arrow {
+    display: none;
+  }
+  .btn-members,
+  .btn-memory,
+  .btn-delete {
+    opacity: 1;
+  }
 }
 </style>

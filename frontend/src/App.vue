@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useWebSocketStore } from './stores/websocket'
@@ -24,6 +24,9 @@ const notifDropdownVisible = ref(false)
 const notifStore = useNotificationStore()
 const msgStore = useMessageStore()
 const sidebarCollapsed = ref(false)
+const mobileSidebarOpen = ref(false)
+const appMainRef = ref<HTMLElement | null>(null)
+const pageScrollPositions = new Map<string, number>()
 let pollNotifTimer: ReturnType<typeof setInterval> | null = null
 const showUserMenu = ref(false)
 
@@ -45,6 +48,9 @@ const pageTitles: Record<string, string> = {
   '/risk-dashboard': '风险驾驶舱',
   '/skills': '技能仓库',
   '/settings': '系统设置',
+  '/profile': '个人资料',
+  '/messages': '消息中心',
+  '/audit': '审计中心',
 }
 
 const currentPageTitle = computed(() => pageTitles[route.path] || '')
@@ -87,7 +93,23 @@ watch(isLoginPage, (isLogin) => {
 watch([() => ws.connected, () => projectStore.currentProject?.id], joinCurrentProject, { immediate: true })
 
 // Close notification dropdown on route change
-watch(() => route.fullPath, () => { notifDropdownVisible.value = false })
+watch(() => route.fullPath, () => {
+  notifDropdownVisible.value = false
+  mobileSidebarOpen.value = false
+  showUserMenu.value = false
+})
+
+watch(() => route.name, async (nextName, previousName) => {
+  const scroller = appMainRef.value
+  if (!scroller) return
+  if (previousName) {
+    pageScrollPositions.set(String(previousName), scroller.scrollTop)
+  }
+  await nextTick()
+  scroller.scrollTop = nextName
+    ? (pageScrollPositions.get(String(nextName)) ?? 0)
+    : 0
+})
 
 onUnmounted(() => {
   unsubProject?.()
@@ -108,16 +130,21 @@ function handleLogout() {
 
   <!-- Main app: sidebar + top bar + content -->
   <div v-else class="app-root">
-    <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed }">
+    <button
+      v-if="mobileSidebarOpen"
+      class="mobile-sidebar-backdrop"
+      aria-label="关闭导航"
+      @click="mobileSidebarOpen = false"
+    />
+    <aside class="app-sidebar" :class="{ collapsed: sidebarCollapsed, 'mobile-open': mobileSidebarOpen }">
       <div class="sidebar-header">
         <div class="sidebar-logo">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
-            <rect x="3" y="7" width="18" height="13" rx="3" fill="var(--primary)"/>
-            <rect x="3" y="7" width="18" height="13" rx="3" fill="none" stroke="var(--primary-hover)" stroke-width="1"/>
-            <circle cx="8.5" cy="13" r="1.5" fill="#fff"/>
-            <circle cx="15.5" cy="13" r="1.5" fill="#fff"/>
-            <path d="M9 16.5h6" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
-            <rect x="9" y="3" width="6" height="4" rx="1.5" fill="var(--primary)"/>
+            <rect x="3" y="7" width="18" height="13" rx="3" fill="#fff"/>
+            <circle cx="8.5" cy="13" r="1.5" fill="var(--primary)"/>
+            <circle cx="15.5" cy="13" r="1.5" fill="var(--primary)"/>
+            <path d="M9 16.5h6" stroke="var(--primary)" stroke-width="1.5" stroke-linecap="round"/>
+            <rect x="9" y="3" width="6" height="4" rx="1.5" fill="#fff"/>
             <circle cx="6" cy="10" r="1" fill="var(--primary)"/>
             <circle cx="18" cy="10" r="1" fill="var(--primary)"/>
           </svg>
@@ -175,7 +202,18 @@ function handleLogout() {
       <!-- Top bar -->
       <header class="app-topbar">
         <div class="topbar-left">
+          <button
+            class="topbar-icon-btn mobile-menu-btn"
+            aria-label="打开导航"
+            @click="sidebarCollapsed = false; mobileSidebarOpen = true"
+          >
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+          </button>
           <h2 class="topbar-title">{{ currentPageTitle }}</h2>
+          <div v-if="projectStore.currentProject" class="topbar-project">
+            <span class="project-status-dot"></span>
+            <span>{{ projectStore.currentProject.name }}</span>
+          </div>
         </div>
         <div class="topbar-right">
           <button
@@ -201,10 +239,18 @@ function handleLogout() {
       </header>
 
       <!-- Content -->
-      <main class="app-main">
+      <main ref="appMainRef" class="app-main">
         <router-view v-slot="{ Component, route: routerRoute }">
           <transition name="fade-slide" mode="out-in">
-            <component :is="Component" :key="routerRoute.fullPath" />
+            <!-- Cache route instances by page, not by full URL. Query-string
+                 changes (for example review_id) no longer destroy editors,
+                 filters, selections, and already loaded data. -->
+            <KeepAlive :max="12">
+              <component
+                :is="Component"
+                :key="routerRoute.name || routerRoute.path"
+              />
+            </KeepAlive>
           </transition>
         </router-view>
       </main>
@@ -228,9 +274,12 @@ function handleLogout() {
 .app-sidebar {
   width: 240px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 100;
   display: flex;
   flex-direction: column;
-  background: var(--app-shell);
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(18px);
   border-right: 1px solid var(--surface-border);
   user-select: none;
   transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
@@ -260,6 +309,9 @@ function handleLogout() {
   height: 32px;
   flex-shrink: 0;
   transition: opacity 0.2s ease;
+  border-radius: 10px;
+  background: var(--primary-gradient);
+  box-shadow: 0 7px 18px var(--primary-glow);
 }
 
 .sidebar-title {
@@ -485,13 +537,14 @@ function handleLogout() {
 }
 
 .app-topbar {
-  height: 52px;
+  height: 60px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 28px;
-  background: var(--surface);
+  padding: 0 32px;
+  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  backdrop-filter: blur(16px);
   border-bottom: 1px solid var(--surface-border);
 }
 
@@ -500,6 +553,42 @@ function handleLogout() {
   font-weight: 600;
   margin: 0;
   color: var(--foreground);
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.topbar-project {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 240px;
+  padding: 5px 10px;
+  border: 1px solid var(--surface-border);
+  border-radius: 999px;
+  background: var(--surface-subtle);
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.topbar-project span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-status-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-light);
 }
 
 .topbar-right {
@@ -553,6 +642,100 @@ function handleLogout() {
   flex: 1;
   overflow-y: auto;
   background: var(--page-canvas);
-  padding: 24px 28px;
+  padding: 30px 32px 48px;
+}
+
+.mobile-menu-btn,
+.mobile-sidebar-backdrop {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  .app-sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 300;
+    width: min(86vw, 280px);
+    transform: translateX(-102%);
+    box-shadow: var(--shadow-floating);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .app-sidebar.collapsed {
+    width: min(86vw, 280px);
+  }
+
+  .app-sidebar.mobile-open {
+    transform: translateX(0);
+  }
+
+  .app-sidebar.collapsed .sidebar-header {
+    padding: 16px 18px;
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .app-sidebar.collapsed .sidebar-logo,
+  .app-sidebar.collapsed .sidebar-title {
+    position: static;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .app-sidebar.collapsed .sidebar-collapse-btn {
+    margin-left: auto;
+  }
+
+  .mobile-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    padding: 0;
+    border: 0;
+    background: rgb(15 23 42 / 0.42);
+    backdrop-filter: blur(3px);
+    animation: backdropIn 0.2s ease both;
+  }
+
+  .mobile-menu-btn {
+    display: flex;
+    margin-left: -8px;
+  }
+
+  .app-topbar {
+    height: 56px;
+    padding: 0 18px;
+  }
+
+  .topbar-project {
+    display: none;
+  }
+
+  .app-main {
+    padding: 22px 18px 40px;
+  }
+
+  @keyframes backdropIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+}
+
+@media (max-width: 480px) {
+  .topbar-title {
+    max-width: 100px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .topbar-right {
+    gap: 2px;
+  }
+
+  .app-main {
+    padding-inline: 14px;
+  }
 }
 </style>

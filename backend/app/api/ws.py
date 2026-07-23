@@ -49,8 +49,28 @@ class ConnectionManager:
 
     def disconnect(self, user_id: int) -> None:
         removed = self._clients.pop(user_id, None)
+        self._user_project.pop(user_id, None)
         if removed:
             logger.info(f"WS client disconnected: {removed['username']} (total: {len(self._clients)})")
+
+    async def shutdown(self) -> None:
+        """Close every socket during application shutdown.
+
+        Code 1012 tells clients that the service is restarting, allowing the
+        frontend reconnect policy to distinguish it from a normal logout.
+        """
+        clients = list(self._clients.values())
+        self._clients.clear()
+        self._user_project.clear()
+        for info in clients:
+            try:
+                await info["ws"].close(
+                    code=status.WS_1012_SERVICE_RESTART,
+                    reason="Service restarting",
+                )
+            except Exception:
+                logger.debug("Failed to close WebSocket during shutdown", exc_info=True)
+        self._main_loop = None
 
     def get_online_users(self) -> list[dict]:
         """Return list of online users with id, username, display_name."""

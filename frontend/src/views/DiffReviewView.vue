@@ -67,6 +67,20 @@ watch(() => store.currentProject?.id, async (pid) => {
   await loadReviews()
 }, { immediate: true })
 
+// The route instance is cached, so query changes must select the target
+// explicitly instead of relying on a component remount.
+watch(() => route.query.review_id, async (rawReviewId) => {
+  if (route.path !== '/reviews') return
+  const targetId = Number(rawReviewId)
+  if (!targetId) return
+  let target = reviews.value.find((review: any) => review.id === targetId)
+  if (!target) {
+    await loadReviews()
+    target = reviews.value.find((review: any) => review.id === targetId)
+  }
+  if (target) selectedReview.value = target
+})
+
 watch(() => selectedReview.value?.id, async (reviewId) => {
   voteSummary.value = null
   voteComment.value = ''

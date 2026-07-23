@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { MessagePlugin } from 'tdesign-vue-next'
+import router from '../router'
 
 const api = axios.create({
   baseURL: '/api',
@@ -46,7 +47,9 @@ api.interceptors.response.use(
       handling401 = true
       localStorage.removeItem('token')
       if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login'
+        // Stay inside the SPA. A hard location change discarded every cached
+        // page and made an expired background request look like a full reload.
+        void router.replace('/login')
       }
       setTimeout(() => { handling401 = false }, 1000)
       return Promise.reject(error)

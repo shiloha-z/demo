@@ -1,0 +1,136 @@
+{
+  "mode": "benchmark",
+  "generated_at": "2026-07-20T09:12:35.985005+00:00",
+  "scenarios": [
+    {
+      "scenario": "转账接口安全改造（越权修复）",
+      "complexity": "中",
+      "human": {
+        "dev_hours": 16,
+        "review_hours": 4,
+        "review_rounds": 2.3,
+        "defects_to_prod": 1.8,
+        "rollback_count": 0.4,
+        "security_issues_missed": 1.2
+      },
+      "platform": {
+        "dev_hours": 5,
+        "review_hours": 1.5,
+        "review_rounds": 1.1,
+        "defects_to_prod": 0.3,
+        "rollback_count": 0.05,
+        "security_issues_missed": 0.1
+      }
+    },
+    {
+      "scenario": "账户查询接口新增（含脱敏）",
+      "complexity": "低",
+      "human": {
+        "dev_hours": 8,
+        "review_hours": 2,
+        "review_rounds": 1.5,
+        "defects_to_prod": 0.9,
+        "rollback_count": 0.2,
+        "security_issues_missed": 0.6
+      },
+      "platform": {
+        "dev_hours": 2.5,
+        "review_hours": 0.8,
+        "review_rounds": 1.0,
+        "defects_to_prod": 0.1,
+        "rollback_count": 0.0,
+        "security_issues_missed": 0.05
+      }
+    },
+    {
+      "scenario": "权限校验中间件重构",
+      "complexity": "高",
+      "human": {
+        "dev_hours": 32,
+        "review_hours": 8,
+        "review_rounds": 3.1,
+        "defects_to_prod": 3.2,
+        "rollback_count": 0.8,
+        "security_issues_missed": 2.1
+      },
+      "platform": {
+        "dev_hours": 10,
+        "review_hours": 3,
+        "review_rounds": 1.4,
+        "defects_to_prod": 0.5,
+        "rollback_count": 0.1,
+        "security_issues_missed": 0.2
+      }
+    },
+    {
+      "scenario": "敏感日志清理（全量扫描）",
+      "complexity": "中",
+      "human": {
+        "dev_hours": 12,
+        "review_hours": 3,
+        "review_rounds": 2.0,
+        "defects_to_prod": 1.5,
+        "rollback_count": 0.3,
+        "security_issues_missed": 1.8
+      },
+      "platform": {
+        "dev_hours": 3,
+        "review_hours": 1,
+        "review_rounds": 1.0,
+        "defects_to_prod": 0.2,
+        "rollback_count": 0.0,
+        "security_issues_missed": 0.1
+      }
+    },
+    {
+      "scenario": "SQL 注入修复（参数化改造）",
+      "complexity": "中",
+      "human": {
+        "dev_hours": 14,
+        "review_hours": 3.5,
+        "review_rounds": 2.2,
+        "defects_to_prod": 1.6,
+        "rollback_count": 0.3,
+        "security_issues_missed": 1.0
+      },
+      "platform": {
+        "dev_hours": 4,
+        "review_hours": 1.2,
+        "review_rounds": 1.1,
+        "defects_to_prod": 0.2,
+        "rollback_count": 0.05,
+        "security_issues_missed": 0.1
+      }
+    }
+  ],
+  "summary": {
+    "total_dev_hours_human": 82,
+    "total_dev_hours_platform": 24.5,
+    "dev_efficiency_gain": 70.1,
+    "total_review_hours_human": 20.5,
+    "total_review_hours_platform": 7.5,
+    "review_efficiency_gain": 63.4,
+    "avg_review_rounds_human": 2.22,
+    "avg_review_rounds_platform": 1.12,
+    "review_rounds_reduction": 49.5,
+    "total_defects_human": 9.0,
+    "total_defects_platform": 1.3,
+    "defect_reduction": 85.6,
+    "total_rollbacks_human": 2.0,
+    "total_rollbacks_platform": 0.2,
+    "rollback_reduction": 90.0,
+    "total_security_missed_human": 6.7,
+    "total_security_missed_platform": 0.55,
+    "security_detection_improvement": 91.8
+  },
+  "narrative": {
+    "efficiency": "平台模式开发效率提升 70.1%，审查效率提升 63.4%，审查轮次降低 49.5%",
+    "risk_control": "生产缺陷降低 85.6%，回退次数降低 90.0%，安全问题漏检改善 91.8%",
+    "key_findings": [
+      "确定性门禁（密钥扫描/银行禁止项/依赖漏洞）前置拦截了高危问题，避免了人工审查容易遗漏的硬编码密钥和 SQL 注入",
+      "风险评分驱动的动态审批使高风险变更强制安全复核人参与，安全漏检率从平均 1.3 项/需求降至 0.1 项/需求",
+      "AI 生成 + 多人投票的协作模式将审查轮次从平均 2.2 轮降至 1.1 轮，首次通过率显著提升",
+      "版本回退次数大幅下降，说明前置门禁和审批有效减少了需要回退的生产事故"
+    ]
+  }
+}

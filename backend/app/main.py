@@ -1,4 +1,4 @@
-import sys, io
+import sys
 
 # ── Windows UTF-8 safeguard ──────────────────────────────────────────────
 # On Windows the default console encoding is GBK, which cannot encode many
@@ -7,28 +7,31 @@ import sys, io
 # for stdout/stderr so third-party output (CrewAI, rich, etc.) never crashes,
 # regardless of how uvicorn is launched.
 #
-# NOTE: sys.stdout.reconfigure(encoding="utf-8") raises UnsupportedOperation on
-# a Windows console, so we instead wrap the underlying binary buffer with a
-# UTF-8 TextIOWrapper. This works on every launch method (uvicorn, start.ps1,
-# debuggers) and never crashes on emoji/unicode output.
+# Do not replace or wrap the stream object: test runners, IDEs and process
+# supervisors own those streams and may use temporary capture files. Replacing
+# them can close the owner's file when our wrapper is collected.
 def _force_utf8(stream):
     try:
-        return io.TextIOWrapper(stream.buffer, encoding="utf-8", errors="replace")
+        stream.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
-        try:
-            stream.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
-        return stream
+        # Some capture/proxy streams intentionally do not support reconfigure.
+        # Keeping the original stream is safer than taking ownership of its
+        # underlying buffer.
+        pass
+    return stream
 
 sys.stdout = _force_utf8(sys.stdout)
 sys.stderr = _force_utf8(sys.stderr)
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import init_db
+from app.core.http_stability import install_http_stability
 from app.api.auth import router as auth_router
 from app.api.projects import router as projects_router
 from app.api.agents import router as agents_router
@@ -46,15 +49,27 @@ from app.api.audit import router as audit_router
 from app.api.risk_dashboard import router as risk_dashboard_router
 from app.api.admin import router as admin_router  # 调试用管理后台（无鉴权，仅本地）
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # Persisted merge-queued tasks survive a process restart and are resumed
-    # by the bounded, project-serial merge scheduler.
-    from app.services.execution_service import recover_merge_queue
+    # Process-local model calls cannot survive a restart. Repair their durable
+    # state before accepting traffic, then resume persisted merge work.
+    from app.services.execution_service import (
+        recover_interrupted_agent_runs,
+        recover_merge_queue,
+    )
+    recovered = recover_interrupted_agent_runs()
     recover_merge_queue()
-    yield
+    logger.info("Application ready; recovered_interrupted_tasks=%s", recovered)
+    try:
+        yield
+    finally:
+        from app.api.ws import manager
+        await manager.shutdown()
+        logger.info("Application shutdown complete")
 
 
 app = FastAPI(
@@ -62,6 +77,7 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+install_http_stability(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -107,12 +123,12 @@ def health_check():
     try:
         from app.core.database import SessionLocal
         from sqlalchemy import text
-        db = SessionLocal()
-        db.execute(text("SELECT 1"))
-        db.close()
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
         checks["database"] = "ok"
     except Exception as e:
-        checks["database"] = f"error: {e}"
+        logger.error("Database readiness check failed", exc_info=e)
+        checks["database"] = "error"
         healthy = False
 
     # Git CLI
@@ -121,7 +137,8 @@ def health_check():
         subprocess.run(["git", "--version"], capture_output=True, check=True, timeout=5)
         checks["git"] = "ok"
     except Exception as e:
-        checks["git"] = f"error: {e}"
+        logger.error("Git readiness check failed", exc_info=e)
+        checks["git"] = "error"
         healthy = False
 
     # ChromaDB (optional — degrade gracefully)
@@ -134,5 +151,14 @@ def health_check():
     except Exception:
         checks["chromadb"] = "not installed"
 
-    status_code = 200 if healthy else 503
-    return {"status": "ok" if healthy else "degraded", "checks": checks}, status_code
+    status_code = status.HTTP_200_OK if healthy else status.HTTP_503_SERVICE_UNAVAILABLE
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+    )
+
+
+@app.get("/api/live")
+def liveness_check():
+    """Liveness probe: the event loop can accept and route requests."""
+    return {"status": "ok"}
