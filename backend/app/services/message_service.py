@@ -66,6 +66,8 @@ def _broadcast(msg: Message) -> None:
     When the message belongs to a project, broadcast only to that project's
     members so non-members (e.g. join-request applicants) don't see it.
     """
+    import logging
+    _log = logging.getLogger(__name__)
     try:
         payload = {
             "id": msg.id,
@@ -85,7 +87,7 @@ def _broadcast(msg: Message) -> None:
             broadcast_sync("message_new", payload)
     except Exception:
         # Messaging must never break the caller's main flow.
-        pass
+        _log.warning("Failed to broadcast message_new for msg #%s", msg.id, exc_info=True)
 
 
 def unread_count(

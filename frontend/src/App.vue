@@ -6,6 +6,7 @@ import { useWebSocketStore } from './stores/websocket'
 import { useThemeStore } from './stores/theme'
 import { useProjectStore } from './stores/project'
 import { useNotificationStore } from './stores/notification'
+import { useMessageStore } from './stores/message'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
 
@@ -19,7 +20,9 @@ const projectStore = useProjectStore()
 const isLoginPage = computed(() => route.meta.guest === true)
 const chatVisible = ref(false)
 const notifStore = useNotificationStore()
+const msgStore = useMessageStore()
 const sidebarCollapsed = ref(false)
+let pollNotifTimer: ReturnType<typeof setInterval> | null = null
 const showUserMenu = ref(false)
 
 function toggleUserMenu() {
@@ -65,6 +68,11 @@ function joinCurrentProject() {
 onMounted(() => {
   if (!isLoginPage.value) ws.connect()
   unsubProject = ws.on('project_update', refreshProjects)
+  // Initial notification count + periodic polling fallback
+  msgStore.refresh()
+  pollNotifTimer = setInterval(() => msgStore.refresh(), 30_000)
+  // Refresh on WebSocket reconnect to catch missed messages
+  watch(() => ws.connected, (ok) => { if (ok) msgStore.refresh() })
 })
 
 // App stays mounted across login/logout, so connect after navigation instead
@@ -79,6 +87,7 @@ watch([() => ws.connected, () => projectStore.currentProject?.id], joinCurrentPr
 onUnmounted(() => {
   unsubProject?.()
   ws.disconnect()
+  if (pollNotifTimer) { clearInterval(pollNotifTimer); pollNotifTimer = null }
 })
 
 function handleLogout() {

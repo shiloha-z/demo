@@ -42,6 +42,8 @@ watch(() => wsStore.connected, (ok) => {
   if (ok) {
     unsubReview = wsStore.on('review_update', () => fetchPendingCount())
     unsubMessage = wsStore.on('message_new', () => msgStore.refresh())
+    // Catch up on any messages that arrived while disconnected
+    msgStore.refresh()
   }
 }, { immediate: true })
 
