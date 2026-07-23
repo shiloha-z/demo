@@ -647,9 +647,6 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
 
     task.status = TaskStatus.REVIEWING
     task.completed_at = datetime.now(timezone.utc)
-    agent = db.get(Agent, task.agent_id)
-    if agent:
-        agent.status = AgentStatus.DONE
     db.commit()
 
     final_message = (
@@ -659,13 +656,26 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
     )
     _progress(task.id, project_id, final_message, "done")
 
+    # Agent is only "done" when no other tasks are still using it.
+    other_active = db.query(Task.id).filter(
+        Task.agent_id == task.agent_id,
+        Task.id != task.id,
+        Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION, TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING]),
+    ).first()
+    agent_status = "done" if not other_active else "working"
+    db.query(Agent).filter(Agent.id == task.agent_id).update(
+        {Agent.status: AgentStatus.DONE if not other_active else AgentStatus.WORKING},
+        synchronize_session=False,
+    )
+    db.commit()
+
     broadcast_sync("task_update", {
         "id": task.id, "project_id": project_id, "status": "reviewing",
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
     })
     broadcast_sync("agent_update", {
-        "id": task.agent_id, "status": "done",
+        "id": task.agent_id, "status": agent_status,
         "last_task_id": task.id, "last_task_status": "reviewing",
     })
 
@@ -694,10 +704,25 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
 def _free_child_agents(db, children):
     for c in children:
         try:
-            a = db.get(Agent, c.agent_id)
-            if a and a.status == AgentStatus.WORKING:
-                a.status = AgentStatus.IDLE
-                db.commit()
+            _maybe_idle_agent(db, c.agent_id)
+        except Exception:
+            pass
+
+
+def _maybe_idle_agent(db, agent_id: int) -> None:
+    """Set the agent to IDLE only when no other task is still using it."""
+    other_active = db.query(Task.id).filter(
+        Task.agent_id == agent_id,
+        Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION, TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING]),
+    ).first()
+    if not other_active:
+        db.query(Agent).filter(Agent.id == agent_id).update(
+            {Agent.status: AgentStatus.IDLE}, synchronize_session=False,
+        )
+        db.commit()
+        try:
+            from app.api.ws import broadcast_sync
+            broadcast_sync("agent_update", {"id": agent_id, "status": "idle"})
         except Exception:
             pass
 
@@ -722,9 +747,9 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
     task.status = TaskStatus.FAILED
     task.completed_at = datetime.now(timezone.utc)
     agent = db.get(Agent, task.agent_id)
-    if agent:
-        agent.status = AgentStatus.IDLE
     db.commit()
+    if agent:
+        _maybe_idle_agent(db, agent.id)
 
     # Preserve failure lessons for both the assigned Agent and the project so
     # future work can avoid repeating the same issue.

@@ -35,6 +35,7 @@ class ProjectCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str = Field(default="")
     workspace_name: str = Field(default="", max_length=100, description="工作空间文件夹名，留空则使用项目名")
+    force: bool = Field(default=False, description="跳过同名警告，强制创建")
 
 
 class ProjectResponse(BaseModel):
@@ -206,6 +207,17 @@ def list_projects(
 
 @router.post("", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # Warn about duplicate project names owned by the same user.
+    existing = db.query(Project).filter(
+        Project.name == req.name.strip(),
+        Project.owner_id == user.id,
+    ).first()
+    if existing and not req.force:
+        raise HTTPException(
+            status_code=409,
+            detail=f"已存在同名项目「{req.name.strip()}」（#{existing.id}），是否继续创建？",
+        )
+
     # Generate unique project_id
     project_id = _generate_project_id()
     while db.query(Project).filter(Project.project_id == project_id).first():

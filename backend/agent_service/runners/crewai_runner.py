@@ -115,7 +115,7 @@ class CrewAIRunner(BaseRunner):
             if enable_planning:
                 if on_progress:
                     on_progress("🧭 正在让模型自主规划任务分解...", "planning")
-                plan_steps = plan_task(
+                plan_steps, _ = plan_task(
                     task_description, model_name,
                     settings.DEEPSEEK_API_KEY, settings.DEEPSEEK_BASE_URL,
                     max_subtasks,

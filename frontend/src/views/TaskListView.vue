@@ -308,6 +308,11 @@ async function loadTasks() {
   tasks.value = active.data.items || active.data
   archivedTasks.value = archived.data.items || archived.data
   archiveChecked.value = new Set()
+  // Restore planning spinners for tasks that are still being planned
+  // (survives page navigation since the backend persists the 'planning' status).
+  for (const t of tasks.value) {
+    if (t.status === 'planning') planning.value = new Set(planning.value).add(t.id)
+  }
   await refreshSubtrees()
 }
 
@@ -497,10 +502,17 @@ function hasActivePipeline(task: any): boolean {
 }
 
 // ── Task workspace ──────────────────────────────────────────────
+const workspaceTaskId = computed(() => {
+  const t = selectedTask.value
+  if (!t) return null
+  // Child tasks share the parent's worktree — resolve to the root task ID.
+  return t.parent_task_id ? t.parent_task_id : t.id
+})
+
 function toggleWorkspace() {
   showWorkspace.value = !showWorkspace.value
-  if (showWorkspace.value) {
-    loadTaskFiles(selectedTask.value.id)
+  if (showWorkspace.value && workspaceTaskId.value) {
+    loadTaskFiles(workspaceTaskId.value)
   }
 }
 
@@ -725,6 +737,13 @@ async function resumeTask(task: any, event: Event) {
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a3 3 0 0 0 3 3h.5M18 8.5v3a3 3 0 0 1-3 3h-.5"/></svg>
                 </button>
+                <span
+                  v-else-if="planning.has(t.id)"
+                  class="plan-spinner"
+                  title="正在规划中…"
+                >
+                  <span class="spinner"></span>
+                </span>
                 <button
                   v-if="t.status === 'running'"
                   class="stop-btn"
@@ -902,7 +921,7 @@ async function resumeTask(task: any, event: Event) {
             </div>
             <div class="detail-header-right">
               <button
-                v-if="['running','paused','reviewing','conflict_resolution'].includes(taskDetail.status)"
+                v-if="['running','paused','reviewing','conflict_resolution','subtask_running','subtask_done','planning'].includes(taskDetail.status)"
                 class="workspace-btn"
                 :class="{ active: showWorkspace }"
                 @click="toggleWorkspace()"
@@ -1046,7 +1065,7 @@ async function resumeTask(task: any, event: Event) {
           <div class="workspace-panel" role="dialog" aria-modal="true" aria-label="任务工作空间">
             <div class="workspace-panel-header">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-              <span>工作空间 · 任务 #{{ selectedTask.id }}</span>
+              <span>工作空间 · 任务 #{{ workspaceTaskId }}</span>
               <button class="workspace-close-btn" @click="showWorkspace = false">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               </button>
@@ -1064,7 +1083,7 @@ async function resumeTask(task: any, event: Event) {
                   :key="f.path"
                   class="workspace-file-item"
                   :class="{ active: selectedTaskFile?.path === f.path, modified: f.modified }"
-                  @click="loadTaskFile(selectedTask.id, f.path)"
+                  @click="loadTaskFile(workspaceTaskId!, f.path)"
                 >
                   <span class="workspace-file-icon">{{ f.type === 'tree' ? '📁' : fileIcon(f.name) }}</span>
                   <span class="workspace-file-name">{{ f.name }}</span>
@@ -1444,6 +1463,18 @@ async function resumeTask(task: any, event: Event) {
   transition: filter var(--transition-fast), transform var(--transition-fast);
 }
 .plan-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.plan-spinner {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px;
+}
+.plan-spinner .spinner {
+  width: 14px; height: 14px;
+  border: 2px solid oklch(0.55 0.2 260 / 0.18);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .subtask-progress {
   margin-left: auto; font-size: 11px; padding: 1px 7px; border-radius: 99px;
   color: #8957e5; background: #8957e514; font-weight: 600;

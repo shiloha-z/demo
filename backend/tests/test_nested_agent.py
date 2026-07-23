@@ -1,9 +1,9 @@
 """Tests for the nested-agent (task planning) feature.
 
 These focus on the safety-critical behaviour called out in the design: the
-planner must never raise (it returns ``None`` on any failure so the caller
-falls back to the default pipeline), and it must return dependency-ordered,
-valid steps.
+planner must never raise (it returns ``(None, reason)`` on any failure so the
+caller falls back to the default pipeline), and it must return
+dependency-ordered, valid steps.
 """
 
 import json
@@ -35,8 +35,9 @@ def test_plan_task_returns_ordered_steps_on_success():
     with mock.patch("urllib.request.urlopen", return_value=mock.MagicMock(
         read=lambda: body, __enter__=lambda self: self, __exit__=lambda *a: False
     )):
-        steps = plan_task("实现一个登录接口", "deepseek-chat", "key", "https://api.deepseek.com")
+        steps, reason = plan_task("实现一个登录接口", "deepseek-chat", "key", "https://api.deepseek.com")
     assert steps is not None
+    assert reason == ""
     # Dependency order must be preserved: 1 -> 2 -> 3
     assert [s.id for s in steps] == [1, 2, 3]
 
@@ -46,21 +47,27 @@ def test_plan_task_returns_none_on_malformed_json():
     with mock.patch("urllib.request.urlopen", return_value=mock.MagicMock(
         read=lambda: body, __enter__=lambda self: self, __exit__=lambda *a: False
     )):
-        steps = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com")
+        steps, reason = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com")
     assert steps is None
+    assert reason  # should have a meaningful error message
 
 
 def test_plan_task_returns_none_on_network_error():
     with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("boom")):
-        steps = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com")
+        steps, reason = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com")
     assert steps is None
+    assert reason  # should contain the error info
 
 
 def test_plan_task_returns_none_without_credentials():
     # Missing API key / base_url must short-circuit without a network call.
     with mock.patch("urllib.request.urlopen") as m:
-        assert plan_task("task", "deepseek-chat", "", "https://api.deepseek.com") is None
-        assert plan_task("task", "deepseek-chat", "key", "") is None
+        steps1, reason1 = plan_task("task", "deepseek-chat", "", "https://api.deepseek.com")
+        assert steps1 is None
+        assert reason1
+        steps2, reason2 = plan_task("task", "deepseek-chat", "key", "")
+        assert steps2 is None
+        assert reason2
         m.assert_not_called()
 
 
@@ -70,7 +77,8 @@ def test_plan_task_truncates_to_max_subtasks():
     with mock.patch("urllib.request.urlopen", return_value=mock.MagicMock(
         read=lambda: body, __enter__=lambda self: self, __exit__=lambda *a: False
     )):
-        steps = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com", max_subtasks=3)
+        steps, reason = plan_task("task", "deepseek-chat", "key", "https://api.deepseek.com", max_subtasks=3)
+    assert reason == ""
     assert len(steps) == 3
 
 

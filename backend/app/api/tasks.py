@@ -340,28 +340,9 @@ def create_task(
     reviewer_agent = _resolve_agent(req.reviewer_agent_id, "reviewer")
     security_agent = _resolve_agent(req.security_agent_id, "security")
 
-    # ── Conflict guard ───────────────────────────────────────────────
-    # Agent must be idle — one agent can only run one task at a time
-    if agent.status == AgentStatus.WORKING:
-        raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
-    # Block if agent has a task currently running (covers gap when status hasn't synced)
-    existing_running = (
-        db.query(Task)
-        .filter(Task.agent_id == req.agent_id, Task.status == TaskStatus.RUNNING)
-        .first()
-    )
-    if existing_running:
-        raise HTTPException(status_code=409,
-            detail=f"Agent「{agent.name}」有任务 #${existing_running.id} 正在执行，请等待完成")
-    # Also block if agent has a task awaiting review (must approve/reject first)
-    existing_reviewing = (
-        db.query(Task)
-        .filter(Task.agent_id == req.agent_id, Task.status == TaskStatus.REVIEWING)
-        .first()
-    )
-    if existing_reviewing:
-        raise HTTPException(status_code=409,
-            detail=f"Agent「{agent.name}」有任务 #${existing_reviewing.id} 待审核，请先处理审查")
+    # Agent concurrency is allowed — one agent may serve multiple tasks.
+    # Worktree isolation (per top-level task) and parent-level serialisation
+    # (for children sharing a parent branch) ensure safety.
 
     task = Task(
         agent_id=req.agent_id,
@@ -455,7 +436,7 @@ def plan_task_endpoint(
 
     model_name = agent.model or "deepseek-chat"
     from app.core.config import settings
-    steps = plan_task(
+    steps, reason = plan_task(
         f"{parent.title}\n{parent.description}".strip(),
         model_name,
         settings.DEEPSEEK_API_KEY,
@@ -464,7 +445,8 @@ def plan_task_endpoint(
         project_context=collect_project_context(project.workspace_path),
     )
     if not steps:
-        raise HTTPException(status_code=422, detail="规划模型未能生成可用子任务，请稍后重试或手动创建子任务")
+        detail = f"规划失败：{reason}" if reason else "规划模型未能生成可用子任务，请稍后重试或手动创建子任务"
+        raise HTTPException(status_code=422, detail=detail)
 
     plan_payload = [
         {"id": s.id, "title": s.title, "goal": s.goal, "deps": s.deps}
@@ -649,19 +631,7 @@ def start_task(
     agent = db.get(Agent, task.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if agent.status == AgentStatus.WORKING and task.parent_task_id is None:
-        # Top-level tasks still enforce one-agent-one-task. Child tasks in a
-        # planning tree may run concurrently, so the guard is relaxed for them.
-        active_task = db.query(Task).filter(
-            Task.agent_id == agent.id,
-            Task.status == TaskStatus.RUNNING,
-        ).first()
-        if active_task:
-            raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
-        # Recover from an interrupted request that set the agent to WORKING
-        # before the background runner was successfully queued.
-        agent.status = AgentStatus.IDLE
-        db.flush()
+    # Agent concurrency is allowed — no per-agent guard here.
 
     # Claim the task and agent conditionally in one transaction. Concurrent
     # start requests can no longer both pass the read-before-write checks.
@@ -675,7 +645,6 @@ def start_task(
     }, synchronize_session=False)
     claimed_agent = db.query(Agent).filter(
         Agent.id == agent.id,
-        Agent.status != AgentStatus.WORKING,
     ).update({Agent.status: AgentStatus.WORKING}, synchronize_session=False)
     if not claimed_task or not claimed_agent:
         db.rollback()
@@ -712,10 +681,18 @@ def start_task(
     if not enqueue_agent_run(task.id):
         task.status = TaskStatus.PENDING
         task.started_at = None
-        agent.status = AgentStatus.IDLE
+        # Only go idle when no other task is still using this agent.
+        other_active = db.query(Task.id).filter(
+            Task.agent_id == agent.id,
+            Task.id != task.id,
+            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION, TaskStatus.SUBTASK_RUNNING]),
+        ).first()
+        if not other_active:
+            agent.status = AgentStatus.IDLE
         db.commit()
         broadcast_sync("task_update", {"id": task.id, "project_id": project_id, "status": "pending"})
-        broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
+        if not other_active:
+            broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
         raise HTTPException(status_code=409, detail="任务已在执行或执行器正在关闭，请稍后重试")
 
     return _task_to_response(task)
@@ -799,8 +776,7 @@ def resume_task(
     agent = db.get(Agent, task.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
-    if agent.status == AgentStatus.WORKING:
-        raise HTTPException(status_code=409, detail=f"Agent「{agent.name}」正在执行任务，请等待完成")
+    # Agent concurrency is allowed — no per-agent guard here.
 
     # Claim both rows conditionally. Two simultaneous resume requests cannot
     # both transition the same paused task back to running.
@@ -814,7 +790,6 @@ def resume_task(
     }, synchronize_session=False)
     claimed_agent = db.query(Agent).filter(
         Agent.id == agent.id,
-        Agent.status != AgentStatus.WORKING,
     ).update({Agent.status: AgentStatus.WORKING}, synchronize_session=False)
     if not claimed_task or not claimed_agent:
         db.rollback()
@@ -826,7 +801,13 @@ def resume_task(
     # Resume in the task's existing isolated worktree.
     if not enqueue_agent_run(task.id, resume=True):
         task.status = TaskStatus.PAUSED
-        agent.status = AgentStatus.IDLE
+        other_active = db.query(Task.id).filter(
+            Task.agent_id == agent.id,
+            Task.id != task.id,
+            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION, TaskStatus.SUBTASK_RUNNING]),
+        ).first()
+        if not other_active:
+            agent.status = AgentStatus.IDLE
         db.commit()
         raise HTTPException(status_code=409, detail="任务恢复入队失败，请稍后重试")
 
@@ -1035,6 +1016,25 @@ def list_all_tasks(
 
 # ── Task workspace (browse task branch files) ─────────────────────────
 
+def _resolve_workspace(task: Task, project: Project, db: Session) -> tuple[str, str]:
+    """Return (branch_name, worktree_path) for *task*.
+
+    Child tasks share their root-parent's worktree and branch.  Walk up to
+    the top-most task so the file browser shows the real working directory
+    even when the user clicks on a subtask.
+    """
+    root = task
+    while root.parent_task_id:
+        parent = db.query(Task).filter(Task.id == root.parent_task_id).first()
+        if not parent:
+            break
+        root = parent
+
+    branch = root.branch_name or f"task/{root.id}"
+    wt = root.worktree_path if root.worktree_path and git.get_repo(root.worktree_path) else ""
+    return branch, wt
+
+
 @router.get("/{task_id}/files")
 def task_file_tree(
     project_id: int,
@@ -1043,7 +1043,7 @@ def task_file_tree(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """List files from the task's working branch (task/{task_id})."""
+    """List files from the task's working branch."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -1051,8 +1051,7 @@ def task_file_tree(
     project = db.get(Project, project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
-    branch_name = task.branch_name or f"task/{task_id}"
-    task_workspace = task.worktree_path if task.worktree_path and git.get_repo(task.worktree_path) else ""
+    branch_name, task_workspace = _resolve_workspace(task, project, db)
     try:
         # Prefer the isolated task worktree so the panel also shows files that
         # have been written but not committed yet.
@@ -1086,7 +1085,7 @@ def task_read_file(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Read a file from the task's working branch (task/{task_id})."""
+    """Read a file from the task's working branch."""
     require_project_member(project_id, user, db)
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
@@ -1094,8 +1093,7 @@ def task_read_file(
     project = db.get(Project, project_id)
     if not project or not project.workspace_path:
         raise HTTPException(status_code=400, detail="Workspace not initialized")
-    branch_name = task.branch_name or f"task/{task_id}"
-    task_workspace = task.worktree_path if task.worktree_path and git.get_repo(task.worktree_path) else ""
+    branch_name, task_workspace = _resolve_workspace(task, project, db)
     try:
         content = git.read_file(task_workspace, path) if task_workspace else git.read_file_snapshot(
             project.workspace_path, branch_name, path

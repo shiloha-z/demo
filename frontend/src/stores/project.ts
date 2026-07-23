@@ -38,8 +38,8 @@ export const useProjectStore = defineStore('project', () => {
     switchableProjects.value = data.projects
   }
 
-  async function createProject(name: string, description: string, workspace_name?: string): Promise<Project> {
-    const { data } = await api.post<Project>('/projects', { name, description, workspace_name })
+  async function createProject(name: string, description: string, workspace_name?: string, force = false): Promise<Project> {
+    const { data } = await api.post<Project>('/projects', { name, description, workspace_name, force })
     projects.value.unshift(data)
     switchableProjects.value.unshift(data)
     return data

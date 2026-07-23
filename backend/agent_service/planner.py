@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import urllib.error
 import urllib.request
@@ -34,6 +35,12 @@ logger = logging.getLogger(__name__)
 # decide (success, or a clear 422 fallback) instead of the client disconnecting
 # first with a bare "timeout of 30000ms exceeded".
 PLANNER_REQUEST_TIMEOUT_SECONDS = 150
+
+# Generous token budget — truncated JSON is the most common silent failure mode.
+PLANNER_MAX_TOKENS = 4096
+
+# Number of retry attempts on transient failures (network, malformed JSON, etc.).
+PLANNER_MAX_RETRIES = 2
 
 # Directories that are never worth showing the planner (deps, caches, VCS).
 _IGNORE_DIRS = {
@@ -171,27 +178,69 @@ def _topo_order(steps: list[PlanStep]) -> Optional[list[PlanStep]]:
     return ordered
 
 
-def plan_task(
+def _extract_json(text: str) -> str:
+    """Pull the first JSON object out of *text*, stripping markdown fences.
+
+    Models sometimes wrap ``{...}`` in ```json ... ``` blocks.  This helper
+    unwraps those so ``json.loads`` gets a clean payload.
+    """
+    text = text.strip()
+    # Strip ```json / ``` fences when present.
+    m = re.match(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if m:
+        text = m.group(1).strip()
+    # If the model prefixed the JSON with a brief sentence, find the first '{'.
+    brace = text.find("{")
+    if brace > 0:
+        text = text[brace:]
+    return text
+
+
+def _parse_steps(raw_steps: list) -> tuple[list[PlanStep], str]:
+    """Convert raw step dicts to :class:`PlanStep` list.
+
+    Returns ``(steps, reject_reason)`` — *steps* is non-empty on success;
+    *reject_reason* is a human-readable explanation when parsing fails.
+    """
+    if not isinstance(raw_steps, list) or not raw_steps:
+        return [], "模型未返回步骤列表（steps 字段为空或格式错误）"
+
+    steps: list[PlanStep] = []
+    for item in raw_steps:
+        try:
+            sid = int(item.get("id"))
+            title = str(item.get("title") or f"步骤{sid}").strip()
+            goal = str(item.get("goal") or "").strip()
+            deps = [int(d) for d in (item.get("deps") or []) if str(d).isdigit()]
+        except (TypeError, ValueError):
+            continue
+        if not title:
+            continue
+        steps.append(PlanStep(id=sid, title=title, goal=goal, deps=deps))
+
+    # De-duplicate by id keeping first occurrence.
+    seen: set[int] = set()
+    unique: list[PlanStep] = []
+    for s in steps:
+        if s.id in seen:
+            continue
+        seen.add(s.id)
+        unique.append(s)
+
+    if not unique:
+        return [], "模型返回的步骤无法解析（缺少有效 id/title）"
+    return unique, ""
+
+
+def _try_plan_once(
     task_description: str,
     model_name: str,
     api_key: str,
     base_url: str,
-    max_subtasks: int = 6,
-    project_context: str = "",
-) -> Optional[list[PlanStep]]:
-    """Ask the model to decompose ``task_description`` into ordered subtasks.
-
-    When ``project_context`` (produced by :func:`collect_project_context`) is
-    supplied, the model decomposes the task against the *actual* project
-    structure instead of from scratch, yielding steps that name concrete
-    files/modules and avoid redundant discovery work.
-
-    Returns a dependency-ordered list of :class:`PlanStep`, or ``None`` when the
-    model could not produce a usable plan (caller should fall back).
-    """
-    if not api_key or not base_url:
-        return None
-
+    max_subtasks: int,
+    project_context: str,
+) -> tuple[Optional[list[PlanStep]], str]:
+    """Single planning attempt.  Returns ``(steps_or_None, error_reason)``."""
     system_prompt = (
         "你是一个资深软件架构师的助手。用户会给你一个软件开发任务，并可能附带"
         "项目结构。请把它拆解成若干个相互独立、可逐步验证、且能落到具体代码上的子步骤。\n"
@@ -202,11 +251,11 @@ def plan_task(
         "1. id 从 1 开始连续递增，且每个 id 在 steps 中唯一；\n"
         "2. deps 是该步骤依赖的其他步骤 id 数组（空数组表示无依赖，可最先执行）；"
         "不要引用不存在的 id；\n"
-        "3. 步骤数量控制在 2 到上限之间；\n"
+        "3. 步骤数量控制在 1 到上限之间（简单任务 1 个步骤即可）；\n"
         "4. 每个步骤必须是「会产生代码改动」的工作：在 goal 中明确要新建或修改哪些"
-        "文件/模块，以及完成后应有的产物（例如“在 src/api/auth.py 新增登录接口，并补充单元测试”）。"
+        "文件/模块，以及完成后应有的产物（例如\"在 src/api/auth.py 新增登录接口，并补充单元测试\"）。"
         "不要拆出没有代码产物的纯调研/讨论步骤——若必须先了解现状，请把调研压缩进实现步骤"
-        "（例如“阅读 src/db.py 后，在其基础上新增 User 模型”），而不是单独作为一个步骤；\n"
+        "（例如\"阅读 src/db.py 后，在其基础上新增 User 模型\"），而不是单独作为一个步骤；\n"
         "5. 步骤之间尽量解耦；当一个步骤的产物是下一步的输入（如先建模型再写接口）时，"
         "用 deps 表达依赖。不要出现循环依赖；\n"
         "6. 若项目结构中能看出相关文件，优先复用/扩展现有文件与约定，避免重复造轮子；\n"
@@ -227,7 +276,7 @@ def plan_task(
         ],
         "response_format": {"type": "json_object"},
         "temperature": 0.2,
-        "max_tokens": 2048,
+        "max_tokens": PLANNER_MAX_TOKENS,
     }
     if "api.deepseek.com" in base_url.lower():
         payload["thinking"] = {"type": "disabled"}
@@ -245,52 +294,84 @@ def plan_task(
     try:
         with urllib.request.urlopen(req, timeout=PLANNER_REQUEST_TIMEOUT_SECONDS) as resp:
             body = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+        return None, f"网络请求失败：{exc}"
+    except Exception as exc:
+        return None, f"API 调用异常：{exc}"
+
+    try:
         content = body["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
-        raw_steps = parsed.get("steps") or []
-        if not isinstance(raw_steps, list) or not raw_steps:
-            logger.warning("Planner returned no steps; falling back to default pipeline")
-            return None
+    except (KeyError, IndexError, TypeError) as exc:
+        return None, f"API 响应结构异常：{exc}"
 
-        steps: list[PlanStep] = []
-        for item in raw_steps:
-            try:
-                sid = int(item.get("id"))
-                title = str(item.get("title") or f"步骤{sid}").strip()
-                goal = str(item.get("goal") or "").strip()
-                deps = [int(d) for d in (item.get("deps") or []) if str(d).isdigit()]
-            except (TypeError, ValueError):
-                continue
-            if not title:
-                continue
-            steps.append(PlanStep(id=sid, title=title, goal=goal, deps=deps))
+    # Parse JSON — first try raw content, then try extracting from markdown.
+    parsed = None
+    parse_err = ""
+    for text in (content, _extract_json(content)):
+        try:
+            parsed = json.loads(text)
+            break
+        except ValueError as e:
+            parse_err = str(e)
+    if parsed is None:
+        return None, f"JSON 解析失败（{parse_err}）。原始返回：{content[:300]}"
 
-        # De-duplicate by id keeping first occurrence.
-        seen: set[int] = set()
-        unique: list[PlanStep] = []
-        for s in steps:
-            if s.id in seen:
-                continue
-            seen.add(s.id)
-            unique.append(s)
+    raw_steps = parsed.get("steps") or []
+    steps, reason = _parse_steps(raw_steps)
+    if not steps:
+        return None, reason
 
-        if len(unique) < 2:
-            logger.warning("Planner produced <2 usable steps; falling back")
-            return None
+    # Truncate to the agent's configured ceiling, preserving order.
+    if len(steps) > max_subtasks:
+        logger.info("Planner produced %d steps; truncating to %d", len(steps), max_subtasks)
+        steps = steps[:max_subtasks]
 
-        # Truncate to the agent's configured ceiling, preserving order.
-        if len(unique) > max_subtasks:
-            logger.info("Planner produced %d steps; truncating to %d", len(unique), max_subtasks)
-            unique = unique[:max_subtasks]
+    ordered = _topo_order(steps)
+    if ordered is None:
+        return None, "模型生成的步骤存在循环依赖，请重试"
+    return ordered, ""
 
-        ordered = _topo_order(unique)
-        if ordered is None:
-            logger.warning("Planner produced a dependency cycle; falling back")
-            return None
-        return ordered
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ValueError, KeyError, IndexError) as exc:
-        logger.warning("Planning LLM call failed (%s); falling back to default pipeline", exc)
-        return None
-    except Exception as exc:  # pragma: no cover - defensive
-        logger.warning("Unexpected planning error (%s); falling back", exc)
-        return None
+
+def plan_task(
+    task_description: str,
+    model_name: str,
+    api_key: str,
+    base_url: str,
+    max_subtasks: int = 6,
+    project_context: str = "",
+) -> tuple[Optional[list[PlanStep]], str]:
+    """Ask the model to decompose ``task_description`` into ordered subtasks.
+
+    When ``project_context`` (produced by :func:`collect_project_context`) is
+    supplied, the model decomposes the task against the *actual* project
+    structure instead of from scratch, yielding steps that name concrete
+    files/modules and avoid redundant discovery work.
+
+    Returns ``(steps, error_reason)`` — *steps* is the dependency-ordered plan
+    on success; *error_reason* is a human-readable explanation on failure (empty
+    string on success).  The caller can surface *error_reason* to the user.
+    """
+    if not api_key or not base_url:
+        return None, "未配置模型 API Key 或 Base URL"
+
+    last_reason = ""
+    for attempt in range(1, PLANNER_MAX_RETRIES + 1):
+        steps, reason = _try_plan_once(
+            task_description, model_name, api_key, base_url,
+            max_subtasks, project_context,
+        )
+        if steps is not None:
+            return steps, ""
+        last_reason = reason
+        if attempt < PLANNER_MAX_RETRIES:
+            logger.warning(
+                "Planner attempt %d/%d failed (%s); retrying…",
+                attempt, PLANNER_MAX_RETRIES, reason,
+            )
+            time.sleep(1.2 * attempt)  # brief back-off
+
+    logger.warning(
+        "Planner exhausted %d retries. Last error: %s",
+        PLANNER_MAX_RETRIES, last_reason,
+    )
+    return None, last_reason or "规划模型多次尝试均失败，请稍后重试"

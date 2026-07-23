@@ -130,16 +130,34 @@ async function loadStats() {
   } catch { /* stats are non-critical */ }
 }
 
-async function handleCreate() {
+async function handleCreate(force = false) {
   creating.value = true
   try {
-    const created = await store.createProject(newProject.value.name, newProject.value.description, newProject.value.workspace_name)
+    const created = await store.createProject(
+      newProject.value.name, newProject.value.description,
+      newProject.value.workspace_name, force,
+    )
     store.setCurrentProject(created)
     dialogVisible.value = false
     newProject.value = { name: '', description: '', workspace_name: '' }
     await loadStats()
   } catch (e: any) {
-    MessagePlugin.error(e?.response?.data?.detail || '创建项目失败，请稍后重试')
+    if (e?.response?.status === 409) {
+      // Same-name project exists — ask the user whether to proceed.
+      const confirmDialog = DialogPlugin.confirm({
+        header: '同名项目已存在',
+        body: e.response.data.detail || '已存在同名项目，确定继续创建？',
+        theme: 'warning',
+        confirmBtn: { content: '仍然创建' },
+        cancelBtn: '取消',
+        onConfirm: async () => {
+          confirmDialog.destroy()
+          await handleCreate(true)  // retry with force
+        },
+      })
+    } else {
+      MessagePlugin.error(e?.response?.data?.detail || '创建项目失败，请稍后重试')
+    }
   } finally {
     creating.value = false
   }
