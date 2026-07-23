@@ -46,6 +46,14 @@ SETTINGS_SECTIONS = [
             {"key": "WORKSPACE_ROOT", "label": "Workspace 根目录", "type": "text"},
         ],
     },
+    {
+        "key": "quality_gate",
+        "label": "确定性门禁",
+        "fields": [
+            {"key": "QUALITY_GATE_ENABLED",  "label": "启用确定性门禁",        "type": "boolean"},
+            {"key": "QUALITY_GATE_TIMEOUT_SECONDS", "label": "门禁超时（秒）",  "type": "text"},
+        ],
+    },
 ]
 
 
@@ -112,14 +120,28 @@ def get_settings():
         fields_out = []
         for f in sec["fields"]:
             raw = env.get(f["key"], getattr(app_settings, f["key"], ""))
-            fields_out.append({
-                "key": f["key"],
-                "label": f["label"],
-                "type": f["type"],
-                "value": "" if f["type"] == "password" else raw,
-                "masked_value": _mask(raw) if f["type"] == "password" else raw,
-                "configured": bool(raw),
-            })
+            # Normalise boolean values to strings the frontend can toggle.
+            if f["type"] == "boolean":
+                if isinstance(raw, bool):
+                    raw_str = "true" if raw else "false"
+                else:
+                    raw_str = str(raw).lower() if raw else "false"
+                fields_out.append({
+                    "key": f["key"],
+                    "label": f["label"],
+                    "type": f["type"],
+                    "value": raw_str,
+                    "configured": True,
+                })
+            else:
+                fields_out.append({
+                    "key": f["key"],
+                    "label": f["label"],
+                    "type": f["type"],
+                    "value": "" if f["type"] == "password" else raw,
+                    "masked_value": _mask(raw) if f["type"] == "password" else raw,
+                    "configured": bool(raw),
+                })
         sections_out.append({
             "key": sec["key"],
             "label": sec["label"],
@@ -145,11 +167,17 @@ def update_setting(req: SettingUpdate):
 
     # Also update the in-memory settings object if possible
     if hasattr(app_settings, req.key):
-        setattr(app_settings, req.key, req.value)
+        val = req.value
+        if any(f["type"] == "boolean" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key):
+            val = req.value.lower() in ("true", "1", "yes", "on")
+        setattr(app_settings, req.key, val)
 
     # Audit: 配置变更（记录变更项，敏感密钥不记原文）。
     from app.services.audit_service import record as audit_record
     from app.models.models import AuditAction, AuditActorType
+    is_bool = any(
+        f["type"] == "boolean" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key
+    )
     is_secret = any(
         f["type"] == "password" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key
     )
@@ -164,10 +192,7 @@ def update_setting(req: SettingUpdate):
 
     return {
         "key": req.key,
-        "value": "" if is_secret else req.value,
-        "masked_value": _mask(req.value) if any(
-            f["type"] == "password" for sec in SETTINGS_SECTIONS for f in sec["fields"] if f["key"] == req.key
-        ) else req.value,
+        "value": "" if is_secret else (req.value.lower() if is_bool else req.value),
         "configured": bool(req.value) if is_secret else None,
         "message": "已保存，部分设置需重启后端生效",
     }

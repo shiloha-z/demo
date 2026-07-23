@@ -132,7 +132,31 @@ function togglePasswordVisibility(fieldKey: string) {
         <div class="card-body">
           <div v-for="field in section.fields" :key="field.key" class="field-row">
             <label class="field-label">{{ field.label }}</label>
-            <div class="field-input-group">
+
+            <!-- Boolean toggle -->
+            <div v-if="field.type === 'boolean'" class="field-input-group">
+              <label class="toggle-switch">
+                <input
+                  type="checkbox"
+                  :checked="edits[field.key] !== undefined ? edits[field.key] === 'true' : field.value === 'true'"
+                  @change="onFieldInput(field, ($event.target as HTMLInputElement).checked ? 'true' : 'false')"
+                />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">{{ (edits[field.key] !== undefined ? edits[field.key] : field.value) === 'true' ? '已开启' : '已关闭' }}</span>
+              </label>
+              <t-button
+                size="small"
+                variant="outline"
+                :disabled="!isModified(field)"
+                :loading="saving[field.key]"
+                @click="saveField(field)"
+              >
+                保存
+              </t-button>
+            </div>
+
+            <!-- Text / Password -->
+            <div v-else class="field-input-group">
               <div class="input-wrapper" :class="{ 'is-password': field.type === 'password' }">
                 <input
                   v-if="field.type === 'password'"
@@ -279,6 +303,39 @@ function togglePasswordVisibility(fieldKey: string) {
   transition: all var(--transition-fast);
 }
 .toggle-vis-btn:hover { color: var(--foreground); background: var(--surface-hover); }
+
+/* ── Boolean toggle switch ──────────────────────────────────────────── */
+.toggle-switch {
+  display: flex; align-items: center; gap: 10px; cursor: pointer;
+  position: relative;
+}
+.toggle-switch input { display: none; }
+.toggle-slider {
+  width: 40px; height: 22px;
+  background: var(--surface-border);
+  border-radius: 11px;
+  position: relative;
+  transition: background var(--transition-fast);
+  flex-shrink: 0;
+}
+.toggle-slider::after {
+  content: '';
+  position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px;
+  background: #fff;
+  border-radius: 50%;
+  transition: transform var(--transition-fast);
+}
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--primary);
+}
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(18px);
+}
+.toggle-label {
+  font-size: 13px; color: var(--muted-foreground);
+  user-select: none;
+}
 
 /* ── Global memory viewer ──────────────────────────────────────────── */
 .memory-empty { padding: 16px 0; text-align: center; color: var(--muted-foreground); font-size: 13px; }
