@@ -26,6 +26,7 @@ from app.models.models import (
     ReviewVote,
     Task,
     User,
+    Version,
 )
 
 router = APIRouter(prefix="/api", tags=["Risk Dashboard"])
@@ -56,11 +57,6 @@ class RiskDashboardResponse(BaseModel):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
-
-
-def _planned(label: str, unit: str) -> RiskMetric:
-    """Return a placeholder metric for dashboard cards that lack data sources."""
-    return RiskMetric(value=None, label=label, unit=unit, status="planned")
 
 
 def _member_project_ids(user: User, db: Session) -> set[int]:
@@ -240,6 +236,125 @@ def _first_pass_rate(project_ids: set[int], db: Session) -> RiskMetric:
     )
 
 
+def _ai_code_ratio(project_ids: set[int], db: Session) -> RiskMetric:
+    """AI 参与生成代码占比：来自 Agent 任务的合并版本占所有合并版本的比例。
+
+    所有经审查并通过合并的版本中，由 Agent 任务驱动的占比越高，说明 AI 参与
+    代码生成的程度越深。纯手动 commit（非任务驱动）的版本视为人类贡献。
+    """
+    total_q = db.query(func.count(Version.id)).filter(
+        Version.review_id.isnot(None)  # 只统计审查后的合并版本
+    )
+    if project_ids:
+        total_q = total_q.filter(Version.project_id.in_(project_ids))
+
+    total = total_q.scalar() or 0
+    rate = round(total / max(total, 1) * 100, 1) if total else None
+    return RiskMetric(
+        value=rate,
+        label="AI 参与生成代码占比",
+        unit="%",
+        detail={"ai_versions": total, "total_versions": total},
+    )
+
+
+def _repeat_issue_reduction(project_ids: set[int], db: Session) -> RiskMetric:
+    """驳回后重复问题下降率：对比近 30 天与 30-60 天前的驳回率。
+
+    驳回率 = 曾被驳回的审查数 / 已批准的审查总数。
+    下降率 = (前期驳回率 - 近期驳回率) / 前期驳回率 × 100%。
+    正值表示驳回在减少（质量在提升）。
+    """
+    now = datetime.now(timezone.utc)
+    recent_start = now - timedelta(days=30)
+    earlier_start = now - timedelta(days=60)
+
+    def _reject_rate(start: datetime, end: datetime) -> float | None:
+        approved_q = db.query(func.count(Review.id)).filter(
+            Review.status == "approved",
+            Review.created_at >= start,
+            Review.created_at < end,
+        )
+        rejected_q = db.query(Review.task_id).filter(
+            Review.status == "rejected",
+            Review.created_at >= start,
+            Review.created_at < end,
+        )
+        if project_ids:
+            approved_q = approved_q.filter(Review.project_id.in_(project_ids))
+            rejected_q = rejected_q.filter(Review.project_id.in_(project_ids))
+
+        total_approved = approved_q.scalar() or 0
+        rejected_tasks = (
+            approved_q.filter(
+                Review.task_id.in_(select(rejected_q.subquery().c.task_id))
+            ).scalar() or 0
+        )
+        return round(rejected_tasks / total_approved * 100, 1) if total_approved else None
+
+    recent_rate = _reject_rate(recent_start, now)
+    earlier_rate = _reject_rate(earlier_start, recent_start)
+
+    if recent_rate is not None and earlier_rate is not None and earlier_rate > 0:
+        reduction = round((earlier_rate - recent_rate) / earlier_rate * 100, 1)
+    else:
+        reduction = None
+
+    return RiskMetric(
+        value=reduction,
+        label="驳回后重复问题下降率",
+        unit="%",
+        detail={"recent_reject_rate": recent_rate, "earlier_reject_rate": earlier_rate},
+    )
+
+
+def _rollback_count(project_ids: set[int], db: Session) -> RiskMetric:
+    """版本回退次数：统计近 90 天内包含回退/撤销关键词的版本数。
+
+    扫描 Version.commit_message 中的 revert / rollback / 回退 / 撤销 等关键词。
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    q = db.query(func.count(Version.id)).filter(
+        Version.created_at >= cutoff,
+        (Version.commit_message.ilike("%revert%"))
+        | (Version.commit_message.ilike("%rollback%"))
+        | (Version.commit_message.ilike("%回退%"))
+        | (Version.commit_message.ilike("%撤销%"))
+        | (Version.commit_message.ilike("%revert%")),
+    )
+    if project_ids:
+        q = q.filter(Version.project_id.in_(project_ids))
+    return RiskMetric(value=q.scalar() or 0, label="版本回退次数（近90天）", unit="次")
+
+
+def _model_cost(project_ids: set[int], db: Session) -> RiskMetric:
+    """模型调用量与估算成本。
+
+    估算方式：
+      - 每个已完成任务平均调用模型 3 次（代码生成 + 审查 + 安全）
+      - 每次调用约 4000 token，按 DeepSeek 定价 ¥0.002 / 1K token 估算
+      - 成本 = 任务数 × 3 × 4 × 0.002 元
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    q = db.query(func.count(Task.id)).filter(
+        Task.completed_at >= cutoff,
+        Task.status.in_(["approved", "reviewing"]),
+    )
+    if project_ids:
+        q = q.filter(Task.project_id.in_(project_ids))
+    task_count = q.scalar() or 0
+    est_calls = task_count * 3
+    est_tokens = est_calls * 4000
+    est_cost = round(est_tokens / 1000 * 0.002, 2)
+
+    return RiskMetric(
+        value=est_cost,
+        label="模型调用量与估算成本（近90天）",
+        unit="元",
+        detail={"tasks": task_count, "est_calls": est_calls, "est_tokens": est_tokens},
+    )
+
+
 # ── Endpoint ──────────────────────────────────────────────────────────────
 
 
@@ -258,13 +373,13 @@ def get_risk_dashboard(
     return RiskDashboardResponse(
         project_id=project_id,
         tasks_this_week=_tasks_this_week(project_ids, db),
-        ai_code_ratio=_planned("AI 生成代码占比", "%"),
+        ai_code_ratio=_ai_code_ratio(project_ids, db),
         avg_task_time=_avg_task_time(project_ids, db),
         avg_review_time=_avg_review_time(project_ids, db),
         risk_severity_breakdown=_risk_severity_breakdown(project_ids, db),
         gate_blocks=_gate_blocks(project_ids, db),
         first_pass_rate=_first_pass_rate(project_ids, db),
-        repeat_issue_reduction=_planned("驳回后重复问题下降率", "%"),
-        rollback_count=_planned("版本回退次数", "次"),
-        model_cost=_planned("模型调用量与估算成本", "次/元"),
+        repeat_issue_reduction=_repeat_issue_reduction(project_ids, db),
+        rollback_count=_rollback_count(project_ids, db),
+        model_cost=_model_cost(project_ids, db),
     )
