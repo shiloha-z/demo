@@ -1130,38 +1130,34 @@ async function resumeTask(task: any, event: Event) {
     </template>
 
     <!-- Create Task Dialog -->
-    <t-dialog v-model:visible="showCreateTask" header="创建任务" width="500px" :body-style="{ maxHeight: '62vh', overflowY: 'auto' }">
+    <t-dialog v-model:visible="showCreateTask" header="创建任务" width="460px">
       <div class="dialog-form">
-        <div class="task-project-info">
-          目标项目：<strong>{{ store.currentProject?.name }}</strong>
-        </div>
-        <label class="field-label">代码生成 Agent</label>
-        <t-select v-model="newTaskForm.agent_id" placeholder="请选择一个代码生成 Agent">
+        <label class="field-label">代码生成 Agent <span style="color:var(--danger)">*</span></label>
+        <t-select v-model="newTaskForm.agent_id" placeholder="请选择" size="small">
           <t-option v-for="a in agents.filter((a: any) => a.role === 'code_gen')" :key="a.id" :value="a.id" :label="`${a.name}`" />
         </t-select>
         <div class="dialog-form-row">
           <div class="dialog-form-col">
-            <label class="field-label">审查 Agent <span class="field-label-opt">（可选）</span></label>
-            <t-select v-model="newTaskForm.reviewer_agent_id" placeholder="使用内置审查" clearable size="small">
+            <label class="field-label">审查 Agent</label>
+            <t-select v-model="newTaskForm.reviewer_agent_id" placeholder="内置默认" clearable size="small">
               <t-option v-for="a in agents.filter((a: any) => a.role === 'reviewer')" :key="a.id" :value="a.id" :label="`${a.name}`" />
             </t-select>
           </div>
           <div class="dialog-form-col">
-            <label class="field-label">安全 Agent <span class="field-label-opt">（可选）</span></label>
-            <t-select v-model="newTaskForm.security_agent_id" placeholder="使用内置安全" clearable size="small">
+            <label class="field-label">安全 Agent</label>
+            <t-select v-model="newTaskForm.security_agent_id" placeholder="内置默认" clearable size="small">
               <t-option v-for="a in agents.filter((a: any) => a.role === 'security')" :key="a.id" :value="a.id" :label="`${a.name}`" />
             </t-select>
           </div>
         </div>
         <label class="field-label">任务标题</label>
-        <t-input v-model="newTaskForm.title" placeholder="例如：写一个用户登录接口" />
+        <t-input v-model="newTaskForm.title" placeholder="例如：写一个用户登录接口" size="small" />
         <label class="field-label">详细描述</label>
-        <textarea v-model="newTaskForm.description" class="field-textarea" rows="3" placeholder="描述清楚你要 Agent 做什么..." />
+        <textarea v-model="newTaskForm.description" class="field-textarea" rows="2" placeholder="描述清楚你要 Agent 做什么..." />
         <label class="field-label">所需通过票数</label>
         <t-input-number v-model="newTaskForm.approval_percent" :min="1" :max="100" theme="normal" size="small">
           <template #suffix>%</template>
         </t-input-number>
-        <p class="field-hint">按审查人总数向上取整计算，达到所需通过票数后进入合并队列。</p>
       </div>
       <template #footer>
         <t-button theme="default" variant="text" @click="showCreateTask = false">取消</t-button>
@@ -1611,17 +1607,18 @@ async function resumeTask(task: any, event: Event) {
 .empty-detail p { font-size: 13px; color: var(--muted-foreground); }
 
 /* ── Create task dialog ─────────────────────────────── */
-.dialog-form { display: flex; flex-direction: column; gap: 10px; }
+.dialog-form { display: flex; flex-direction: column; gap: 8px; }
 .task-project-info { font-size: 13px; color: var(--muted-foreground); }
 .field-label { font-size: 12px; font-weight: 600; color: var(--foreground); }
 .field-label-opt { font-weight: 400; font-size: 11px; color: var(--muted-foreground); }
-.dialog-form-row { display: flex; gap: 12px; }
-.dialog-form-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.dialog-form-row { display: flex; gap: 10px; }
+.dialog-form-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .field-textarea {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--surface-border);
+  width: 100%; padding: 6px 10px; border: 1px solid var(--surface-border);
   border-radius: var(--radius-md); font-size: 13px; font-family: inherit;
   background: var(--surface); color: var(--foreground);
-  resize: vertical; box-sizing: border-box;
+  resize: vertical; box-sizing: border-box; line-height: 1.4;
 }
 .field-textarea:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px oklch(0.55 0.2 260 / 0.12); }
+.field-hint { font-size: 11px; color: var(--muted-foreground); margin: 0; line-height: 1.4; }
 </style>
