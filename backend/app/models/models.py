@@ -369,6 +369,7 @@ class Message(Base):
     body = Column(Text, default="")
     link = Column(String(300), default="")   # 点击跳转，如 /reviews?task_id=12
     read = Column(Boolean, default=False)
+    resolved = Column(Boolean, default=False)  # 关联动作已被处理（审查通过/驳回、申请批准/拒绝）
     created_at = Column(DateTime, default=_now)
 
 

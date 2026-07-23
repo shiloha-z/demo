@@ -19,6 +19,7 @@ interface MessageItem {
   body: string
   link: string
   read: boolean
+  resolved: boolean
   created_at: string | null
 }
 
@@ -176,13 +177,14 @@ function onBackdropClick(e: MouseEvent) {
               v-for="m in filtered"
               :key="m.id"
               class="nd-item"
-              :class="{ unread: !m.read, clickable: !!m.link }"
+              :class="{ unread: !m.read, resolved: m.resolved, clickable: !!m.link && !m.resolved }"
               @click="m.link ? openLink(m) : null"
             >
               <div class="nd-item-top">
                 <span class="nd-dot" :class="levelMeta[m.level]?.cls || 'lv-info'"></span>
-                <span class="nd-item-title">{{ m.title }}</span>
-                <span v-if="!m.read" class="nd-unread-dot"></span>
+                <span class="nd-item-title" :class="{ 'nd-resolved-title': m.resolved }">{{ m.title }}</span>
+                <span v-if="m.resolved" class="nd-resolved-tag">已处理</span>
+                <span v-else-if="!m.read" class="nd-unread-dot"></span>
               </div>
               <p v-if="m.body" class="nd-item-body">{{ m.body }}</p>
               <div class="nd-item-foot">
@@ -264,12 +266,19 @@ function onBackdropClick(e: MouseEvent) {
   transition: background var(--transition-fast);
 }
 .nd-item.unread { background: var(--primary-lighter); }
+.nd-item.resolved { opacity: 0.6; }
 .nd-item.clickable { cursor: pointer; }
 .nd-item.clickable:hover { background: var(--surface-hover); }
 
 .nd-item-top { display: flex; align-items: center; gap: 6px; }
 .nd-item-title { font-size: 13px; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nd-unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex-shrink: 0; margin-left: auto; }
+.nd-resolved-tag {
+  font-size: 10px; font-weight: 600; color: var(--muted-foreground);
+  background: var(--surface-hover); padding: 1px 6px; border-radius: 6px;
+  margin-left: auto;
+}
+.nd-resolved-title { color: var(--muted-foreground); text-decoration: line-through; }
 
 .nd-item-body {
   margin: 4px 0 0; font-size: 12px; line-height: 1.5;

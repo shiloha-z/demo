@@ -29,6 +29,7 @@ class MessageResponse(BaseModel):
     body: str
     link: str
     read: bool
+    resolved: bool = False
     created_at: str | None = None
 
     class Config:
@@ -84,6 +85,7 @@ def list_messages(
             body=m.body,
             link=m.link,
             read=bool(m.read) or m.id in read_ids,
+            resolved=bool(m.resolved),
             created_at=m.created_at.isoformat() if m.created_at else None,
         )
         for m in messages

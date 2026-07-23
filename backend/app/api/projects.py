@@ -551,14 +551,14 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
 
 def _mark_join_messages_read(db: Session, request_id: int, project_id: int) -> None:
     """When a join request is processed, mark all related notification messages
-    as read so other admins don't see stale pending notifications."""
+    as resolved so other admins see them as expired."""
     try:
         from app.models.models import Message
         link_pattern = f"join_request={request_id}"
         db.query(Message).filter(
             Message.project_id == project_id,
             Message.link == f"/dashboard?{link_pattern}",
-        ).update({Message.read: True}, synchronize_session=False)
+        ).update({Message.read: True, Message.resolved: True}, synchronize_session=False)
         db.commit()
         from app.api.ws import broadcast_sync
         broadcast_sync("message_new", {"project_id": project_id})
@@ -755,6 +755,8 @@ def reject_application(
     join_req.status = JoinStatus.REJECTED
     join_req.reviewed_at = datetime.now(timezone.utc)
     db.commit()
+
+    _mark_join_messages_read(db, app_id, project_id)
 
     _mark_join_messages_read(db, app_id, project_id)
 

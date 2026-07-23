@@ -16,6 +16,7 @@ interface MessageItem {
   body: string
   link: string
   read: boolean
+  resolved: boolean
   created_at: string | null
 }
 
@@ -279,14 +280,15 @@ onUnmounted(() => {
         v-for="m in filtered"
         :key="m.id"
         class="msg-card"
-        :class="{ unread: !m.read, clickable: !!m.link && !parseJoinRequest(m.link) }"
+        :class="{ unread: !m.read, resolved: m.resolved, clickable: !!m.link && !parseJoinRequest(m.link) && !m.resolved }"
         @click="m.link && !parseJoinRequest(m.link) ? openLink(m) : null"
       >
         <div class="msg-main">
           <div class="msg-top">
             <span class="dot" :class="levelMeta[m.level]?.cls || 'lv-info'"></span>
-            <span class="msg-title">{{ m.title }}</span>
-            <span v-if="!m.read" class="unread-flag">未读</span>
+            <span class="msg-title" :class="{ 'msg-title-resolved': m.resolved }">{{ m.title }}</span>
+            <span v-if="m.resolved" class="resolved-flag">已处理</span>
+            <span v-else-if="!m.read" class="unread-flag">未读</span>
             <span class="badge" :class="categoryMeta[m.category]?.cls">{{ categoryMeta[m.category]?.label || m.category }}</span>
           </div>
           <p v-if="m.body" class="msg-body">{{ m.body }}</p>
@@ -363,6 +365,7 @@ onUnmounted(() => {
   border-color: var(--primary-light);
   background: var(--primary-light);
 }
+.msg-card.resolved { opacity: 0.55; }
 .msg-card.clickable { cursor: pointer; }
 .msg-card.clickable:hover { border-color: var(--ring); box-shadow: var(--shadow-surface); }
 
@@ -372,6 +375,11 @@ onUnmounted(() => {
   font-size: 10px; font-weight: 700; color: var(--primary);
   background: var(--primary-light); padding: 1px 6px; border-radius: 8px;
 }
+.resolved-flag {
+  font-size: 10px; font-weight: 600; color: var(--muted-foreground);
+  background: var(--surface-hover); padding: 1px 6px; border-radius: 8px;
+}
+.msg-title-resolved { color: var(--muted-foreground); text-decoration: line-through; }
 .msg-body {
   margin: 8px 0 0; font-size: 13px; line-height: 1.6; color: var(--muted-foreground);
 }

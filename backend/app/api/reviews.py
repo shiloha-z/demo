@@ -513,6 +513,8 @@ def approve_review(review_id: int, db: Session = Depends(get_db), user: User = D
             status_code=409,
             detail=f"Approval quorum not met ({votes['approve_count']}/{votes['required_approvals']})",
         )
+    from app.services import message_service as msg_svc
+    msg_svc.resolve_by_link(f"/reviews?task_id={task.id}")
     return _queue_review_merge(review, task, db)
 
 
@@ -618,6 +620,8 @@ def reject_review(
         )
     except Exception:
         pass
+
+    msg_svc.resolve_by_link(f"/reviews?task_id={task.id}")
 
     # Trigger agent re-run with feedback via BackgroundTasks for safe shutdown
     # The pipeline will create the real Review with actual diff and summary

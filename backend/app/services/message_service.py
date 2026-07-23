@@ -96,7 +96,10 @@ def unread_count(
     recipient_id: int | None = None,
     user_id: int | None = None,
 ) -> int:
-    q = db.query(Message).filter(Message.read == False)  # noqa: E712
+    q = db.query(Message).filter(
+        Message.read == False,       # noqa: E712
+        Message.resolved == False,  # noqa: E712
+    )
     if project_id is not None:
         q = q.filter(Message.project_id == project_id)
     if recipient_id is not None:
@@ -109,3 +112,27 @@ def unread_count(
         )
         q = q.filter(~Message.id.in_(read_message_ids))
     return q.count()
+
+
+def resolve_by_link(link_prefix: str) -> None:
+    """Mark messages whose ``link`` starts with *link_prefix* as resolved.
+
+    Call this when a review is approved/rejected or a join request is handled,
+    so other project members can see that the action has already been taken.
+    """
+    db = SessionLocal()
+    try:
+        updated = (
+            db.query(Message)
+            .filter(
+                Message.link.startswith(link_prefix),
+                Message.resolved == False,  # noqa: E712
+            )
+            .update({Message.resolved: True}, synchronize_session=False)
+        )
+        if updated:
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
