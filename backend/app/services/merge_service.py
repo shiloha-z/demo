@@ -196,6 +196,24 @@ def integrate_task(task_id: int) -> None:
         if agent:
             broadcast_sync("agent_update", {"id": agent.id, "status": "working", "current_task_id": task.id})
 
+        # Push a user-facing notification so the project members see it.
+        try:
+            from app.services import message_service as msg
+            from app.models.models import MessageCategory, MessageLevel
+            msg.push(
+                title=f"合并冲突 — 任务 #{task.id}「{task.title}」",
+                body=(
+                    f"任务合并到主分支时与另一任务的改动冲突，Agent 正在自动解决。"
+                    f"冲突文件：{conflict_list}"
+                ),
+                category=MessageCategory.TASK,
+                level=MessageLevel.WARNING,
+                project_id=project.id,
+                link=f"/tasks",
+            )
+        except Exception:
+            pass
+
         from app.services.execution_service import enqueue_agent_run
         feedback = (
             "主分支合并时发生冲突。请只解决以下文件中的 Git 冲突标记，保留双方意图，"
