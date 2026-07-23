@@ -275,11 +275,23 @@ def _run_agent_pipeline(
             f"任务详情：{(task.description or task.title).strip()}"
         )
         if feedback:
-            task_desc = (
-                f"【人工审查反馈 — 请根据以下意见修改代码】\n"
-                f"{feedback}\n\n"
-                f"【原始任务】\n{task_desc}"
-            )
+            if conflict_resolution:
+                # Conflict resolution is a targeted fix, not a full redo.
+                # Don't show the original task — the agent should ONLY resolve
+                # the merge markers, not regenerate code from scratch.
+                task_desc = (
+                    f"【合并冲突解决 — 请仅修复以下文件的 Git 冲突标记，不要重写或重新生成任何代码！】\n\n"
+                    f"{feedback}\n\n"
+                    f"重要提醒：你的唯一工作是打开冲突文件，找到 <<<<<<<、=======、>>>>>>> 标记，"
+                    f"合并双方的修改（保留双方的有效改动），移除冲突标记，然后提交。"
+                    f"不要修改任何非冲突文件，不要重写或重新生成任何代码。"
+                )
+            else:
+                task_desc = (
+                    f"【人工审查反馈 — 请根据以下意见修改代码】\n"
+                    f"{feedback}\n\n"
+                    f"【原始任务】\n{task_desc}"
+                )
 
         # Enforce Chinese output for all human-facing content
         task_desc += (
