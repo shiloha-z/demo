@@ -629,43 +629,39 @@ async function handleJoinProject(p: any, event: Event) {
 .project-access.joined { background: var(--success-light); color: var(--success); }
 .project-card-desc { font-size: 12px; color: var(--muted-foreground); margin: 2px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
-.project-card-arrow { color: var(--muted-foreground); opacity: 0; transition: all var(--transition-base); flex-shrink: 0; }
-.project-card:hover .project-card-arrow { opacity: 1; color: var(--primary); }
+.project-card-arrow { color: var(--muted-foreground); flex-shrink: 0; }
+.project-card:hover .project-card-arrow { color: var(--primary); }
 
 .btn-delete {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
-.project-card:hover .btn-delete { opacity: 1; }
 .btn-delete:hover { background: var(--danger-light); color: var(--danger); }
 
 .btn-members {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
-.project-card:hover .btn-members { opacity: 1; }
 .btn-members:hover { background: var(--primary-light); color: var(--primary); }
 
 .btn-memory {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; opacity: 0; transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
-.project-card:hover .btn-memory { opacity: 1; }
 .btn-memory:hover { background: var(--info-light); color: var(--info); }
 
 .btn-join {
   width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; transition: all var(--transition-fast);
+  flex-shrink: 0;
 }
-.project-card:hover .btn-join { opacity: 1; }
 .btn-join:hover { background: var(--success-light); color: var(--success); }
 .btn-join:disabled { opacity: 0.4; cursor: not-allowed; }
 
