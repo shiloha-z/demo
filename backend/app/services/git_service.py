@@ -402,12 +402,10 @@ def _stage_agent_changes(repo: Repo) -> None:
     ]
     if generated:
         repo.git.reset("--", *generated)
-    # Unstage README / doc files that only contain a stub header (≤2 non-empty
-    # lines) — the classic agent hallucination pattern.  Real documentation
-    # changes (3+ lines) are kept so conflict resolution and legitimate doc
-    # work still works.
-    # Also skip files that contain Git conflict markers (<<<<<<<) — those are
-    # being actively resolved and must not be filtered.
+    # Unstage README files that are obviously placeholder stubs — exactly the
+    # default "# Project Workspace" that init_repo creates, or ≤2 non-empty
+    # lines with no other meaningful content.  Files with conflict markers
+    # (being actively resolved) or 3+ non-empty lines are kept.
     try:
         root = Path(repo.working_dir)
         to_unstage: list[str] = []
@@ -420,9 +418,15 @@ def _stage_agent_changes(repo: Repo) -> None:
             try:
                 text = fpath.read_text(encoding="utf-8", errors="replace")
                 if "<<<<<<<" in text:
-                    continue  # has conflict markers — being resolved, don't filter
+                    continue  # conflict markers — being resolved
+                stripped = text.strip()
+                # Exact placeholder match (default init_repo output):
+                if stripped in ("# Project Workspace", "# Project Workspace\n"):
+                    to_unstage.append(f)
+                    continue
+                # Very short file with no subsection headings (##) = likely stub:
                 lines = [l for l in text.splitlines() if l.strip()]
-                if len(lines) <= 2:
+                if len(lines) <= 2 and not any(l.startswith("##") for l in lines):
                     to_unstage.append(f)
             except OSError:
                 pass
