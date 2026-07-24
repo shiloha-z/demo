@@ -80,6 +80,14 @@ PROJECT_MEMORY_CAP = 200
 GLOBAL_MEMORY_CAP = 200
 MAX_MEMORY_CHARS = 4000
 MAX_METADATA_VALUE_CHARS = 500
+# When evicting old memories, summarise batches of this size into one compact entry.
+MEMORY_SUMMARISE_BATCH = 12
+# Domain-category keywords used for grouping similar memories before summarising.
+_MEMORY_CATEGORIES = [
+    "error", "bug", "failure", "fix", "pattern", "lesson",
+    "convention", "style", "architecture", "dependency", "security",
+    "testing", "performance", "refactor", "review",
+]
 MEMORY_CONTEXT_MAX_CHARS = 12000
 MEMORY_CONTEXT_ITEM_MAX_CHARS = 1400
 
@@ -188,7 +196,7 @@ def _write_memory(
         uid = _new_uid(uid_prefix)
         col.add(documents=[document], metadatas=[meta], ids=[uid])
         if cap is not None:
-            _enforce_cap(col, cap)
+            _summarise_and_evict(col, cap, collection_name)
         return uid
 
 
@@ -211,6 +219,123 @@ def _get_or_create(name: str):
     except Exception:
         logger.exception("Failed to open memory collection %s", name)
         return None
+
+
+def _summarise_batch(documents: list[str], category: str = "") -> str:
+    """Call the LLM to compact a batch of old memory entries into one summary.
+
+    Falls back to a mechanical join when the LLM is unavailable so no knowledge
+    is silently lost.
+    """
+    if not documents:
+        return ""
+    joined = "\n\n---\n\n".join(
+        f"{i}. {d[:MAX_MEMORY_CHARS]}" for i, d in enumerate(documents, 1)
+    )
+    cat_label = f" about {category}" if category else ""
+    prompt = (
+        f"You are summarising a project's accumulated AI agent memories{cat_label}. "
+        f"Below are {len(documents)} older memory entries. "
+        "Condense them into a single compact summary (max 300 words) that preserves "
+        "key lessons, recurring patterns, error types, fixes that worked, and "
+        "important decisions. Write in plain English. Output only the summary, "
+        "no preamble or meta-commentary.\n\n{joined}"
+    )
+    try:
+        from app.core.config import settings
+        import urllib.request, json
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "You are a technical knowledge archivist. Output only the requested summary text."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "max_tokens": 600,
+        }
+        if settings.DEEPSEEK_API_KEY and settings.DEEPSEEK_BASE_URL:
+            url = settings.DEEPSEEK_BASE_URL.rstrip("/") + "/chat/completions"
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url, data=data, method="POST",
+                headers={"Content-Type": "application/json",
+                         "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+            return body["choices"][0]["message"]["content"].strip()
+    except Exception:
+        logger.debug("Memory summarisation LLM call failed; falling back to mechanical join", exc_info=True)
+    # Mechanical fallback: keep first line of each entry.
+    lines: list[str] = []
+    for d in documents:
+        first = d.strip().split("\n")[0][:200]
+        if first:
+            lines.append(f"• {first}")
+    return "Compacted memories:\n" + "\n".join(lines[:20])
+
+
+def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
+    """When over *cap*, summarise the oldest batch into one entry, evict the rest.
+
+    This preserves institutional knowledge instead of silently dropping old
+    memories when the capacity limit is hit.
+    """
+    if col is None or cap <= 0:
+        return
+    try:
+        all_data = col.get()
+        ids = all_data.get("ids", [])
+        metas = all_data.get("metadatas", [])
+        docs = all_data.get("documents", [])
+        total = len(ids)
+        if total <= cap:
+            return
+        # Pair, sort by timestamp ascending, take the oldest batch.
+        def _ts(m):
+            if isinstance(m, dict) and m.get("timestamp"):
+                return m["timestamp"]
+            return ""
+        triples = sorted(zip(ids, docs, metas), key=lambda p: _ts(p[2]))
+        excess = total - cap
+        # Summarise at most MEMORY_SUMMARISE_BATCH old entries; drop the rest.
+        batch = min(excess, MEMORY_SUMMARISE_BATCH)
+        to_summarise = triples[:batch]
+        to_drop = triples[batch:excess] if excess > batch else []
+        # Guess a category from the metadata of the batch.
+        cat = ""
+        for _, _, m in to_summarise:
+            if isinstance(m, dict):
+                t = str(m.get("type", "")).lower()
+                for kw in _MEMORY_CATEGORIES:
+                    if kw in t:
+                        cat = kw
+                        break
+            if cat:
+                break
+        summary_doc = _summarise_batch([d for _, d, _ in to_summarise], cat)
+        # Store the summary with a merged metadata record.
+        summary_meta = {
+            "type": "memory_summary",
+            "source": "auto_compaction",
+            "category": cat,
+            "original_count": len(to_summarise),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        summary_id = _new_uid("sum")
+        col.add(documents=[summary_doc], metadatas=[summary_meta], ids=[summary_id])
+        # Delete the summarised originals and any excess beyond the batch.
+        delete_ids = [pid for pid, _, _ in to_summarise]
+        if to_drop:
+            delete_ids += [pid for pid, _, _ in to_drop]
+        if delete_ids:
+            col.delete(ids=delete_ids)
+        logger.info(
+            f"Compacted {len(to_summarise)} entries into summary {summary_id} "
+            f"in {collection_name} (cap={cap}, dropped={len(to_drop)})"
+        )
+    except Exception:
+        logger.exception(f"Failed to summarise/evict in {col.name if col else '?'}")
 
 
 def _enforce_cap(col, cap: int) -> None:
