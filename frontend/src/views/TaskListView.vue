@@ -125,7 +125,7 @@ async function loadSubtasks(t: any) {
       tasks.value[idx] = { ...tasks.value[idx], status: data.parent.status, subtask_done: data.parent.subtask_done, subtask_count: data.parent.subtask_count }
     }
   } catch (e) {
-    /* ignore subtree load errors */
+    MessagePlugin.warning(getErrorMessage(e, '加载子任务失败'))
   }
 }
 
