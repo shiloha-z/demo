@@ -722,3 +722,18 @@ def delete_project_memory(project_id: int) -> None:
         logger.info(f"Deleted project memory collection: {name}")
     except Exception:
         pass  # collection may not exist
+
+
+def delete_agent_memory(agent_id: int) -> None:
+    """Clean up agent-scoped collection when an agent is deleted."""
+    if not _chromadb_available:
+        return
+    name = _agent_collection(agent_id)
+    try:
+        client = _get_client()
+        if client is None:
+            return
+        client.delete_collection(name)
+        logger.info(f"Deleted agent memory collection: {name}")
+    except Exception:
+        pass  # collection may not exist

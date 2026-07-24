@@ -308,6 +308,13 @@ def delete_agent(
     db.delete(agent)
     db.commit()
 
+    # Clean up agent-scoped memory (ChromaDB collection).
+    try:
+        from app.services import memory_service as mem
+        mem.delete_agent_memory(agent_id)
+    except Exception:
+        pass
+
     # Notify clients about agent removal
     from app.api.ws import broadcast_sync
     broadcast_sync("agent_update", {"id": agent_id, "status": "deleted"})
