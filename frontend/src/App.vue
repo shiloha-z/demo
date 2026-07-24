@@ -9,6 +9,7 @@ import { useNotificationStore } from './stores/notification'
 import { useMessageStore } from './stores/message'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
+import GlobalLoadingBar from './components/GlobalLoadingBar.vue'
 import NotificationDropdown from './components/NotificationDropdown.vue'
 
 
@@ -125,7 +126,8 @@ function handleLogout() {
 }
 </script>
 
-<template>
+<template>  <GlobalLoadingBar />
+
   <!-- Login page: full-screen, no chrome -->
   <router-view v-if="isLoginPage" />
 
