@@ -508,6 +508,12 @@ def delete_project(project_id: int, db: Session = Depends(get_db), user: User = 
     project_name = project.name
     project_workspace = project.workspace_path
     db.delete(project)
+    # Clean up project-scoped memory (ChromaDB collection).
+    try:
+        from app.services import memory_service as mem
+        mem.delete_project_memory(project.id)
+    except Exception:
+        pass
     try:
         # Commit metadata first. If this fails, the workspace is untouched and
         # the project remains recoverable instead of pointing at deleted files.

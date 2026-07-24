@@ -707,3 +707,18 @@ def delete_task_memory(task_id: int) -> None:
         logger.info(f"Deleted task memory collection: {name}")
     except Exception:
         pass  # collection may not exist
+
+
+def delete_project_memory(project_id: int) -> None:
+    """Clean up project-scoped collection when a project is deleted."""
+    if not _chromadb_available:
+        return
+    name = _project_collection(project_id)
+    try:
+        client = _get_client()
+        if client is None:
+            return
+        client.delete_collection(name)
+        logger.info(f"Deleted project memory collection: {name}")
+    except Exception:
+        pass  # collection may not exist
