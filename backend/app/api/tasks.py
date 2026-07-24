@@ -203,7 +203,7 @@ def list_tasks(
     order = sort_map.get(sort)
     q = (
         db.query(Task)
-        .filter(Task.project_id == project_id)
+        .filter(Task.project_id == project_id, Task.parent_task_id.is_(None))
         .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
     )
     # Filter by archived status — default shows active (non-archived) tasks
@@ -395,6 +395,8 @@ class SubtaskBrief(BaseModel):
     status: str
     agent_id: int
     agent_name: str | None = None
+    project_id: int
+    parent_task_id: int | None = None
 
 
 class PlanResponse(BaseModel):
@@ -560,6 +562,8 @@ def plan_task_endpoint(
                 id=c.id, title=c.title, status=c.status.value,
                 agent_id=c.agent_id,
                 agent_name=(c.agent.name if c.agent else None),
+                project_id=c.project_id,
+                parent_task_id=c.parent_task_id,
             )
             for c in children
         ],
@@ -614,6 +618,8 @@ def get_subtasks(
                 id=c.id, title=c.title, status=c.status.value,
                 agent_id=c.agent_id,
                 agent_name=(c.agent.name if c.agent else None),
+                project_id=c.project_id,
+                parent_task_id=c.parent_task_id,
             )
             for c in children
         ],
@@ -1036,6 +1042,7 @@ def list_all_tasks(
             ProjectMember.user_id == user.id,
         ))
         .filter(Task.archived == False)
+        .filter(Task.parent_task_id.is_(None))  # only top-level tasks
         .filter(or_(Project.owner_id == user.id, ProjectMember.user_id == user.id))
         .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
         .order_by(Task.id.desc())
