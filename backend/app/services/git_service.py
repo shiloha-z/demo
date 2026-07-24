@@ -637,16 +637,7 @@ def diff_vs_master(workspace: str) -> str:
     repo = get_repo(workspace)
     if not repo:
         return ""
-    # Find the base branch
-    base = "master"
-    try:
-        repo.git.rev_parse("master")
-    except GitCommandError:
-        try:
-            repo.git.rev_parse("main")
-            base = "main"
-        except GitCommandError:
-            return get_diff(workspace)
+    base = _get_base_branch(repo)
     try:
         # Stage agent-authored changes first so new files show up in diff.
         # Test/build artifacts are deliberately kept out of the review.
@@ -654,6 +645,36 @@ def diff_vs_master(workspace: str) -> str:
         return repo.git.diff("--cached", base)
     except GitCommandError:
         return get_diff(workspace)
+
+
+def repo_has_uncommitted_changes(workspace: str) -> bool:
+    """Return True if the working directory has uncommitted changes."""
+    repo = get_repo(workspace)
+    if not repo:
+        return False
+    try:
+        return repo.is_dirty(index=True, working_tree=True, untracked_files=True)
+    except Exception:
+        return False
+
+
+@_workspace_locked
+def diff_commit_vs_base(workspace: str, commit_hash: str) -> str:
+    """Diff a specific commit against the base branch.
+
+    Unlike ``diff_vs_master`` (which re-stages the live working directory),
+    this always diffs the *committed* snapshot so the review shows exactly
+    what was committed, even if the worktree was later mutated by conflict
+    resolution or a re-run.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return ""
+    base = _get_base_branch(repo)
+    try:
+        return repo.git.diff(base, commit_hash)
+    except GitCommandError:
+        return ""
 
 
 @_workspace_locked

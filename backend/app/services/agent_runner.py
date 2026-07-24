@@ -381,9 +381,17 @@ def _run_agent_pipeline(
         commit_hash = git.commit(workspace, f"Task #{task.id} — agent changes")
         if commit_hash:
             _progress(task_id, project_id, f"📌 已提交：{commit_hash[:7]}", "committed")
+            # Verify the working directory matches the commit so we catch
+            # agent "disk hallucinations" (model claimed to write but didn't).
+            dirty = git.repo_has_uncommitted_changes(workspace)
+            if dirty:
+                _progress(task_id, project_id,
+                    "⚠️ 提交后工作区仍有未提交变更 — Agent 可能在提交后又修改了文件", "diff_empty")
 
         _progress(task_id, project_id, "📊 正在生成代码差异对比...", "diff")
-        diff = git.diff_vs_master(workspace)
+        # Use the committed snapshot for the review so later worktree mutations
+        # (conflict resolution, re-runs) never change what the reviewer sees.
+        diff = git.diff_commit_vs_base(workspace, commit_hash) if commit_hash else ""
         if not diff or diff == "":
             diff = "# No code changes detected"
             _progress(task_id, project_id, "⚠️ 未检测到代码变更", "diff_empty")
@@ -391,12 +399,13 @@ def _run_agent_pipeline(
             diff_lines = diff.count('\n')
             _progress(task_id, project_id, f"📊 代码差异：{diff_lines} 行", "diff_done")
 
-        # Push code preview
-        if diff and diff != "# No code changes detected":
+        # Push live code preview (workspace state, for real-time feedback)
+        preview_diff = git.diff_vs_master(workspace)
+        if preview_diff and preview_diff != "":
             broadcast_sync("code_preview", {
                 "task_id": task_id,
                 "project_id": project_id,
-                "diff": diff,
+                "diff": preview_diff,
                 "timestamp": _now_iso(),
             })
 
@@ -567,7 +576,7 @@ def _finalize_parent_review(db, parent, project_id):
 
     workspace = parent.worktree_path
     commit_hash = git.head_commit(workspace) if workspace else ""
-    diff = git.diff_vs_master(workspace) if workspace else ""
+    diff = git.diff_commit_vs_base(workspace, commit_hash) if workspace and commit_hash else ""
     if not diff or diff == "":
         diff = "# No code changes detected"
 
