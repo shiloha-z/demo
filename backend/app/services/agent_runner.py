@@ -376,6 +376,20 @@ def _run_agent_pipeline(
 
         _progress(task_id, project_id, f"📄 审查报告已生成（{summary_len} 字符）", "report_done")
 
+        # ── Step 3.5: Verify file integrity before committing ──────
+        # Catch "disk hallucinations" where the agent claimed to write a rich
+        # file but the content never landed on disk.
+        ok, bad = git.verify_workspace_file_integrity(workspace)
+        if not ok:
+            bad_list = ", ".join(bad)
+            _progress(task_id, project_id,
+                f"❌ 落盘完整性校验失败：{bad_list} 仅有占位内容（Agent 声称已写但未落盘）",
+                "error")
+            _fail_task_child_aware(db, task,
+                f"Disk hallucination detected: {bad_list} is placeholder-only. The agent claimed to write full content but only a stub was found on disk.",
+                project_id, runner_type)
+            return
+
         # ── Step 4: Commit & Diff ──────────────────────────────────
         _progress(task_id, project_id, "💾 正在提交代码变更到 Git...", "commit")
         commit_hash = git.commit(workspace, f"Task #{task.id} — agent changes")

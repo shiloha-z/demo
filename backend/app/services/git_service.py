@@ -718,6 +718,54 @@ def suspicious_files_in_diff(workspace: str, commit_hash: str) -> list[str]:
     return suspicious
 
 
+def verify_workspace_file_integrity(workspace: str) -> tuple[bool, list[str]]:
+    """Check that files on disk contain real content, not just placeholders.
+
+    Reads every tracked modified/untracked file in *workspace*.  If a text
+    file has ≤ 2 non-empty lines and is not a config stub, it is flagged as
+    a likely "disk hallucination" (the agent claimed to write it but the
+    content never landed on disk).
+
+    Returns ``(ok, bad_files)`` — *ok* is True when all files pass.
+    """
+    from pathlib import Path
+    repo = get_repo(workspace)
+    if not repo:
+        return True, []
+    # Collect modified tracked files + untracked files.
+    candidates: set[str] = set()
+    try:
+        candidates.update(f for f in repo.git.diff("--name-only").splitlines() if f)
+    except GitCommandError:
+        pass
+    try:
+        candidates.update(f for f in repo.untracked_files if f)
+    except Exception:
+        pass
+    bad: list[str] = []
+    root = Path(workspace)
+    for rel in candidates:
+        fpath = root / rel
+        try:
+            if not fpath.is_file():
+                continue
+            # Skip binary / generated / config files.
+            if fpath.suffix in {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3",
+                                 ".png", ".jpg", ".jpeg", ".gif", ".svg",
+                                 ".ico", ".woff", ".woff2", ".ttf", ".eot"}:
+                continue
+            text = fpath.read_text(encoding="utf-8", errors="replace")
+            lines = [l for l in text.splitlines() if l.strip()]
+            if not lines:
+                continue  # empty files are fine
+            if len(lines) <= 2 and fpath.name.lower() in ("readme.md", "readme.rst", "readme.txt"):
+                # README files with only a header are the classic hallucination.
+                bad.append(rel)
+        except OSError:
+            pass
+    return len(bad) == 0, bad
+
+
 @_workspace_locked
 def diff_commit_vs_base(workspace: str, commit_hash: str) -> str:
     """Diff a specific commit against the base branch.
