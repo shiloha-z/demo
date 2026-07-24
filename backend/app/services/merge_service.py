@@ -101,17 +101,40 @@ def integrate_task(task_id: int) -> None:
         _broadcast(task)
 
         # Sync the task branch with latest master BEFORE attempting integration.
-        # This prevents the "perpetual conflict" loop where every merge attempt
-        # hits the same conflict because the task branch was never updated.
         task_wt = task.worktree_path or git.default_task_worktree_path(project.workspace_path, task.id)
         synced = True
+        sync_conflicts: list[str] = []
         if task_wt and git.get_repo(task_wt):
-            synced, _ = git.sync_task_branch_with_master(task_wt, branch_name)
+            synced, sync_conflicts = git.sync_task_branch_with_master(task_wt, branch_name)
+
+        if not synced and sync_conflicts:
+            # Sync had conflicts — hand off to the agent for resolution directly.
+            conflict_list = ", ".join(sync_conflicts)
+            task.status = TaskStatus.CONFLICT_RESOLUTION
+            task.merge_error = f"Merge conflict in: {conflict_list}"
+            task.completed_at = None
+            db.commit()
+            _broadcast(task)
+            git.prepare_conflict_resolution(task_wt, project.workspace_path, branch_name)
+            # Enqueue the conflict-resolution agent.
+            agent = db.get(Agent, task.agent_id)
+            if agent:
+                agent.status = AgentStatus.WORKING
+            db.commit()
+            if agent:
+                broadcast_sync("agent_update", {"id": agent.id, "status": "working", "current_task_id": task.id})
+            from app.services.execution_service import enqueue_agent_run
+            feedback = (
+                "主分支合并时发生冲突。请只解决以下文件中的 Git 冲突标记，保留双方意图，"
+                "不要丢弃任一方的有效改动。解决后检查代码并提交，系统会重新尝试合并。\n"
+                f"冲突文件：{conflict_list}"
+            )
+            enqueue_agent_run(task.id, feedback=feedback, conflict_resolution=True)
+            return
 
         # Only integration touches the base workspace.  Agent worktrees have
         # their own locks and continue running independently.
-        # If synced==True the task branch already has all master changes, so
-        # the merge into master will be a clean fast-forward or trivial merge.
+        # The task branch is now synced — merge into master will be clean.
         with git.workspace_lock(project.workspace_path):
             result = git.begin_integration(project.workspace_path, branch_name)
             if result["status"] == "ready":
