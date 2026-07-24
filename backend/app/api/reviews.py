@@ -752,6 +752,7 @@ def close_review(
     )
 
     # ── WebSocket broadcasts ──────────────────────────────────────
+    from app.api.ws import broadcast_sync
     broadcast_sync("review_update", {
         "id": review.id, "task_id": review.task_id,
         "project_id": review.project_id, "status": "rejected",
