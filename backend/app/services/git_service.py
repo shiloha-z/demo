@@ -357,9 +357,14 @@ _GENERATED_ARTIFACT_NAMES = {".coverage"}
 
 
 def _stage_agent_changes(repo: Repo) -> None:
-    """Stage workspace changes while keeping test/build artifacts out of commits."""
+    """Stage workspace changes while keeping test/build artifacts out of commits.
+
+    Also unstages files whose only change is a mode/permission toggle (the diff
+    shows +0 / −0), so the review diff only surfaces meaningful content changes.
+    """
     repo.git.add(A=True)
     staged = repo.git.diff("--cached", "--name-only").splitlines()
+    # Unstage generated artifacts.
     generated = [
         path for path in staged
         if Path(path).name in _GENERATED_ARTIFACT_NAMES
@@ -368,6 +373,15 @@ def _stage_agent_changes(repo: Repo) -> None:
     ]
     if generated:
         repo.git.reset("--", *generated)
+    # Unstage mode-only changes (files showing +0 / −0).
+    try:
+        numstat = repo.git.diff("--cached", "--numstat").splitlines()
+        empty = [line.split("\t")[2] for line in numstat
+                 if line.startswith("0\t0\t")]
+        if empty:
+            repo.git.reset("--", *empty)
+    except GitCommandError:
+        pass
 
 
 @_workspace_locked
