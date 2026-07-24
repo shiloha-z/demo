@@ -35,7 +35,11 @@ class Settings(BaseSettings):
     QUALITY_GATE_BANK_RULE_COMMAND: str = ""
     QUALITY_GATE_FORBIDDEN_PATTERNS: str = "TODO,FIXME"
     QUALITY_GATE_TIMEOUT_SECONDS: int = 300
-    QUALITY_GATE_ENABLED: bool = True  # 设为 false 可跳过全部确定性门禁检查
+    QUALITY_GATE_ENABLED: bool = True  # 设为 false 可完全跳过全部确定性门禁检查
+    # 门禁严格度：strict=与历史行为一致（强制命令未配置即判失败、内置检查偏紧）；
+    # lenient=更宽松（缺少强制命令不判失败、放宽行长度/空白/禁止项/密钥阈值，更容易通过）。
+    # 完全关闭请使用 QUALITY_GATE_ENABLED=false。
+    QUALITY_GATE_MODE: str = "strict"  # "strict" | "lenient"
     # Audit trail — append-only ledger recording human actions, AI dispatch
     # intents, and their impact on the project. Defaults on; never blocks the
     # main flow (the recorder swallows its own exceptions).

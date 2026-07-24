@@ -57,6 +57,15 @@ SETTINGS_SECTIONS = [
         "label": "确定性门禁",
         "fields": [
             {"key": "QUALITY_GATE_ENABLED",  "label": "启用确定性门禁",        "type": "boolean"},
+            {
+                "key": "QUALITY_GATE_MODE",
+                "label": "门禁严格度",
+                "type": "select",
+                "options": [
+                    {"value": "strict", "label": "严格（默认，类似原行为）"},
+                    {"value": "lenient", "label": "宽松（更容易通过）"},
+                ],
+            },
             {"key": "QUALITY_GATE_TIMEOUT_SECONDS", "label": "门禁超时（秒）",  "type": "text"},
         ],
     },
@@ -126,6 +135,13 @@ def get_settings():
         fields_out = []
         for f in sec["fields"]:
             raw = env.get(f["key"], getattr(app_settings, f["key"], ""))
+            base = {
+                "key": f["key"],
+                "label": f["label"],
+                "type": f["type"],
+            }
+            if "options" in f:
+                base["options"] = f["options"]
             # Normalise boolean values to strings the frontend can toggle.
             if f["type"] == "boolean":
                 if isinstance(raw, bool):
@@ -133,17 +149,13 @@ def get_settings():
                 else:
                     raw_str = str(raw).lower() if raw else "false"
                 fields_out.append({
-                    "key": f["key"],
-                    "label": f["label"],
-                    "type": f["type"],
+                    **base,
                     "value": raw_str,
                     "configured": True,
                 })
             else:
                 fields_out.append({
-                    "key": f["key"],
-                    "label": f["label"],
-                    "type": f["type"],
+                    **base,
                     "value": "" if f["type"] == "password" else raw,
                     "masked_value": _mask(raw) if f["type"] == "password" else raw,
                     "configured": bool(raw),

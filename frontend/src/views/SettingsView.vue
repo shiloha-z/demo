@@ -11,6 +11,7 @@ interface SettingField {
   value: string
   masked_value: string
   configured?: boolean
+  options?: { value: string; label: string }[]
 }
 
 interface SettingSection {
@@ -119,6 +120,30 @@ function togglePasswordVisibility(fieldKey: string) {
                 <span class="toggle-slider"></span>
                 <span class="toggle-label">{{ (edits[field.key] !== undefined ? edits[field.key] : field.value) === 'true' ? '已开启' : '已关闭' }}</span>
               </label>
+              <t-button
+                size="small"
+                variant="outline"
+                :disabled="!isModified(field)"
+                :loading="saving[field.key]"
+                @click="saveField(field)"
+              >
+                保存
+              </t-button>
+            </div>
+
+            <!-- Select -->
+            <div v-else-if="field.type === 'select'" class="field-input-group">
+              <div class="input-wrapper">
+                <select
+                  class="field-native-input field-select"
+                  :value="edits[field.key] !== undefined ? edits[field.key] : field.value"
+                  @change="onFieldInput(field, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option v-for="opt in field.options" :key="opt.value" :value="opt.value">
+                    {{ opt.label }}
+                  </option>
+                </select>
+              </div>
               <t-button
                 size="small"
                 variant="outline"
@@ -254,6 +279,16 @@ function togglePasswordVisibility(fieldKey: string) {
 }
 .field-native-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px var(--ring); }
 .field-native-input::placeholder { color: var(--muted-foreground); font-family: var(--font-sans); }
+
+.field-select {
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 28px;
+}
 
 .is-password .field-native-input {
   padding-right: 32px;

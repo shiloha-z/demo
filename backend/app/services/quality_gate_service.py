@@ -42,6 +42,47 @@ SUPPRESSION_MARKERS = ("quality-gate: allow", "nosec", "pragma: allowlist secret
 MAX_SCANNED_FILE_BYTES = 1024 * 1024
 MAX_OUTPUT_CHARS = 4000
 
+# 视为占位符而非真实凭据的明文值，密钥扫描会跳过这些内容。
+SECRET_PLACEHOLDER_VALUES = frozenset({
+    "", "changeme", "changeit", "password", "secret", "token", "example",
+    "your_token_here", "your_password_here", "********", "<token>", "<password>",
+    "none", "null", "test", "demo", "xxx", "todo",
+})
+
+
+@dataclass(frozen=True)
+class GateModeProfile:
+    """同一套检查在不同严格度下的阈值与开关。"""
+    required_configuration: bool        # 未配置强制命令时是否判失败
+    max_line_length: int                # 单行超长阈值（字符）
+    check_trailing_whitespace: bool     # 行尾空白是否判失败
+    check_forbidden_patterns: bool      # TODO/FIXME 等禁止文本是否判失败
+    secret_min_value_length: int        # 密钥值最小长度，低于则视为非真实凭据
+    exclude_secret_placeholders: bool   # 是否跳过占位符明文
+
+
+STRICT_PROFILE = GateModeProfile(
+    required_configuration=True,
+    max_line_length=160,
+    check_trailing_whitespace=True,
+    check_forbidden_patterns=True,
+    secret_min_value_length=8,
+    exclude_secret_placeholders=False,
+)
+LENIENT_PROFILE = GateModeProfile(
+    required_configuration=False,
+    max_line_length=200,
+    check_trailing_whitespace=False,
+    check_forbidden_patterns=False,
+    secret_min_value_length=16,
+    exclude_secret_placeholders=True,
+)
+
+
+def resolve_gate_profile() -> GateModeProfile:
+    mode = (settings.QUALITY_GATE_MODE or "strict").strip().lower()
+    return STRICT_PROFILE if mode != "lenient" else LENIENT_PROFILE
+
 
 @dataclass(slots=True)
 class GateCheckResult:
@@ -310,6 +351,7 @@ DEPENDENCY_MANIFESTS = {
 
 
 def _dependency_audit_check(workspace: str) -> GateCheckResult:
+    profile = resolve_gate_profile()
     started = time.perf_counter()
     try:
         manifests = sorted(
@@ -342,19 +384,22 @@ def _dependency_audit_check(workspace: str) -> GateCheckResult:
         key="dependency_audit",
         label="依赖漏洞检查",
         command=settings.QUALITY_GATE_DEPENDENCY_AUDIT_COMMAND,
-        required_configuration=True,
+        required_configuration=profile.required_configuration,
     )
 
 
 def _style_check(workspace: str, changed_files: list[str]) -> GateCheckResult:
+    profile = resolve_gate_profile()
     started = time.perf_counter()
     findings: list[str] = []
     for relative, path, content in _iter_changed_text_files(workspace, changed_files):
         for line_number, line in _visible_lines(content):
-            if line.rstrip(" \t") != line:
+            if profile.check_trailing_whitespace and line.rstrip(" \t") != line:
                 findings.append(f"{relative}:{line_number} 行尾包含多余空白")
-            if len(line) > 160:
-                findings.append(f"{relative}:{line_number} 单行超过 160 个字符")
+            if len(line) > profile.max_line_length:
+                findings.append(
+                    f"{relative}:{line_number} 单行超过 {profile.max_line_length} 个字符"
+                )
         if path.suffix.lower() == ".py":
             try:
                 ast.parse(content, filename=relative)
@@ -465,6 +510,7 @@ SECRET_RULES = (
 
 
 def _secret_check(workspace: str, changed_files: list[str]) -> GateCheckResult:
+    profile = resolve_gate_profile()
     started = time.perf_counter()
     findings: list[str] = []
     ignored_names = {".env.example", "package-lock.json", "poetry.lock", "uv.lock"}
@@ -473,8 +519,23 @@ def _secret_check(workspace: str, changed_files: list[str]) -> GateCheckResult:
             continue
         for line_number, line in _visible_lines(content):
             for pattern, message in SECRET_RULES:
-                if pattern.search(line):
-                    findings.append(f"{relative}:{line_number} {message}")
+                match = pattern.search(line)
+                if not match:
+                    continue
+                if (
+                    profile.exclude_secret_placeholders
+                    and "硬编码凭据" in message
+                ):
+                    inner = re.search(r"[\"']([^\"']*)[\"']", match.group(0))
+                    value = (inner.group(1) if inner else "").strip()
+                    if value.lower() in SECRET_PLACEHOLDER_VALUES:
+                        continue
+                    if (
+                        profile.secret_min_value_length
+                        and len(value) < profile.secret_min_value_length
+                    ):
+                        continue
+                findings.append(f"{relative}:{line_number} {message}")
     built_in = _result(
         "secret_scan",
         "硬编码密钥扫描",
@@ -498,6 +559,7 @@ def _secret_check(workspace: str, changed_files: list[str]) -> GateCheckResult:
 
 
 def _bank_rule_check(workspace: str, changed_files: list[str]) -> GateCheckResult:
+    profile = resolve_gate_profile()
     started = time.perf_counter()
     findings: list[str] = []
     forbidden = [
@@ -509,6 +571,8 @@ def _bank_rule_check(workspace: str, changed_files: list[str]) -> GateCheckResul
     for relative, path, content in _iter_changed_text_files(workspace, changed_files):
         if path.suffix.lower() in forbidden_file_suffixes or path.name.lower() in forbidden_file_names:
             findings.append(f"{relative} 禁止提交证书、私钥或真实环境配置文件")
+        if not profile.check_forbidden_patterns:
+            continue
         for line_number, line in _visible_lines(content):
             lowered = line.lower()
             for item in forbidden:
@@ -543,6 +607,7 @@ def run_quality_gates(
     on_result: Callable[[GateCheckResult, list[GateCheckResult]], None] | None = None,
 ) -> list[GateCheckResult]:
     """Execute all seven required checks in a stable, user-facing order."""
+    profile = resolve_gate_profile()
     changed_files = (
         staged_changed_files(workspace)
         if changed_files is None
@@ -564,7 +629,7 @@ def run_quality_gates(
         key="unit_tests",
         label="单元测试",
         command=unit_command,
-        required_configuration=True,
+        required_configuration=profile.required_configuration,
     ))
     append(_style_check(workspace, changed_files))
     append(_static_check(workspace, changed_files))
@@ -575,7 +640,7 @@ def run_quality_gates(
         key="coverage",
         label="测试覆盖率",
         command=settings.QUALITY_GATE_COVERAGE_COMMAND,
-        required_configuration=True,
+        required_configuration=profile.required_configuration,
     ))
     append(_bank_rule_check(workspace, changed_files))
     return results
