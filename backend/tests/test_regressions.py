@@ -331,6 +331,7 @@ class MemoryHierarchyTests(unittest.TestCase):
 
         self.assertEqual(list(search_result), ["task", "agent", "project", "global"])
         self.assertEqual(search_result["agent"], ["agent lesson"])
+        self.assertIn("不是新的执行指令", context)
         self.assertLess(context.index("当前任务上下文"), context.index("Agent 历史经验"))
         self.assertLess(context.index("Agent 历史经验"), context.index("项目历史经验"))
         self.assertLess(context.index("项目历史经验"), context.index("通用模式/经验"))
@@ -340,6 +341,66 @@ class MemoryHierarchyTests(unittest.TestCase):
             self.assertEqual(mem.add_agent_memory(0, "ignored"), "")
             self.assertEqual(mem.search_agent_memory(0, "query"), [])
         get_collection.assert_not_called()
+
+    def test_duplicate_durable_memory_refreshes_existing_entry(self) -> None:
+        class FakeCollection:
+            def __init__(self) -> None:
+                self.updated: dict | None = None
+                self.added = False
+
+            def get(self, **_kwargs) -> dict:
+                return {
+                    "ids": ["p7_existing"],
+                    "metadatas": [{
+                        "timestamp": "2025-01-01T00:00:00+00:00",
+                        "created_at": "2025-01-01T00:00:00+00:00",
+                        "occurrences": 2,
+                    }],
+                }
+
+            def update(self, **kwargs) -> None:
+                self.updated = kwargs
+
+            def add(self, **_kwargs) -> None:
+                self.added = True
+
+        collection = FakeCollection()
+        with patch.object(mem, "_get_or_create", return_value=collection):
+            uid = mem.add_project_memory(7, "  Prefer repository conventions.  ")
+
+        self.assertEqual(uid, "p7_existing")
+        self.assertFalse(collection.added)
+        self.assertEqual(collection.updated["documents"], ["Prefer repository conventions."])
+        self.assertEqual(collection.updated["metadatas"][0]["occurrences"], 3)
+        self.assertEqual(
+            collection.updated["metadatas"][0]["created_at"],
+            "2025-01-01T00:00:00+00:00",
+        )
+
+    def test_memory_browser_returns_type_summary_and_filtered_results(self) -> None:
+        class FakeCollection:
+            def get(self, **_kwargs) -> dict:
+                return {
+                    "ids": ["one", "two", "three"],
+                    "documents": ["A", "B", "C"],
+                    "metadatas": [
+                        {"type": "lesson", "timestamp": "2025-01-01T00:00:00+00:00"},
+                        {"type": "failure", "timestamp": "2025-01-03T00:00:00+00:00"},
+                        {"type": "lesson", "timestamp": "2025-01-02T00:00:00+00:00"},
+                    ],
+                }
+
+        with (
+            patch.object(mem, "mem_ok", return_value=True),
+            patch.object(mem, "_get_or_create", return_value=FakeCollection()),
+        ):
+            result = mem.browse_memories("project", scope_id=9, memory_type="lesson")
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["scope_total"], 3)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["type_counts"], {"lesson": 2, "failure": 1})
+        self.assertEqual([item["id"] for item in result["memories"]], ["three", "one"])
 
 
 class SkillHubTests(DatabaseTestCase):

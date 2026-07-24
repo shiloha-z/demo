@@ -3,6 +3,7 @@ import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
+import MemoryExplorer from '../components/MemoryExplorer.vue'
 import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
@@ -276,31 +277,12 @@ function lastResultLabel(status: string | null): string {
   return map[status] || status
 }
 
-// ── Agent memory ─────────────────────────────────────────────────────
-interface MemoryEntry { id: string; document: string; metadata: Record<string, any> }
 const memoryDialogVisible = ref(false)
 const memoryDialogAgent = ref<{ id: number; name: string } | null>(null)
-const agentMemories = ref<MemoryEntry[]>([])
-const memoryLoading = ref(false)
 
 function openAgentMemory(a: any) {
   memoryDialogAgent.value = { id: a.id, name: a.name }
   memoryDialogVisible.value = true
-  loadAgentMemories(a.id)
-}
-
-async function loadAgentMemories(agentId: number) {
-  memoryLoading.value = true
-  try {
-    const { data } = await api.get('/settings/agent-memories', { params: { agent_id: agentId, limit: 30 } })
-    agentMemories.value = data.memories || []
-  } catch { /* ChromaDB may not be available */ }
-  finally { memoryLoading.value = false }
-}
-
-function fmtTs(iso: string): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 </script>
 
@@ -494,21 +476,13 @@ function fmtTs(iso: string): string {
     </t-dialog>
 
     <!-- Agent memory dialog -->
-    <t-dialog v-model:visible="memoryDialogVisible" :header="`Agent 记忆 — ${memoryDialogAgent?.name || ''}`" width="540px" :footer="false">
-      <div v-if="memoryLoading" class="memory-empty">加载中...</div>
-      <div v-else-if="agentMemories.length === 0" class="memory-empty">
-        <p>暂无 Agent 记忆</p>
-        <p class="memory-hint">Agent 执行任务后会将经验教训、常见错误和解决方案记录在此。</p>
-      </div>
-      <div v-else class="memory-scroll">
-        <div v-for="m in agentMemories" :key="m.id" class="memory-item">
-          <div class="memory-doc">{{ m.document }}</div>
-          <div class="memory-meta">
-            <span v-if="m.metadata.type" class="memory-tag">{{ m.metadata.type }}</span>
-            <span v-if="m.metadata.timestamp">{{ fmtTs(m.metadata.timestamp) }}</span>
-          </div>
-        </div>
-      </div>
+    <t-dialog v-model:visible="memoryDialogVisible" :header="`Agent 记忆 — ${memoryDialogAgent?.name || ''}`" width="680px" :footer="false">
+      <MemoryExplorer
+        v-if="memoryDialogAgent"
+        scope="agent"
+        :scope-id="memoryDialogAgent.id"
+        empty-hint="Agent 会将跨任务可复用的工作习惯、常见错误和解决方案沉淀在这里。"
+      />
     </t-dialog>
   </div>
 </template>
@@ -605,21 +579,4 @@ function fmtTs(iso: string): string {
 .runner-warning-body strong { font-weight: 600; }
 .runner-warning-body p { margin: 3px 0 0; font-size: 12px; opacity: 0.85; }
 
-/* ── Memory dialog ──────────────────────────────────────────────────── */
-.memory-empty { padding: 24px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
-.memory-hint { font-size: 12px; margin-top: 4px; opacity: 0.7; }
-.memory-scroll { max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.memory-item {
-  padding: 10px 12px;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  background: var(--page-canvas);
-}
-.memory-doc { font-size: 13px; line-height: 1.5; color: var(--foreground); word-break: break-word; white-space: pre-wrap; }
-.memory-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
-.memory-tag {
-  padding: 1px 6px; border-radius: 999px;
-  background: var(--primary-light); color: var(--primary);
-  font-size: 10px; font-weight: 600;
-}
 </style>

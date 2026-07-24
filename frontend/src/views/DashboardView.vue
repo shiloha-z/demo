@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import MemberManager from '../components/MemberManager.vue'
+import MemoryExplorer from '../components/MemoryExplorer.vue'
 import api from '../api'
 
 const store = useProjectStore()
@@ -57,31 +58,9 @@ const activeAgentCount = ref(0)
 const pendingReviewCount = ref(0)
 const approvalRate = ref<string | null>(null)
 
-// ── Project memory ──────────────────────────────────────────────────
-interface MemoryEntry { id: string; document: string; metadata: Record<string, any> }
-const projectMemories = ref<MemoryEntry[]>([])
-const memoryLoading = ref(false)
-
 function openProjectMemory(p: any) {
   memoryDialogProject.value = { id: p.id, name: p.name }
   memoryDialogVisible.value = true
-  loadProjectMemories(p.id)
-}
-
-async function loadProjectMemories(pid?: number) {
-  const targetId = pid ?? store.currentProject?.id
-  if (!targetId) { projectMemories.value = []; return }
-  memoryLoading.value = true
-  try {
-    const { data } = await api.get('/settings/project-memories', { params: { project_id: targetId, limit: 20 } })
-    projectMemories.value = data.memories || []
-  } catch { /* ChromaDB may not be available */ }
-  finally { memoryLoading.value = false }
-}
-
-function fmtTs(iso: string): string {
-  if (!iso) return ''
-  return new Date(iso).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
 let dashboardLoadedAt = 0
@@ -448,21 +427,13 @@ async function handleJoinProject(p: any, event: Event) {
     </t-dialog>
 
     <!-- Project memory dialog -->
-    <t-dialog v-model:visible="memoryDialogVisible" :header="`项目记忆 — ${memoryDialogProject?.name || ''}`" width="560px" :footer="false">
-      <div v-if="memoryLoading" class="memory-empty">加载中...</div>
-      <div v-else-if="projectMemories.length === 0" class="memory-empty">
-        <p>暂无项目记忆</p>
-        <p class="memory-hint">Agent 执行任务后会将审查经验、设计决策和错误教训记录在此。</p>
-      </div>
-      <div v-else class="memory-list">
-        <div v-for="m in projectMemories" :key="m.id" class="memory-item">
-          <div class="memory-doc">{{ m.document }}</div>
-          <div class="memory-meta">
-            <span v-if="m.metadata.type" class="memory-tag">{{ m.metadata.type }}</span>
-            <span v-if="m.metadata.timestamp">{{ fmtTs(m.metadata.timestamp) }}</span>
-          </div>
-        </div>
-      </div>
+    <t-dialog v-model:visible="memoryDialogVisible" :header="`项目记忆 — ${memoryDialogProject?.name || ''}`" width="680px" :footer="false">
+      <MemoryExplorer
+        v-if="memoryDialogProject"
+        scope="project"
+        :scope-id="memoryDialogProject.id"
+        empty-hint="Agent 会将该项目的设计决策、审查反馈和失败教训沉淀在这里。"
+      />
     </t-dialog>
   </div>
 </template>
@@ -668,24 +639,6 @@ async function handleJoinProject(p: any, event: Event) {
 .field-hint {
   font-size: 11px; color: var(--muted-foreground);
   margin: 2px 0 0; line-height: 1.4;
-}
-
-/* ── Project memory dialog ─────────────────────────────────────────── */
-.memory-empty { padding: 24px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
-.memory-hint { font-size: 12px; margin-top: 4px; opacity: 0.7; }
-.memory-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow-y: auto; }
-.memory-item {
-  padding: 10px 12px;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  background: var(--page-canvas);
-}
-.memory-doc { font-size: 13px; line-height: 1.5; color: var(--foreground); word-break: break-word; white-space: pre-wrap; }
-.memory-meta { display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--muted-foreground); }
-.memory-tag {
-  padding: 1px 6px; border-radius: 999px;
-  background: var(--primary-light); color: var(--primary);
-  font-size: 10px; font-weight: 600;
 }
 
 @media (max-width: 980px) {

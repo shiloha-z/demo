@@ -7,11 +7,17 @@ Sensitive fields (API keys) are masked in responses.
 import os
 import re
 from pathlib import Path
+from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.config import settings as app_settings
+from app.core.auth import get_current_user
+from app.core.database import get_db
+from app.models.models import Agent, User
+from app.api.members import require_member
 
 router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
@@ -200,22 +206,75 @@ def update_setting(req: SettingUpdate):
 
 # ── Memory viewers ────────────────────────────────────────────────────────
 
+@router.get("/memories")
+def browse_memories(
+    response: Response,
+    scope: Literal["global", "project", "agent"] = Query(default="global"),
+    scope_id: int = Query(default=0, ge=0),
+    query: str = Query(default="", max_length=300),
+    memory_type: str = Query(default="", max_length=80),
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Search and filter durable memories with access checks and health data."""
+    response.headers["Cache-Control"] = "no-store"
+    if scope == "project":
+        require_member(scope_id, user, db)
+    elif scope == "agent" and db.get(Agent, scope_id) is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    from app.services import memory_service as mem
+
+    try:
+        return mem.browse_memories(
+            scope,
+            scope_id=scope_id,
+            query=query,
+            memory_type=memory_type,
+            n=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
 @router.get("/global-memories")
-def list_global_memories(limit: int = 50):
+def list_global_memories(
+    response: Response,
+    limit: int = 50,
+    _user: User = Depends(get_current_user),
+):
     """List recent global (cross-project) memories from ChromaDB."""
+    response.headers["Cache-Control"] = "no-store"
     from app.services import memory_service as mem
     return {"memories": mem.list_global_memories(n=max(1, min(200, limit)))}
 
 
 @router.get("/project-memories")
-def list_project_memories(project_id: int, limit: int = 50):
+def list_project_memories(
+    response: Response,
+    project_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """List recent project-scoped memories from ChromaDB."""
+    response.headers["Cache-Control"] = "no-store"
+    require_member(project_id, user, db)
     from app.services import memory_service as mem
     return {"memories": mem.list_project_memories(project_id, n=max(1, min(200, limit)))}
 
 
 @router.get("/agent-memories")
-def list_agent_memories(agent_id: int, limit: int = 50):
+def list_agent_memories(
+    response: Response,
+    agent_id: int,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
     """List recent agent-scoped memories from ChromaDB."""
+    response.headers["Cache-Control"] = "no-store"
+    if db.get(Agent, agent_id) is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
     from app.services import memory_service as mem
     return {"memories": mem.list_agent_memories(agent_id, n=max(1, min(200, limit)))}
