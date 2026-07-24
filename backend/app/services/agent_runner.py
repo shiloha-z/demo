@@ -424,6 +424,19 @@ def _run_agent_pipeline(
             _complete_child_task(db, task, parent, project_id, branch_name)
             return
 
+        # ── Conflict resolution: skip review — re-queue merge directly ─
+        if conflict_resolution:
+            _progress(task_id, project_id, "🔀 冲突已解决，重新进入合并队列", "merge_queued")
+            task.status = TaskStatus.MERGE_QUEUED
+            task.merge_error = ""
+            db.commit()
+            broadcast_sync("task_update", {
+                "id": task.id, "project_id": project_id, "status": "merge_queued",
+            })
+            from app.services.execution_service import enqueue_merge
+            enqueue_merge(task.id)
+            return
+
         # Top-level task: build the review + gate + voting round via the
         # shared helper (children never reach this point — they return earlier).
         _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary)
