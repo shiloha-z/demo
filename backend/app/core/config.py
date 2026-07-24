@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # exhausting the web server or the model provider's rate limit.
     AGENT_MAX_CONCURRENCY: int = 4
     MERGE_MAX_CONCURRENCY: int = 2
+    # A task normally needs one integration attempt, or two when it must first
+    # absorb a concurrently merged task. Bound retries so a bad resolver can
+    # never create an endless Agent/merge loop.
+    MERGE_MAX_ATTEMPTS: int = 4
     MERGE_TEST_COMMAND: str = ""
     MERGE_TEST_TIMEOUT_SECONDS: int = 300
     # HTTP diagnostics. Slow requests are logged with a correlation ID so

@@ -48,6 +48,19 @@ def integrate_task(task_id: int) -> None:
             db.commit()
             _broadcast(task)
             return
+        max_attempts = max(1, int(getattr(settings, "MERGE_MAX_ATTEMPTS", 4)))
+        if (task.merge_attempts or 0) >= max_attempts:
+            _update_task(
+                task,
+                TaskStatus.MERGE_BLOCKED,
+                (
+                    f"合并已连续尝试 {task.merge_attempts} 次仍未成功，已停止自动重试。"
+                    "请检查冲突文件或调整任务改动后再重新提交。"
+                ),
+            )
+            db.commit()
+            _broadcast(task)
+            return
         review = db.query(Review).filter(
             Review.task_id == task.id,
         ).order_by(Review.id.desc()).first()

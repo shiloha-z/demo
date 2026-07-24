@@ -581,6 +581,47 @@ class MergeConflictTests(DatabaseTestCase):
         self.assertEqual(integ_task.status, TaskStatus.MERGE_QUEUED)
         integ_session.close()
 
+    @patch("app.api.ws.broadcast_sync_to_project")
+    @patch("app.api.ws.broadcast_sync")
+    @patch("app.services.execution_service.enqueue_agent_run", return_value=True)
+    @patch.object(settings, "QUALITY_GATE_ENABLED", False)
+    def test_merge_attempt_limit_stops_an_endless_retry_loop(
+        self, _enq, _ws, _wsp
+    ) -> None:
+        reviewer = self.add_reviewer("retry-reviewer")
+        task = self.add_task(TaskStatus.PENDING)
+        start_task(self.project.id, task.id, BackgroundTasks(), self.db, self.owner)
+        review = self.simulate_pipeline_complete(task)
+        with patch("app.services.execution_service.enqueue_merge"):
+            cast_review_vote(
+                review.id,
+                VoteRequest(decision="approve"),
+                BackgroundTasks(),
+                self.db,
+                self.owner,
+            )
+            cast_review_vote(
+                review.id,
+                VoteRequest(decision="approve"),
+                BackgroundTasks(),
+                self.db,
+                reviewer,
+            )
+        task.merge_attempts = settings.MERGE_MAX_ATTEMPTS
+        self.db.commit()
+
+        integ_session = self.Session()
+        with (
+            patch.object(merge_service, "SessionLocal", return_value=integ_session),
+            patch.object(merge_service, "broadcast_sync"),
+        ):
+            merge_service.integrate_task(task.id)
+
+        integ_task = integ_session.get(Task, task.id)
+        self.assertEqual(integ_task.status, TaskStatus.MERGE_BLOCKED)
+        self.assertIn("停止自动重试", integ_task.merge_error)
+        integ_session.close()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # Flow 4: Version Rollback

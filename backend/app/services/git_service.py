@@ -305,7 +305,11 @@ def finish_integration(workspace: str, message: str) -> tuple[bool, str]:
     if not repo:
         return False, "Project repository not found"
     try:
-        commit_hash = repo.index.commit(message).hexsha
+        # Use native ``git commit`` instead of ``IndexFile.commit``.  The
+        # latter does not automatically include MERGE_HEAD as a second parent,
+        # so Git would forget that the task branch had been merged and could
+        # report the same conflict again on the next attempt.
+        commit_hash = _commit_staged(repo, message, allow_empty=True)
         return True, commit_hash
     except Exception as exc:
         return False, str(exc)
@@ -445,6 +449,32 @@ def _stage_agent_changes(repo: Repo) -> None:
         pass
 
 
+def _commit_staged(repo: Repo, message: str, *, allow_empty: bool = False) -> str:
+    """Commit the staged index while preserving an in-progress merge.
+
+    GitPython's ``IndexFile.commit`` creates a regular single-parent commit
+    unless callers manually provide parents.  During conflict resolution that
+    drops MERGE_HEAD, leaving the latest base branch outside the task history
+    and causing the same merge conflict to recur forever.  Native ``git
+    commit`` consumes MERGE_HEAD, records both parents, and clears merge state.
+
+    A process-local identity keeps automated commits reliable on hosts without
+    a global Git user configuration and avoids changing repository config.
+    """
+    args = ["--no-verify", "--no-gpg-sign"]
+    if allow_empty:
+        args.append("--allow-empty")
+    args.extend(["-m", message])
+    with repo.git.custom_environment(
+        GIT_AUTHOR_NAME="AgentCollab",
+        GIT_AUTHOR_EMAIL="agentcollab@local",
+        GIT_COMMITTER_NAME="AgentCollab",
+        GIT_COMMITTER_EMAIL="agentcollab@local",
+    ):
+        repo.git.commit(*args)
+    return repo.head.commit.hexsha
+
+
 @_workspace_locked
 def commit(workspace: str, message: str) -> str | None:
     """Stage all, commit, return commit hash. None if nothing to commit."""
@@ -452,10 +482,13 @@ def commit(workspace: str, message: str) -> str | None:
     if not repo:
         return None
     _stage_agent_changes(repo)
-    if not repo.is_dirty(index=True, working_tree=False, untracked_files=True):
+    merge_in_progress = (Path(repo.git_dir) / "MERGE_HEAD").exists()
+    if (
+        not merge_in_progress
+        and not repo.is_dirty(index=True, working_tree=False, untracked_files=True)
+    ):
         return None
-    c = repo.index.commit(message)
-    return c.hexsha
+    return _commit_staged(repo, message)
 
 
 @_workspace_locked

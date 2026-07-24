@@ -438,10 +438,64 @@ def _run_agent_pipeline(
                     "Conflict resolution failed: agent produced no code changes. The conflict markers may not have been fixed.",
                     project_id, runner_type)
                 return
+            # Conflict resolution creates a new merge commit. The deterministic
+            # gate attached to the original approved commit is therefore stale;
+            # validate the resolved tree and persist a gate run for this exact
+            # commit before placing it back in the merge queue.
+            if settings.QUALITY_GATE_ENABLED:
+                approved_review = (
+                    db.query(Review)
+                    .filter(Review.task_id == task.id)
+                    .order_by(Review.id.desc())
+                    .first()
+                )
+                if not approved_review:
+                    task.status = TaskStatus.MERGE_BLOCKED
+                    task.merge_error = "冲突已解决，但找不到原审批记录，已停止自动合并。"
+                    db.commit()
+                    _maybe_idle_agent(db, task.agent_id)
+                    broadcast_sync("task_update", {
+                        "id": task.id,
+                        "project_id": project_id,
+                        "status": "merge_blocked",
+                        "merge_error": task.merge_error,
+                    })
+                    return
+                changed_files = sorted(git.changed_files_vs_base(workspace, commit_hash))
+                _progress(task_id, project_id, "🛡️ 正在检查冲突解决后的合并结果...", "quality_gate")
+                gate_run = quality_gates.execute_and_persist(
+                    db,
+                    task=task,
+                    review=approved_review,
+                    workspace=workspace,
+                    commit_hash=commit_hash,
+                    changed_files=changed_files,
+                )
+                if gate_run.status != "passed":
+                    task.status = TaskStatus.MERGE_BLOCKED
+                    task.merge_error = (
+                        f"冲突解决后的确定性检查未通过：{gate_run.summary}"
+                    )
+                    db.commit()
+                    _maybe_idle_agent(db, task.agent_id)
+                    broadcast_sync("task_update", {
+                        "id": task.id,
+                        "project_id": project_id,
+                        "status": "merge_blocked",
+                        "merge_error": task.merge_error,
+                    })
+                    return
+                _progress(
+                    task_id,
+                    project_id,
+                    "✅ 冲突解决后的确定性检查已通过",
+                    "quality_gate_passed",
+                )
             _progress(task_id, project_id, "🔀 冲突已解决，重新进入合并队列", "merge_queued")
             task.status = TaskStatus.MERGE_QUEUED
             task.merge_error = ""
             db.commit()
+            _maybe_idle_agent(db, task.agent_id)
             broadcast_sync("task_update", {
                 "id": task.id, "project_id": project_id, "status": "merge_queued",
             })
