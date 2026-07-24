@@ -1042,7 +1042,12 @@ async function resumeTask(task: any, event: Event) {
                   <span class="progress-msg">{{ entry.message }}</span>
                 </div>
                 <div v-if="taskProgress.length === 0" class="progress-empty">
-                  已发送启动指令，等待 Agent 输出执行进度…
+                  <template v-if="selectedTask?.parent_task_id">
+                    子任务执行日志（完成后将汇总至父任务审查）
+                  </template>
+                  <template v-else>
+                    已发送启动指令，等待 Agent 输出执行进度…
+                  </template>
                 </div>
               </div>
             </div>
