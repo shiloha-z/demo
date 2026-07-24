@@ -801,7 +801,7 @@ async function resumeTask(task: any, event: Event) {
               :key="c.id"
               class="task-item subtask-item"
               :class="{ active: selectedTask?.id === c.id }"
-              @click="selectTask(c)"
+              @click.stop="selectTask(c)"
             >
               <div class="task-item-top">
                 <span class="task-id">#{{ c.id }}</span>
