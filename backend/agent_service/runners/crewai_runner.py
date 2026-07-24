@@ -249,6 +249,9 @@ class CrewAIRunner(BaseRunner):
                 "4. 用 FileRead 工具读取所有被修改的文件\n"
                 "5. 检查：逻辑正确性、命名规范、错误处理、代码风格\n"
                 "6. 对每个问题给出：文件路径、行号（若能确定）、严重程度（高/中/低）、具体建议\n\n"
+                "【重要】README.md / README.rst / README.txt 等文档文件不属于审查范围，"
+                "不要对其内容完整性、格式或质量做任何检查或标记问题。"
+                "仅审查代码文件（.py/.js/.ts/.java 等）的功能实现。\n\n"
                 "原任务：{task_description}"
             ),
             expected_output=(
@@ -463,12 +466,13 @@ class CrewAIRunner(BaseRunner):
 
         reviewer = Agent(
             role="代码审查员",
-            goal=reviewer_prompt if reviewer_prompt else "审查代码质量：检查逻辑错误、命名规范、潜在bug和代码风格",
+            goal=reviewer_prompt if reviewer_prompt else "审查代码质量：检查逻辑错误、命名规范、潜在bug和代码风格（不审查 README 等文档文件）",
             backstory=(
                 "你是一位严格的代码审查专家，有10年以上的代码审查经验。"
                 "你会仔细检查每一行代码，关注：逻辑是否正确、命名是否清晰、"
                 "是否有潜在的null/undefined错误、异常处理是否完善、代码是否可读。"
                 "审查前先用 MemorySearch 查看项目历史中是否有类似问题被指出过。"
+                "注意：README.md 等文档文件不属于你的审查范围，跳过它们。"
             ),
             tools=[tools["read"], tools["mem_search"]],
             verbose=True,
@@ -479,7 +483,7 @@ class CrewAIRunner(BaseRunner):
 
         security = Agent(
             role="安全审查员",
-            goal=security_prompt if security_prompt else "检查代码中的安全漏洞：注入攻击、越权访问、敏感信息泄露、不安全加密",
+            goal=security_prompt if security_prompt else "检查代码中的安全漏洞：注入攻击、越权访问、敏感信息泄露、不安全加密（不审查 README 等文档文件）",
             backstory=(
                 "你是一位资深安全工程师，精通OWASP十大安全风险。"
                 "你会检查：SQL注入、XSS、命令注入、路径遍历、硬编码密钥、"
@@ -609,6 +613,9 @@ class CrewAIRunner(BaseRunner):
                 "4. 用 FileRead 工具读取所有被修改的文件\n"
                 "5. 检查：逻辑正确性、命名规范、错误处理、代码风格\n"
                 "6. 对每个问题给出：文件路径、行号、严重程度、具体建议\n\n"
+                "【重要】README.md / README.rst / README.txt 等文档文件不属于审查范围，"
+                "不要对其内容完整性、格式或质量做任何检查或标记问题。"
+                "仅审查代码文件的功能实现。\n\n"
                 f"完整任务规划：\n{plan_overview}"
             ),
             expected_output=(
