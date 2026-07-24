@@ -658,6 +658,37 @@ def repo_has_uncommitted_changes(workspace: str) -> bool:
         return False
 
 
+def suspicious_files_in_diff(workspace: str, commit_hash: str) -> list[str]:
+    """Return files whose committed diff looks like a placeholder / incomplete write.
+
+    Detects the "disk hallucination" pattern where the agent claims to have
+    written a rich file but the actual content is just a stub header.
+    """
+    repo = get_repo(workspace)
+    if not repo:
+        return []
+    base = _get_base_branch(repo)
+    try:
+        numstat = repo.git.diff(base, commit_hash, "--numstat").splitlines()
+    except GitCommandError:
+        return []
+    suspicious: list[str] = []
+    for line in numstat:
+        parts = line.split("\t")
+        if len(parts) != 3:
+            continue
+        added_str, _, filename = parts
+        try:
+            added = int(added_str)
+        except ValueError:
+            continue
+        # A file with exactly 1 added line is almost certainly a placeholder
+        # (e.g. "# Project Workspace"). Flag it so the runner can warn.
+        if added <= 1:
+            suspicious.append(filename)
+    return suspicious
+
+
 @_workspace_locked
 def diff_commit_vs_base(workspace: str, commit_hash: str) -> str:
     """Diff a specific commit against the base branch.

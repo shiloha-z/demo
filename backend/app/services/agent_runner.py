@@ -381,12 +381,12 @@ def _run_agent_pipeline(
         commit_hash = git.commit(workspace, f"Task #{task.id} — agent changes")
         if commit_hash:
             _progress(task_id, project_id, f"📌 已提交：{commit_hash[:7]}", "committed")
-            # Verify the working directory matches the commit so we catch
-            # agent "disk hallucinations" (model claimed to write but didn't).
-            dirty = git.repo_has_uncommitted_changes(workspace)
-            if dirty:
+            # Catch "disk hallucinations": files the agent claimed to write
+            # but only wrote a stub (e.g. 1-line placeholder).
+            suspicious = git.suspicious_files_in_diff(workspace, commit_hash)
+            if suspicious:
                 _progress(task_id, project_id,
-                    "⚠️ 提交后工作区仍有未提交变更 — Agent 可能在提交后又修改了文件", "diff_empty")
+                    f"⚠️ 疑似未完整写入：{', '.join(suspicious[:8])}", "diff_suspicious")
 
         _progress(task_id, project_id, "📊 正在生成代码差异对比...", "diff")
         # Use the committed snapshot for the review so later worktree mutations
