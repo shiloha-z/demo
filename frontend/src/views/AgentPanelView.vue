@@ -65,7 +65,7 @@ let agentsLoadedAt = 0
 onMounted(async () => {
   if (store.projects.length === 0) await store.fetchProjects()
   await loadAgents()
-  unsubAgent = wsStore.on('agent_update', () => loadAgents())
+  unsubAgent = wsStore.on('agent_update', () => loadAgents(true))
 })
 
 // KeepAlive preserves this page. Only reconcile after a meaningful stale
@@ -80,9 +80,9 @@ onUnmounted(() => {
   if (unsubAgent) unsubAgent()
 })
 
-async function loadAgents() {
+async function loadAgents(silent = false) {
   try {
-    const { data } = await api.get('/agents')
+    const { data } = await api.get('/agents', { silent })
     agents.value = data.items || data
     agentsLoadedAt = Date.now()
   } catch (e: any) {

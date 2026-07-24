@@ -123,10 +123,10 @@ function toggleExpand(t: any) {
   expanded.value = next
 }
 
-async function loadSubtasks(t: any) {
+async function loadSubtasks(t: any, silent = false) {
   if (!filterProjectId.value) return
   try {
-    const res = await api.get(`/projects/${filterProjectId.value}/tasks/${t.id}/subtasks`)
+    const res = await api.get(`/projects/${filterProjectId.value}/tasks/${t.id}/subtasks`, { silent })
     const data = res.data
     subtasksMap.value = { ...subtasksMap.value, [t.id]: data.subtasks || [] }
     // Reflect aggregated parent state returned by the endpoint.
@@ -171,10 +171,10 @@ async function planTask(t: any, ev?: Event) {
 }
 
 // Refresh planning trees after the initial load so progress is visible.
-async function refreshSubtrees() {
+async function refreshSubtrees(silent = false) {
   for (const t of tasks.value) {
     if (isParentState(t)) {
-      await loadSubtasks(t)
+      await loadSubtasks(t, silent)
       if ((subtasksMap.value[t.id]?.length ?? 0) > 0) {
         expanded.value = new Set(expanded.value).add(t.id)
       }
@@ -342,7 +342,7 @@ async function loadTasks(silent = false) {
   for (const t of tasks.value) {
     if (t.status === 'planning') planning.value = new Set(planning.value).add(t.id)
   }
-  await refreshSubtrees()
+  await refreshSubtrees(silent)
 }
 
 // 后台 WS 事件频繁到达时，把多次刷新合并为一次（且静默，不触发顶部进度条）。

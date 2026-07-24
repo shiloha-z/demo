@@ -51,7 +51,9 @@ export const useLoadingStore = defineStore('loading', () => {
       hideTimer = null
     }
     if (visible.value) {
-      if (progress.value >= 100) progress.value = 24
+      // 已在显示中：保持当前进度单向推进。并发请求到达时若已接近完成，
+      // 平滑回落到 90% 继续，而不是硬重置回 24%，避免进度条反复横跳。
+      if (progress.value >= 100) progress.value = 90
       runProgressTimer()
       return
     }
