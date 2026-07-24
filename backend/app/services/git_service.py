@@ -402,13 +402,28 @@ def _stage_agent_changes(repo: Repo) -> None:
     ]
     if generated:
         repo.git.reset("--", *generated)
-    # Unstage README / documentation files — agents frequently hallucinate
-    # rich content that never lands on disk (single-line placeholder).
+    # Unstage README / doc files that only contain a stub header (≤2 non-empty
+    # lines) — the classic agent hallucination pattern.  Real documentation
+    # changes (3+ lines) are kept so conflict resolution and legitimate doc
+    # work still works.
     try:
-        readme_files = [f for f in staged
-                        if Path(f).name.lower() in {"readme.md", "readme.rst", "readme.txt", "readme"}]
-        if readme_files:
-            repo.git.reset("--", *readme_files)
+        root = Path(repo.working_dir)
+        to_unstage: list[str] = []
+        for f in staged:
+            if Path(f).name.lower() not in {"readme.md", "readme.rst", "readme.txt", "readme"}:
+                continue
+            fpath = root / f
+            if not fpath.is_file():
+                continue
+            try:
+                text = fpath.read_text(encoding="utf-8", errors="replace")
+                lines = [l for l in text.splitlines() if l.strip()]
+                if len(lines) <= 2:
+                    to_unstage.append(f)
+            except OSError:
+                pass
+        if to_unstage:
+            repo.git.reset("--", *to_unstage)
     except GitCommandError:
         pass
     # Unstage mode-only changes (files showing +0 / −0).
