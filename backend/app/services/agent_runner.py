@@ -461,12 +461,28 @@ def _complete_child_task(db, task, parent, project_id, branch_name):
     from app.api.ws import broadcast_sync
     task.status = TaskStatus.SUBTASK_DONE
     task.completed_at = datetime.now(timezone.utc)
+    # Increment the parent's done counter so the frontend shows accurate progress.
+    if parent and parent.subtask_count > 0:
+        # Re-count from DB to stay accurate even if children were manually deleted.
+        from app.models.models import Task as TaskModel
+        terminal = {TaskStatus.SUBTASK_DONE, TaskStatus.APPROVED, TaskStatus.REJECTED,
+                    TaskStatus.FAILED, TaskStatus.MERGE_BLOCKED}
+        done = db.query(TaskModel).filter(
+            TaskModel.parent_task_id == parent.id,
+            TaskModel.status.in_(terminal),
+        ).count()
+        parent.subtask_done = min(done, parent.subtask_count)
     db.commit()
     _progress(task.id, project_id, f"✅ 子任务完成，改动已并入共享分支 {branch_name}", "subtask_done")
     broadcast_sync("task_update", {
         "id": task.id, "project_id": project_id, "status": "subtask_done",
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+    })
+    # Broadcast parent update so frontend progress counter refreshes.
+    broadcast_sync("task_update", {
+        "id": parent.id, "project_id": project_id, "status": parent.status.value,
+        "subtask_done": parent.subtask_done, "subtask_count": parent.subtask_count,
     })
     _on_child_finished(db, task.id, project_id)
 
@@ -491,9 +507,9 @@ def _on_child_finished(db, task_id, project_id):
 
     children = db.query(Task).filter(Task.parent_task_id == parent.id).order_by(Task.id).all()
     any_failed = any(c.status == TaskStatus.FAILED for c in children)
-    all_terminal = all(
-        c.status in (TaskStatus.SUBTASK_DONE, TaskStatus.FAILED) for c in children
-    )
+    _child_terminal = {TaskStatus.SUBTASK_DONE, TaskStatus.FAILED,
+                       TaskStatus.APPROVED, TaskStatus.REJECTED, TaskStatus.MERGE_BLOCKED}
+    all_terminal = all(c.status in _child_terminal for c in children)
 
     if not all_terminal:
         nxt = db.query(Task).filter(
@@ -512,7 +528,13 @@ def _on_child_finished(db, task_id, project_id):
                     "id": nxt.id, "project_id": project_id, "status": "running",
                     "started_at": nxt.started_at.isoformat() if nxt.started_at else None,
                 })
-                enqueue_agent_run(nxt.id)
+                if not enqueue_agent_run(nxt.id):
+                    # Roll back to avoid the next child being stuck RUNNING.
+                    db.query(Task).filter(Task.id == nxt.id).update(
+                        {Task.status: TaskStatus.PENDING, Task.started_at: None},
+                        synchronize_session=False,
+                    )
+                    db.commit()
         if parent.status == TaskStatus.PLANNING:
             parent.status = TaskStatus.SUBTASK_RUNNING
             db.commit()

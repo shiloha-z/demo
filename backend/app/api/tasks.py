@@ -427,8 +427,18 @@ def plan_task_endpoint(
         raise HTTPException(status_code=404, detail="Task not found")
     if parent.parent_task_id is not None:
         raise HTTPException(status_code=400, detail="子任务不能再次拆解")
-    if parent.status not in (TaskStatus.PENDING, TaskStatus.FAILED, TaskStatus.PLANNING):
+    if parent.status not in (TaskStatus.PENDING, TaskStatus.FAILED):
         raise HTTPException(status_code=400, detail=f"仅待开始/失败的任务可规划，当前状态：{parent.status.value}")
+
+    # Atomically claim the task for planning — prevents concurrent duplicate plans.
+    claimed = db.query(Task).filter(
+        Task.id == parent.id,
+        Task.status.in_([TaskStatus.PENDING, TaskStatus.FAILED]),
+    ).update({Task.status: TaskStatus.PLANNING}, synchronize_session=False)
+    if not claimed:
+        raise HTTPException(status_code=409, detail="任务已被其他请求规划，请刷新后重试")
+    db.commit()
+    db.refresh(parent)
 
     agent = db.get(Agent, parent.agent_id) if parent.agent_id else None
     if not agent:
@@ -445,6 +455,11 @@ def plan_task_endpoint(
         project_context=collect_project_context(project.workspace_path),
     )
     if not steps:
+        # Roll back the PLANNING claim so the user can retry.
+        db.query(Task).filter(Task.id == parent.id).update(
+            {Task.status: TaskStatus.PENDING}, synchronize_session=False,
+        )
+        db.commit()
         detail = f"规划失败：{reason}" if reason else "规划模型未能生成可用子任务，请稍后重试或手动创建子任务"
         raise HTTPException(status_code=422, detail=detail)
 
@@ -467,6 +482,8 @@ def plan_task_endpoint(
             title=f"{step.title}",
             description=f"{step.goal}\n\n（来自父任务「{parent.title}」子步骤 {step.id}）",
             agent_id=child_agent_id,
+            reviewer_agent_id=parent.reviewer_agent_id,
+            security_agent_id=parent.security_agent_id,
             approval_percent=parent.approval_percent,
             project_id=project_id,
             status=TaskStatus.PENDING,
@@ -521,6 +538,13 @@ def plan_task_endpoint(
             if claimed and enqueue_agent_run(first.id):
                 parent.status = TaskStatus.SUBTASK_RUNNING
                 db.commit()
+            elif claimed:
+                # Enqueue failed — roll back the child so it isn't stuck RUNNING.
+                db.query(Task).filter(Task.id == first.id).update(
+                    {Task.status: TaskStatus.PENDING, Task.started_at: None},
+                    synchronize_session=False,
+                )
+                db.commit()
     else:
         db.commit()
     db.refresh(parent)
@@ -561,8 +585,8 @@ def get_subtasks(
     children = db.query(Task).filter(Task.parent_task_id == parent.id).order_by(Task.id).all()
 
     terminal = {TaskStatus.APPROVED, TaskStatus.REJECTED, TaskStatus.FAILED,
-                TaskStatus.MERGE_QUEUED, TaskStatus.MERGING, TaskStatus.INTEGRATING,
-                TaskStatus.MERGED, TaskStatus.MERGE_BLOCKED, TaskStatus.SUBTASK_DONE}
+                TaskStatus.MERGE_QUEUED, TaskStatus.INTEGRATING,
+                TaskStatus.MERGE_BLOCKED, TaskStatus.SUBTASK_DONE}
     done = sum(1 for c in children if c.status in terminal)
     parent.subtask_done = done
     if children and parent.status in (TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING) and done == len(children):
@@ -839,8 +863,10 @@ def archive_task(
     task = db.query(Task).filter(Task.id == task_id, Task.project_id == project_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.REVIEWING):
-        raise HTTPException(status_code=400, detail="只有已结束的任务才能归档（已通过/已驳回/已完成/失败）")
+    if task.status in (TaskStatus.PENDING, TaskStatus.RUNNING, TaskStatus.REVIEWING,
+                       TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING,
+                       TaskStatus.MERGE_QUEUED, TaskStatus.INTEGRATING, TaskStatus.CONFLICT_RESOLUTION):
+        raise HTTPException(status_code=400, detail="只有已结束的任务才能归档")
     if task.archived:
         raise HTTPException(status_code=400, detail="任务已归档")
     task.archived = True
@@ -910,6 +936,10 @@ def delete_task(
         )
         db.query(Review).filter(Review.id.in_(review_ids)).delete(synchronize_session=False)
 
+    # Cascade-delete child tasks in planning trees so no orphans remain.
+    children = db.query(Task).filter(Task.parent_task_id == task_id).all()
+    for child in children:
+        db.delete(child)
     db.delete(task)
     db.commit()
 

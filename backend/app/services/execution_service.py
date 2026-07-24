@@ -113,7 +113,8 @@ def _release_paused_agent(task_id: int) -> None:
         other_active = db.query(Task.id).filter(
             Task.agent_id == task.agent_id,
             Task.id != task.id,
-            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION]),
+            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION,
+                             TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING]),
         ).first()
         if agent and not other_active and agent.status == AgentStatus.WORKING:
             agent.status = AgentStatus.IDLE

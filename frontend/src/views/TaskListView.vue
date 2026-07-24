@@ -769,7 +769,7 @@ async function resumeTask(task: any, event: Event) {
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                 </button>
                 <button
-                  v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing' && t.status !== 'paused'"
+                  v-if="t.status !== 'pending' && t.status !== 'running' && t.status !== 'reviewing' && t.status !== 'paused' && t.status !== 'planning' && t.status !== 'subtask_running' && t.status !== 'merge_queued' && t.status !== 'integrating' && t.status !== 'conflict_resolution'"
                   class="archive-btn"
                   title="归档"
                   @click="archiveTask(t, $event)"
