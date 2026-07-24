@@ -28,6 +28,8 @@ const joinDialogVisible = ref(false)
 const joinProjectId = ref('')
 const joining = ref(false)
 const searchKeyword = ref('')
+const detailDialogVisible = ref(false)
+const detailProject = ref<any>(null)
 
 const visibleProjects = computed(() => {
   const keyword = searchKeyword.value.trim().toLocaleLowerCase()
@@ -199,6 +201,16 @@ function goProject(p: any) {
   router.push('/files')
 }
 
+function openProjectDetail(p: any) {
+  detailProject.value = p
+  detailDialogVisible.value = true
+}
+
+function enterProject(p: any) {
+  detailDialogVisible.value = false
+  goProject(p)
+}
+
 async function handleJoinProject(p: any, event: Event) {
   event.stopPropagation()
   if (!p.project_id) {
@@ -329,7 +341,7 @@ async function handleJoinProject(p: any, event: Event) {
           v-for="p in visibleProjects"
         :key="p.id"
         class="project-card"
-        @click="goProject(p)"
+        @click="openProjectDetail(p)"
       >
         <div class="project-card-icon">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
@@ -381,6 +393,41 @@ async function handleJoinProject(p: any, event: Event) {
     </div>
 
     <!-- Dialog -->
+    <!-- Project Detail Dialog -->
+    <t-dialog v-model:visible="detailDialogVisible" header="项目详情" width="440px">
+      <div v-if="detailProject" class="detail-body">
+        <div class="detail-row">
+          <span class="detail-label">项目名称</span>
+          <span class="detail-value">{{ detailProject.name }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">项目 ID</span>
+          <span class="detail-value detail-mono">{{ detailProject.project_id || '未生成' }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">描述</span>
+          <span class="detail-value">{{ detailProject.description || '暂无描述' }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">创建者</span>
+          <span class="detail-value">{{ detailProject.owner_name || '—' }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">创建时间</span>
+          <span class="detail-value">{{ formatTime(detailProject.created_at) }}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">状态</span>
+          <span class="detail-value" :class="{ 'text-success': detailProject.is_member, 'text-muted': !detailProject.is_member }">{{ detailProject.is_member ? '已加入' : '未加入' }}</span>
+        </div>
+      </div>
+      <template #footer>
+        <t-button theme="default" variant="text" @click="detailDialogVisible = false">关闭</t-button>
+        <t-button v-if="detailProject?.is_member" theme="primary" @click="enterProject(detailProject)">进入项目</t-button>
+        <t-button v-else theme="primary" @click="detailDialogVisible = false; handleJoinProject(detailProject, $event as any)">申请加入</t-button>
+      </template>
+    </t-dialog>
+
     <t-dialog v-model:visible="dialogVisible" header="创建项目" width="460px">
       <div class="dialog-form">
         <label class="field-label">项目名称</label>
@@ -635,6 +682,18 @@ async function handleJoinProject(p: any, event: Event) {
 }
 .btn-join:hover { background: var(--success-light); color: var(--success); }
 .btn-join:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Project detail dialog ─────────────────────────────────────── */
+.detail-body { display: flex; flex-direction: column; gap: 10px; }
+.detail-row { display: flex; align-items: flex-start; gap: 12px; }
+.detail-label {
+  width: 72px; flex-shrink: 0; font-size: 13px; font-weight: 600;
+  color: var(--muted-foreground); text-align: right; padding-top: 1px;
+}
+.detail-value { font-size: 13px; color: var(--foreground); word-break: break-all; }
+.detail-mono { font-family: var(--font-mono); font-size: 12px; }
+.text-success { color: var(--success); }
+.text-muted { color: var(--muted-foreground); }
 
 .field-hint {
   font-size: 11px; color: var(--muted-foreground);
