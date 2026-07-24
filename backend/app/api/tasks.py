@@ -754,13 +754,16 @@ def stop_task(
     from app.services.execution_service import is_agent_run_active
     agent = db.get(Agent, task.agent_id)
     run_active = is_agent_run_active(task.id)
-    other_active = db.query(Task.id).filter(
-        Task.agent_id == task.agent_id,
-        Task.id != task.id,
-        Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION]),
-    ).first()
-    if agent and not run_active and not other_active and agent.status == AgentStatus.WORKING:
-        agent.status = AgentStatus.IDLE
+    other_active = None
+    if agent:
+        other_active = db.query(Task.id).filter(
+            Task.agent_id == task.agent_id,
+            Task.id != task.id,
+            Task.status.in_([TaskStatus.RUNNING, TaskStatus.CONFLICT_RESOLUTION,
+                             TaskStatus.PLANNING, TaskStatus.SUBTASK_RUNNING]),
+        ).first()
+        if not run_active and not other_active and agent.status == AgentStatus.WORKING:
+            agent.status = AgentStatus.IDLE
 
     db.commit()
 
@@ -769,15 +772,18 @@ def stop_task(
     if agent and not run_active and not other_active:
         broadcast_sync("agent_update", {"id": agent.id, "status": "idle"})
 
-    audit_record(
-        action=AuditAction.TASK_STOP,
-        actor_id=user.id,
-        actor_type=AuditActorType.HUMAN,
-        project_id=project_id,
-        task_id=task.id,
-        target_type="task",
-        target_id=task.id,
-    )
+    try:
+        audit_record(
+            action=AuditAction.TASK_STOP,
+            actor_id=user.id,
+            actor_type=AuditActorType.HUMAN,
+            project_id=project_id,
+            task_id=task.id,
+            target_type="task",
+            target_id=task.id,
+        )
+    except Exception:
+        pass
 
     return _task_to_response(task)
 
