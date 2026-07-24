@@ -27,6 +27,8 @@ const saving = ref(false)
 const showSkillHubDialog = ref(false)
 const showRemotePreview = ref(false)
 const skillHubConfigured = ref(false)
+const importInput = ref<HTMLInputElement | null>(null)
+const importingFile = ref(false)
 const remoteQuery = ref('')
 const remoteSkills = ref<any[]>([])
 const remoteLoading = ref(false)
@@ -214,6 +216,49 @@ function truncate(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen) + '…' : text
 }
 
+async function exportSkill(skill: Skill) {
+  try {
+    const { data } = await api.get(`/skills/${skill.id}/export`)
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${skill.name.replace(/[\\/:*?"<>|]/g, '_')}.skill.json`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+    MessagePlugin.success('技能已导出')
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '导出失败'))
+  }
+}
+
+function openImportPicker() {
+  importInput.value?.click()
+}
+
+async function importSkill(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  importingFile.value = true
+  try {
+    const payload = JSON.parse(await file.text())
+    if (payload?.format !== 'skill-export' || payload?.version !== 1 || !payload?.skill) {
+      throw new Error('请选择由本系统导出的技能 JSON 文件')
+    }
+    await api.post('/skills/import', payload)
+    MessagePlugin.success('技能已导入')
+    await loadSkills()
+  } catch (e: any) {
+    MessagePlugin.error(getErrorMessage(e, '导入失败'))
+  } finally {
+    importingFile.value = false
+    input.value = ''
+  }
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -228,12 +273,21 @@ function fmtTime(iso: string | null): string {
         <h1 class="page-title">技能仓库</h1>
         <p class="page-desc">管理可复用的 Agent 提示词模板，创建 Agent 时可一键加载</p>
       </div>
-      <t-button theme="primary" @click="openCreateDialog">
-        <template #icon>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        </template>
-        创建技能
-      </t-button>
+      <div class="header-actions">
+        <input ref="importInput" type="file" accept=".skill.json,.json" style="display:none" @change="importSkill" />
+        <t-button variant="outline" :loading="importingFile" @click="openImportPicker">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </template>
+          导入技能
+        </t-button>
+        <t-button theme="primary" @click="openCreateDialog">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </template>
+          创建技能
+        </t-button>
+      </div>
     </div>
 
     <section class="external-source-card">
@@ -280,6 +334,11 @@ function fmtTime(iso: string | null): string {
           <span class="skill-time">{{ fmtTime(s.updated_at) }}</span>
           <div class="skill-actions">
             <t-button size="small" variant="text" @click="openEditDialog(s)">编辑</t-button>
+            <t-button size="small" variant="text" @click="exportSkill(s)" title="导出">
+              <template #icon>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              </template>
+            </t-button>
             <t-button size="small" variant="text" theme="danger" @click="deleteSkill(s)" title="删除">
               <template #icon>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
@@ -374,6 +433,8 @@ function fmtTime(iso: string | null): string {
 </template>
 
 <style scoped>
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
 .page-root { max-width: 1000px; }
 
 .external-source-card {

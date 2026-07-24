@@ -257,3 +257,67 @@ def delete_skill(
             detail=f"删除技能失败：{exc}",
         )
     return {"message": "Deleted"}
+
+
+class SkillImportRequest(BaseModel):
+    format: str = Field(default="skill-export")
+    version: int = Field(default=1)
+    skill: SkillCreate
+
+
+@router.get("/{skill_id}/export")
+def export_skill(
+    skill_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Export a skill's reusable configuration."""
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return {
+        "format": "skill-export",
+        "version": 1,
+        "skill": {
+            "name": skill.name,
+            "description": skill.description or "",
+            "prompt_content": skill.prompt_content or "",
+        },
+    }
+
+
+@router.post("/import", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
+def import_skill(
+    req: SkillImportRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Create a new skill from a portable export."""
+    if req.format != "skill-export" or req.version != 1:
+        raise HTTPException(status_code=400, detail="Unsupported skill export format or version")
+    source = req.skill
+    skill = Skill(
+        creator_id=user.id,
+        name=source.name,
+        description=source.description or "",
+        prompt_content=source.prompt_content or "",
+        source="local",
+    )
+    db.add(skill)
+    try:
+        db.commit()
+        db.refresh(skill)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"导入失败：{exc}")
+    return SkillResponse(
+        id=skill.id,
+        name=skill.name,
+        description=skill.description or "",
+        prompt_content=skill.prompt_content or "",
+        source=skill.source or "local",
+        source_id=skill.source_id or "",
+        source_url=skill.source_url or "",
+        created_at=skill.created_at,
+        updated_at=skill.updated_at,
+    )
