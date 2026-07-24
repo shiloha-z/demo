@@ -241,6 +241,35 @@ def cleanup_task_resources(project_workspace: str, task_worktree: str, branch_na
         delete_branch(project_workspace, branch_name)
 
 
+def sync_task_branch_with_master(task_workspace: str, branch_name: str) -> tuple[bool, list[str]]:
+    """Merge latest master into the task branch in *task_workspace*.
+
+    Returns ``(clean, conflict_files)``.  Call this before integration so the
+    task branch is always up-to-date with master, avoiding the "perpetual
+    conflict" loop when multiple tasks touch the same files.
+    """
+    repo = get_repo(task_workspace)
+    if not repo:
+        return False, []
+    base = _get_base_branch(repo)
+    try:
+        repo.git.checkout(branch_name)
+        repo.git.merge(base)
+        return True, []
+    except GitCommandError:
+        try:
+            conflicts = repo.git.diff("--name-only", "--diff-filter=U").splitlines()
+        except GitCommandError:
+            conflicts = []
+        try:
+            repo.git.merge("--abort")
+        except GitCommandError:
+            pass
+        if conflicts:
+            return False, [f for f in conflicts if f]
+        return False, []
+
+
 def begin_integration(workspace: str, source_branch: str) -> dict[str, Any]:
     """Start a no-commit merge in the base workspace.
 

@@ -100,8 +100,18 @@ def integrate_task(task_id: int) -> None:
         db.commit()
         _broadcast(task)
 
+        # Sync the task branch with latest master BEFORE attempting integration.
+        # This prevents the "perpetual conflict" loop where every merge attempt
+        # hits the same conflict because the task branch was never updated.
+        task_wt = task.worktree_path or git.default_task_worktree_path(project.workspace_path, task.id)
+        synced = True
+        if task_wt and git.get_repo(task_wt):
+            synced, _ = git.sync_task_branch_with_master(task_wt, branch_name)
+
         # Only integration touches the base workspace.  Agent worktrees have
         # their own locks and continue running independently.
+        # If synced==True the task branch already has all master changes, so
+        # the merge into master will be a clean fast-forward or trivial merge.
         with git.workspace_lock(project.workspace_path):
             result = git.begin_integration(project.workspace_path, branch_name)
             if result["status"] == "ready":
