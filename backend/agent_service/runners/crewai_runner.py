@@ -98,6 +98,7 @@ class CrewAIRunner(BaseRunner):
         on_stage: StageCallback | None = None,
         reviewer_prompt: str | None = None,
         security_prompt: str | None = None,
+        conflict_resolution: bool = False,
     ) -> RunResult:
         """Build and execute the CrewAI review DAG.
 
@@ -130,7 +131,12 @@ class CrewAIRunner(BaseRunner):
                         on_progress("⚠️ 规划失败，回退到标准流水线", "plan_fallback")
                     logger.warning("Planning failed/unavailable; using default pipeline for task %s", task_id)
 
-            if plan_steps:
+            if conflict_resolution:
+                crew = self._build_conflict_crew(
+                    workspace, model_name, task_id, project_id, agent_id,
+                    on_progress, on_stage, stage_state,
+                )
+            elif plan_steps:
                 crew = self._build_planned_crew(
                     plan_steps, workspace, model_name, task_id, project_id, agent_id,
                     on_progress, on_stage, stage_state,
@@ -503,6 +509,38 @@ class CrewAIRunner(BaseRunner):
             **({"llm": llm_kwargs} if llm_kwargs else {}),
         )
         return code_gen, reviewer, security, summarizer
+
+    # ── Conflict resolution builder (lightweight, single-stage) ──
+
+    def _build_conflict_crew(
+        self, workspace: str, model_name: str,
+        task_id: int, project_id: int, agent_id: int,
+        on_progress: ProgressCallback | None,
+        on_stage: StageCallback | None,
+        stage_state: dict[str, str],
+    ) -> Crew:
+        """Single-stage crew: only code_gen agent resolves conflict markers."""
+        tools = self._make_tools(workspace, task_id, project_id, agent_id)
+        llm_kwargs = self._make_llm_kwargs(model_name)
+        code_gen, _, _, _ = self._make_agents(llm_kwargs, tools, None, None)
+
+        task = Task(
+            description=(
+                "【合并冲突解决 — 只修复 Git 冲突标记，不要重写代码！】\n\n"
+                "{task_description}\n\n"
+                "硬性要求：\n"
+                "1. 用 FileRead 打开每一个冲突文件，找到 <<<<<<< / ======= / >>>>>>> 标记\n"
+                "2. 理解双方改动，手动合并，保留双方有效代码\n"
+                "3. 用 FileWrite 把修复后的内容写入磁盘\n"
+                "4. 删除所有 <<<<<<< / ======= / >>>>>>> 标记\n"
+                "5. 用 GitDiff 确认冲突标记已全部移除\n"
+                "6. 只修复冲突标记，不要修改任何非冲突文件，不要重写代码"
+            ),
+            expected_output="修复后的文件列表及 GitDiff 确认结果",
+            agent=code_gen,
+        )
+
+        return Crew(agents=[code_gen], tasks=[task], verbose=True)
 
     # ── Planning mode builder ─────────────────────────────────────
 

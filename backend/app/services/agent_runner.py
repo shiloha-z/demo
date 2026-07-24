@@ -349,8 +349,12 @@ def _run_agent_pipeline(
             max_subtasks=int(agent.max_subtasks) if (agent and not child and agent.max_subtasks) else 6,
             on_progress=on_progress,
             on_stage=on_stage,
-            reviewer_prompt=reviewer_prompt,
-            security_prompt=security_prompt,
+            **(
+                {"reviewer_prompt": reviewer_prompt,
+                 "security_prompt": security_prompt,
+                 "conflict_resolution": conflict_resolution}
+                if runner_type == "crewai" else {}
+            ),
         )
         elapsed = time.time() - start_ts
 
