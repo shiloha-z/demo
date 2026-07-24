@@ -10,7 +10,7 @@ import { useMessageStore } from './stores/message'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
 import NotificationDropdown from './components/NotificationDropdown.vue'
-import GlobalLoadingBar from './components/GlobalLoadingBar.vue'
+
 
 const route = useRoute()
 const router = useRouter()
@@ -126,8 +126,6 @@ function handleLogout() {
 </script>
 
 <template>
-  <GlobalLoadingBar />
-
   <!-- Login page: full-screen, no chrome -->
   <router-view v-if="isLoginPage" />
 

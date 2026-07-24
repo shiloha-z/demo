@@ -1,7 +1,6 @@
 import axios from 'axios'
 import { MessagePlugin } from 'tdesign-vue-next'
 import router from '../router'
-import { useLoadingStore } from '../stores/loading'
 
 const api = axios.create({
   baseURL: '/api',
@@ -26,12 +25,6 @@ function _shouldNotify(key: string): boolean {
 
 // Request interceptor – attach JWT token
 api.interceptors.request.use((config) => {
-  try {
-    useLoadingStore().start()
-    ;(config as any).__globalLoadingTracked = true
-  } catch {
-    // Requests issued before Pinia installation are still allowed.
-  }
   const token = localStorage.getItem('token')
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
@@ -44,16 +37,8 @@ api.interceptors.request.use((config) => {
 
 // Response interceptor – unified error handling
 api.interceptors.response.use(
-  (response) => {
-    if ((response.config as any).__globalLoadingTracked) {
-      useLoadingStore().finish()
-    }
-    return response
-  },
+  (response) => response,
   (error) => {
-    if ((error.config as any)?.__globalLoadingTracked) {
-      useLoadingStore().finish()
-    }
     const status = error.response?.status
     const detail = error.response?.data?.detail || ''
     const url = error.config?.url || ''
