@@ -430,6 +430,14 @@ def _run_agent_pipeline(
 
         # ── Conflict resolution: skip review — re-queue merge directly ─
         if conflict_resolution:
+            if diff == "# No code changes detected" or not commit_hash:
+                _progress(task_id, project_id,
+                    "❌ 冲突修复失败：Agent 未产生任何代码变更，README 可能被过滤",
+                    "error")
+                _fail_task_child_aware(db, task,
+                    "Conflict resolution failed: agent produced no code changes. The conflict markers may not have been fixed.",
+                    project_id, runner_type)
+                return
             _progress(task_id, project_id, "🔀 冲突已解决，重新进入合并队列", "merge_queued")
             task.status = TaskStatus.MERGE_QUEUED
             task.merge_error = ""

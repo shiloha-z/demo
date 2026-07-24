@@ -406,6 +406,8 @@ def _stage_agent_changes(repo: Repo) -> None:
     # lines) — the classic agent hallucination pattern.  Real documentation
     # changes (3+ lines) are kept so conflict resolution and legitimate doc
     # work still works.
+    # Also skip files that contain Git conflict markers (<<<<<<<) — those are
+    # being actively resolved and must not be filtered.
     try:
         root = Path(repo.working_dir)
         to_unstage: list[str] = []
@@ -417,6 +419,8 @@ def _stage_agent_changes(repo: Repo) -> None:
                 continue
             try:
                 text = fpath.read_text(encoding="utf-8", errors="replace")
+                if "<<<<<<<" in text:
+                    continue  # has conflict markers — being resolved, don't filter
                 lines = [l for l in text.splitlines() if l.strip()]
                 if len(lines) <= 2:
                     to_unstage.append(f)
