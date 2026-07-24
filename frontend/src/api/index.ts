@@ -26,11 +26,16 @@ function _shouldNotify(key: string): boolean {
 
 // Request interceptor – attach JWT token
 api.interceptors.request.use((config) => {
-  try {
-    useLoadingStore().start()
-    ;(config as any).__globalLoadingTracked = true
-  } catch {
-    // Requests issued before Pinia installation are still allowed.
+  // `silent` 请求（如后台 WebSocket 驱动的任务列表刷新）不触发顶部进度条，
+  // 避免任务执行期间进度条因频繁自动刷新而反复横跳。
+  const silent = (config as any).silent === true
+  if (!silent) {
+    try {
+      useLoadingStore().start()
+      ;(config as any).__globalLoadingTracked = true
+    } catch {
+      // Requests issued before Pinia installation are still allowed.
+    }
   }
   const token = localStorage.getItem('token')
   if (token) {

@@ -41,6 +41,16 @@ const loadingTaskFiles = ref(false)
 const taskFileCache = new Map<number, { files: any[]; loadedAt: number }>()
 const TASK_FILE_CACHE_TTL = 10_000
 const statusFilter = ref('all')
+const viewMode = ref<'list' | 'tree'>('list')
+// 树形视图中父任务卡片上的完成度进度环（SVG 圆周长）。
+const RING_C = 2 * Math.PI * 14
+function ringPercent(t: any): number {
+  if (!t.subtask_count) return 0
+  return Math.round(((t.subtask_done || 0) / t.subtask_count) * 100)
+}
+function ringOffset(t: any): number {
+  return RING_C * (1 - ringPercent(t) / 100)
+}
 const filterProjectId = computed(() => store.currentProject?.id ?? null)
 
 // 兜底：进入任务页时若尚未选择项目，自动选中可切换项目列表中的第一个，
@@ -253,15 +263,22 @@ onMounted(() => {
     const pid = store.currentProject?.id
     if (pid && data.project_id === pid) {
       taskFileCache.delete(data.id)
-      loadTasks()
-      if (selectedTask.value?.id === data.id) {
-        selectTask(selectedTask.value)
+      scheduleWsRefresh()
+      const sel = selectedTask.value
+      // 更新命中选中任务本身，或其下某个子任务时，静默刷新右侧详情，保证进度实时可见。
+      if (sel && (sel.id === data.id || (sel.parent_task_id == null && (subtasksMap.value[sel.id] || []).some((c: any) => c.id === data.id)))) {
+        selectTask(sel, true)
       }
     }
   })
   unsubProgress = wsStore.on('task_progress', (data: any) => {
-    if (selectedTask.value?.id === data.task_id) {
+    const sel = selectedTask.value
+    if (!sel) return
+    if (sel.id === data.task_id) {
       syncTaskProgress(data.task_id)
+    } else if (sel.parent_task_id == null && (subtasksMap.value[sel.id] || []).some((c: any) => c.id === data.task_id)) {
+      // 父任务被选中时，实时汇总子任务日志，避免「看不到进度」。
+      mergeSubtreeProgress(sel.id)
     }
   })
   unsubStage = wsStore.on('pipeline_stage', (data: any) => {
@@ -299,11 +316,23 @@ watch(() => store.currentProject?.id, async (pid) => {
   await loadTasks()
 }, { immediate: true })
 
-async function loadTasks() {
+// 进入树形视图时，自动展开有子任务的父任务，立即呈现嵌套结构。
+watch(viewMode, (mode) => {
+  if (mode !== 'tree') return
+  for (const t of tasks.value) {
+    if (expanded.value.has(t.id)) continue
+    if (isParentState(t) || subtasksMap.value[t.id]?.length) {
+      expanded.value = new Set(expanded.value).add(t.id)
+      loadSubtasks(t)
+    }
+  }
+})
+
+async function loadTasks(silent = false) {
   if (!filterProjectId.value) return
   const [active, archived] = await Promise.all([
-    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { sort: sortBy.value } }),
-    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { archived: true } }),
+    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { sort: sortBy.value }, silent }),
+    api.get(`/projects/${filterProjectId.value}/tasks`, { params: { archived: true }, silent }),
   ])
   tasks.value = active.data.items || active.data
   archivedTasks.value = archived.data.items || archived.data
@@ -316,12 +345,36 @@ async function loadTasks() {
   await refreshSubtrees()
 }
 
+// 后台 WS 事件频繁到达时，把多次刷新合并为一次（且静默，不触发顶部进度条）。
+let wsRefreshTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleWsRefresh() {
+  if (wsRefreshTimer) return
+  wsRefreshTimer = setTimeout(() => {
+    wsRefreshTimer = null
+    void loadTasks(true)
+  }, 700)
+}
+
+// 父任务被选中时，把其所有子任务的实时日志汇总到父任务的「执行日志」中，
+// 这样无需逐个点开子任务也能看到执行进度，无需刷新页面。
+function mergeSubtreeProgress(parentId: number) {
+  const merged = [...wsStore.getTaskProgress(parentId)]
+  for (const c of subtasksMap.value[parentId] || []) {
+    merged.push(...wsStore.getTaskProgress(c.id))
+  }
+  merged.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+  taskProgress.value = merged.slice(-200)
+  nextTick(() => {
+    if (progressLogEl.value) progressLogEl.value.scrollTop = progressLogEl.value.scrollHeight
+  })
+}
+
 const filteredTasks = computed(() => {
   if (statusFilter.value === 'all') return tasks.value
   return tasks.value.filter((t: any) => t.status === statusFilter.value)
 })
 
-async function selectTask(task: any) {
+async function selectTask(task: any, silent = false) {
   if (selectedTask.value?.id !== task.id) {
     taskProgress.value = wsStore.getTaskProgress(task.id)
     showReviewDiff.value = false
@@ -357,7 +410,7 @@ async function selectTask(task: any) {
   selectedTask.value = task
   loadingDetail.value = true
   try {
-    const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`)
+    const { data } = await api.get(`/projects/${task.project_id}/tasks/${task.id}`, { silent })
     taskDetail.value = data
   } catch {
     taskDetail.value = null
@@ -687,6 +740,10 @@ async function resumeTask(task: any, event: Event) {
           </template>
           时间线
         </t-button>
+        <div class="view-seg">
+          <button class="seg-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
+          <button class="seg-btn" :class="{ active: viewMode === 'tree' }" @click="viewMode = 'tree'">树形</button>
+        </div>
       </div>
     </div>
 
@@ -707,8 +764,109 @@ async function resumeTask(task: any, event: Event) {
       </div>
 
       <div v-else class="task-layout">
-        <!-- ── Left: task list ─────────────────────────────── -->
-        <div class="task-list">
+        <!-- ── Left: task list / tree ───────────────────────── -->
+        <div class="task-list" :class="{ 'tree-mode': viewMode === 'tree' }">
+          <!-- Tree view -->
+          <template v-if="viewMode === 'tree'">
+            <div class="tree-toolbar">
+              <span class="tree-toolbar-title">任务树</span>
+              <span class="tree-toolbar-hint">父任务 → 子任务（嵌套 Agent 协作）</span>
+            </div>
+            <div class="task-tree">
+              <div v-for="t in filteredTasks" :key="t.id" class="tree-branch">
+                <div
+                  class="tree-card root-card"
+                  :class="{ active: selectedTask?.id === t.id }"
+                  @click="selectTask(t)"
+                >
+                  <div class="tree-card-main">
+                    <button
+                      v-if="isParentState(t) || hasChildren(t)"
+                      class="tree-toggle"
+                      :class="{ rotated: expanded.has(t.id) }"
+                      @click.stop="toggleExpand(t, $event)"
+                      title="展开/收起子任务"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                    <span v-else class="tree-toggle-spacer"></span>
+                    <span class="task-status" :style="{ color: statusColors[t.status] }">
+                      <span class="status-dot" :class="t.status"></span>
+                    </span>
+                    <span class="tree-card-title">{{ t.title }}</span>
+                    <span class="tree-card-id">#{{ t.id }}</span>
+                  </div>
+                  <div class="tree-card-foot">
+                    <div class="tree-card-meta">
+                      <span
+                        v-if="t.agent_role"
+                        class="agent-badge"
+                        :style="{ color: roleColors[t.agent_role] || 'var(--muted-foreground)', background: (roleColors[t.agent_role] || 'var(--muted-foreground)') + '14' }"
+                      >{{ roleLabels[t.agent_role] || t.agent_role }}</span>
+                      <span>{{ t.agent_name || 'Agent #' + t.agent_id }}</span>
+                      <span v-if="t.subtask_count" class="subtask-progress">子任务 {{ t.subtask_done || 0 }}/{{ t.subtask_count }}</span>
+                    </div>
+                    <div class="tree-card-actions">
+                      <button
+                        v-if="t.status === 'pending' && !t.parent_task_id && !planning.has(t.id)"
+                        class="plan-btn"
+                        title="自主任务规划"
+                        @click.stop="planTask(t, $event)"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a3 3 0 0 0 3 3h.5M18 8.5v3a3 3 0 0 1-3 3h-.5"/></svg>
+                      </button>
+                      <span v-else-if="planning.has(t.id)" class="plan-spinner"><span class="spinner"></span></span>
+                      <button v-if="t.status === 'running'" class="stop-btn" title="停止" @click.stop="stopTask(t, $event)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                      </button>
+                      <button v-if="t.status === 'paused'" class="resume-btn" title="重新执行" @click.stop="resumeTask(t, $event)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                      </button>
+                      <button v-if="t.status === 'pending'" class="start-btn" title="开始执行" @click.stop="startTask(t, $event)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <svg v-if="t.subtask_count" class="tree-ring" width="36" height="36" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="14" class="ring-bg" />
+                    <circle cx="18" cy="18" r="14" class="ring-fg" :stroke-dasharray="RING_C" :stroke-dashoffset="ringOffset(t)" :style="{ stroke: statusColors[t.status] }" />
+                    <text x="18" y="21" class="ring-text">{{ ringPercent(t) }}%</text>
+                  </svg>
+                </div>
+
+                <div v-if="expanded.has(t.id) && subtasksMap[t.id]?.length" class="tree-children">
+                  <div v-for="c in subtasksMap[t.id]" :key="c.id" class="tree-leaf">
+                    <div
+                      class="tree-card child-card"
+                      :class="{ active: selectedTask?.id === c.id }"
+                      @click.stop="selectTask(c)"
+                    >
+                      <div class="tree-card-main">
+                        <span class="tree-toggle-spacer"></span>
+                        <span class="task-status" :style="{ color: statusColors[c.status] }">
+                          <span class="status-dot" :class="c.status"></span>
+                        </span>
+                        <span class="tree-card-title">{{ c.title }}</span>
+                        <span class="tree-card-id">#{{ c.id }}</span>
+                      </div>
+                      <div class="tree-card-foot">
+                        <div class="tree-card-meta">
+                          <span>{{ c.agent_name || 'Agent #' + c.agent_id }}</span>
+                        </div>
+                        <div class="tree-card-actions">
+                          <button v-if="c.status === 'pending'" class="start-btn" title="开始执行" @click.stop="startTask(c, $event)">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+          <!-- Active tasks (list view) -->
+          <template v-else>
           <!-- Active tasks -->
           <div
             v-for="t in filteredTasks"
@@ -894,6 +1052,7 @@ async function resumeTask(task: any, event: Event) {
               </div>
             </div>
           </div>
+        </template>
         </div>
 
         <!-- ── Right: task detail ─────────────────────────── -->
@@ -1198,6 +1357,56 @@ async function resumeTask(task: any, event: Event) {
   background: var(--app-shell); overflow-y: auto; flex-shrink: 0;
   display: flex; flex-direction: column;
 }
+.task-list.tree-mode { width: 380px; }
+
+/* ── 列表/树形 切换 ───────────────────────────── */
+.view-seg { display: inline-flex; border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; }
+.seg-btn { border: none; background: var(--surface); color: var(--muted-foreground); font-size: 12px; font-family: var(--font-sans); padding: 4px 11px; cursor: pointer; transition: all var(--transition-fast); }
+.seg-btn + .seg-btn { border-left: 1px solid var(--surface-border); }
+.seg-btn:hover { color: var(--foreground); }
+.seg-btn.active { background: var(--primary); color: #fff; }
+
+/* ── 树形视图 ─────────────────────────────────── */
+.tree-toolbar { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--surface-border); flex-shrink: 0; }
+.tree-toolbar-title { font-size: 13px; font-weight: 700; color: var(--foreground); }
+.tree-toolbar-hint { font-size: 11px; color: var(--muted-foreground); }
+.task-tree { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.tree-branch { display: flex; flex-direction: column; }
+.tree-card {
+  position: relative; background: var(--surface); border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md); padding: 10px 12px; cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.tree-card:hover { border-color: var(--primary); }
+.tree-card.active { border-color: var(--primary); background: var(--primary-lighter); box-shadow: 0 0 0 2px var(--ring); }
+.tree-card.root-card { border-left: 3px solid var(--primary); padding-right: 46px; }
+.tree-card.child-card { border-left: 3px solid #8957e5; }
+.tree-card-main { display: flex; align-items: center; gap: 8px; }
+.tree-card-title { font-size: 13.5px; font-weight: 600; color: var(--foreground); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tree-card-id { font-size: 11px; font-weight: 700; color: var(--muted-foreground); font-family: var(--font-mono); flex-shrink: 0; }
+.tree-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
+.tree-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-foreground); flex-wrap: wrap; }
+.tree-card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.tree-toggle-spacer { width: 22px; height: 22px; flex-shrink: 0; }
+
+/* 连接线 */
+.tree-children { position: relative; margin: 8px 0 4px 22px; padding-left: 16px; display: flex; flex-direction: column; gap: 8px; }
+.tree-children::before {
+  content: ''; position: absolute; left: 0; top: -6px; bottom: 16px;
+  border-left: 1.5px dashed var(--border, rgba(255,255,255,0.14));
+}
+.tree-leaf { position: relative; }
+.tree-leaf::before {
+  content: ''; position: absolute; left: -16px; top: 22px; width: 16px; height: 1.5px;
+  border-top: 1.5px dashed var(--border, rgba(255,255,255,0.14));
+}
+
+/* 完成度进度环 */
+.tree-ring { position: absolute; top: 8px; right: 8px; }
+.ring-bg { fill: none; stroke: var(--surface-border); stroke-width: 3; }
+.ring-fg { fill: none; stroke-width: 3; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 50% 50%; transition: stroke-dashoffset 0.4s ease; }
+.ring-text { font-size: 9px; font-weight: 700; fill: var(--foreground); text-anchor: middle; font-family: var(--font-sans); }
+
 .task-item {
   padding: 12px 14px; border-bottom: 1px solid var(--surface-border);
   cursor: pointer; transition: background var(--transition-fast);
