@@ -77,7 +77,7 @@ api.interceptors.response.use(
 
     // Show a unified toast for common errors — components can still
     // catch and override with a custom fallback message if needed.
-    if (status && _shouldNotify(`${status}:${url}`)) {
+    if (status && _shouldNotify(status === 403 ? '403' : `${status}:${url}`)) {
       switch (status) {
         case 403:
           MessagePlugin.warning(detail || '权限不足，无法执行此操作')

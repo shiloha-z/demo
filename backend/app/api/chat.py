@@ -14,6 +14,13 @@ from app.api.ws import broadcast_sync, broadcast_sync_to_project
 
 router = APIRouter(prefix="/api", tags=["Chat"])
 
+
+def _avatar_url(value: str | None) -> str:
+    if not value:
+        return ""
+    filename = Path(value.split("?", 1)[0]).name
+    return f"/api/auth/profile/avatar/{filename}" if filename else ""
+
 # File upload config
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "chat"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -34,6 +41,8 @@ class ChatMessageResponse(BaseModel):
     id: int
     user_id: int
     username: str
+    display_name: str = ""
+    avatar_url: str = ""
     message: str
     project_id: int | None = None
     recipient_id: int | None = None
@@ -48,11 +57,21 @@ class ChatMessageResponse(BaseModel):
         from_attributes = True
 
     @classmethod
-    def from_orm_obj(cls, msg) -> "ChatMessageResponse":
+    def from_orm_obj(cls, msg, user_map: dict[int, "User"] | None = None) -> "ChatMessageResponse":
+        display_name = ""
+        avatar_url = ""
+        if user_map and msg.user_id in user_map:
+            u = user_map[msg.user_id]
+            display_name = u.display_name or u.username
+            avatar_url = _avatar_url(u.avatar_url)
+        elif msg.user_id == 0:
+            display_name = "系统"
         return cls(
             id=msg.id,
             user_id=msg.user_id,
             username=msg.username,
+            display_name=display_name,
+            avatar_url=avatar_url,
             message=msg.message or "",
             project_id=msg.project_id,
             recipient_id=msg.recipient_id,
@@ -91,7 +110,13 @@ def get_messages(
     if before_id is not None:
         q = q.filter(ChatMessage.id < before_id)
     messages = q.order_by(ChatMessage.id.desc()).limit(limit).all()
-    return [ChatMessageResponse.from_orm_obj(m) for m in reversed(messages)]
+    # Build a user map for avatar/display_name lookup
+    user_ids = {m.user_id for m in messages if m.user_id != 0}
+    user_map: dict[int, User] = {}
+    if user_ids:
+        rows = db.query(User).filter(User.id.in_(user_ids)).all()
+        user_map = {u.id: u for u in rows}
+    return [ChatMessageResponse.from_orm_obj(m, user_map) for m in reversed(messages)]
 
 
 @router.get("/chat/members")
@@ -109,14 +134,14 @@ def get_project_members(
     # Owner
     owner = db.query(User).filter(User.id == project.owner_id).first()
     if owner and owner.id != user.id:
-        members.append({"id": owner.id, "username": owner.username, "display_name": owner.display_name or owner.username, "role": "owner"})
+        members.append({"id": owner.id, "username": owner.username, "display_name": owner.display_name or owner.username, "avatar_url": _avatar_url(owner.avatar_url), "role": "owner"})
     # Members
     rows = db.query(ProjectMember, User).join(User, ProjectMember.user_id == User.id).filter(
         ProjectMember.project_id == project_id
     ).all()
     for pm, u in rows:
         if u.id != user.id:
-            members.append({"id": u.id, "username": u.username, "display_name": u.display_name or u.username, "role": pm.role.value if hasattr(pm.role, 'value') else str(pm.role)})
+            members.append({"id": u.id, "username": u.username, "display_name": u.display_name or u.username, "avatar_url": _avatar_url(u.avatar_url), "role": pm.role.value if hasattr(pm.role, 'value') else str(pm.role)})
     return {"members": members}
 
 
@@ -196,7 +221,7 @@ def send_message(
     db.commit()
     db.refresh(msg)
 
-    resp = ChatMessageResponse.from_orm_obj(msg)
+    resp = ChatMessageResponse.from_orm_obj(msg, {user.id: user})
     payload = resp.model_dump(mode="json")
     if recipient_id is not None:
         # Private message: push to both participants only.

@@ -99,6 +99,8 @@ interface ChatMsg {
   id: number
   user_id: number
   username: string
+  display_name?: string
+  avatar_url?: string
   message: string
   project_id?: number
   recipient_id?: number | null
@@ -646,7 +648,8 @@ watch(() => props.visible, (v) => {
 
           <!-- Normal message -->
           <template v-else>
-            <div class="msg-avatar" v-if="msg.showAvatar" :style="{ background: avatarColor(msg.username) }">
+            <img v-if="msg.showAvatar && msg.avatar_url" class="msg-avatar-img" :src="msg.avatar_url" />
+            <div v-else-if="msg.showAvatar" class="msg-avatar" :style="{ background: avatarColor(msg.username) }">
               {{ avatarInitials(msg.username) }}
             </div>
             <div class="msg-avatar-spacer" v-else />
@@ -856,6 +859,10 @@ watch(() => props.visible, (v) => {
   width: 32px; height: 32px; border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; margin-top: 2px;
+}
+.msg-avatar-img {
+  width: 32px; height: 32px; border-radius: var(--radius-md);
+  object-fit: cover; flex-shrink: 0; margin-top: 2px;
 }
 .msg-avatar-spacer { width: 32px; flex-shrink: 0; }
 .msg-body { max-width: 75%; min-width: 0; }
