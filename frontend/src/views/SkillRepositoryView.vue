@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import api, { getErrorMessage } from '../api'
@@ -123,7 +123,7 @@ function extractRemoteSkills(payload: any): any[] {
 }
 
 function remoteName(skill: any): string {
-  return String(skill?.name || skill?.title || skill?.slug || skill?.id || 'SkillHub Skill')
+  return String(skill?.name || skill?.title || skill?.slug || skill?.id || 'Remote Skill')
 }
 
 function remoteDescription(skill: any): string {
@@ -145,15 +145,9 @@ function remoteUrl(skill: any): string {
 async function openSkillHubDialog() {
   showSkillHubDialog.value = true
   try {
-    const { data } = await api.get('/skills/skillhub/status')
-    skillHubConfigured.value = Boolean(data.configured)
-    if (!skillHubConfigured.value) {
-      MessagePlugin.warning('请先在系统设置中配置 SkillHub API Key')
-      return
-    }
     if (remoteSkills.value.length === 0) await loadSkillHubCatalog()
   } catch (e: any) {
-    MessagePlugin.error(getErrorMessage(e, '无法连接 SkillHub'))
+    MessagePlugin.error(getErrorMessage(e, '无法连接 Agent Skills Hub'))
   }
 }
 
@@ -163,7 +157,7 @@ async function loadSkillHubCatalog() {
     const { data } = await api.get('/skills/skillhub/catalog', { params: { limit: 20, sort: 'score' } })
     remoteSkills.value = extractRemoteSkills(data)
   } catch (e: any) {
-    MessagePlugin.error(getErrorMessage(e, '加载 SkillHub 目录失败'))
+    MessagePlugin.error(getErrorMessage(e, '加载 Agent Skills Hub 目录失败'))
   } finally {
     remoteLoading.value = false
   }
@@ -179,15 +173,29 @@ async function searchSkillHub() {
     const { data } = await api.post('/skills/skillhub/search', { query: remoteQuery.value.trim(), limit: 20, method: 'hybrid' })
     remoteSkills.value = extractRemoteSkills(data)
   } catch (e: any) {
-    MessagePlugin.error(getErrorMessage(e, '搜索 SkillHub 失败'))
+    MessagePlugin.error(getErrorMessage(e, '搜索 Agent Skills Hub 失败'))
   } finally {
     remoteLoading.value = false
   }
 }
 
-function previewRemoteSkill(skill: any) {
+const previewContentLoading = ref(false)
+const previewContent = ref('')
+
+async function previewRemoteSkill(skill: any) {
   selectedRemote.value = skill
+  previewContent.value = ''
   showRemotePreview.value = true
+  // Fetch full SKILL.md content from Agent Skills Hub
+  previewContentLoading.value = true
+  try {
+    const { data } = await api.get(`/skills/skillhub/content/${remoteId(skill)}`)
+    previewContent.value = data.content || ''
+  } catch {
+    previewContent.value = ''
+  } finally {
+    previewContentLoading.value = false
+  }
 }
 
 async function importRemoteSkill() {
@@ -197,7 +205,7 @@ async function importRemoteSkill() {
     await api.post('/skills/skillhub/import', {
       name: remoteName(selectedRemote.value),
       description: remoteDescription(selectedRemote.value),
-      prompt_content: remoteContent(selectedRemote.value),
+      prompt_content: previewContent.value || remoteContent(selectedRemote.value),
       source_id: remoteId(selectedRemote.value),
       source_url: remoteUrl(selectedRemote.value),
     })
@@ -205,7 +213,7 @@ async function importRemoteSkill() {
     showRemotePreview.value = false
     await loadSkills()
   } catch (e: any) {
-    MessagePlugin.error(getErrorMessage(e, '导入 SkillHub 技能失败'))
+    MessagePlugin.error(getErrorMessage(e, '导入技能失败'))
   } finally {
     importingRemote.value = false
   }
@@ -292,10 +300,10 @@ function fmtTime(iso: string | null): string {
 
     <section class="external-source-card">
       <div>
-        <strong>SkillHub</strong>
-        <p>搜索公开 Agent Skills，预览后导入为你的本地技能模板。</p>
+        <strong>Agent Skills Hub</strong>
+        <p>浏览 790+ 开源 Agent 技能，预览后导入为你的本地技能模板。</p>
       </div>
-      <t-button variant="outline" @click="openSkillHubDialog">浏览 SkillHub</t-button>
+      <t-button variant="outline" @click="openSkillHubDialog">浏览 Agent Skills Hub</t-button>
     </section>
 
     <!-- Loading state -->
@@ -349,36 +357,32 @@ function fmtTime(iso: string | null): string {
       </article>
     </div>
 
-    <t-dialog v-model:visible="showSkillHubDialog" header="从 SkillHub 导入技能" width="760px" :footer="false">
-      <div v-if="!skillHubConfigured" class="remote-empty">
-        请先在系统设置中保存 SkillHub API Key，然后重新打开此窗口。
+    <t-dialog v-model:visible="showSkillHubDialog" header="从 Agent Skills Hub 导入技能" width="760px" :footer="false">
+      <div class="remote-search-row">
+        <t-input v-model="remoteQuery" placeholder="搜索技能，例如：PDF processing" @enter="searchSkillHub" />
+        <t-button theme="primary" :loading="remoteLoading" @click="searchSkillHub">搜索</t-button>
       </div>
-      <template v-else>
-        <div class="remote-search-row">
-          <t-input v-model="remoteQuery" placeholder="搜索技能，例如：PDF processing" @enter="searchSkillHub" />
-          <t-button theme="primary" :loading="remoteLoading" @click="searchSkillHub">搜索</t-button>
-        </div>
-        <div v-if="remoteLoading" class="remote-empty">正在加载 SkillHub 技能…</div>
-        <div v-else-if="remoteSkills.length === 0" class="remote-empty">未找到可导入的技能。</div>
-        <div v-else class="remote-skill-list">
-          <article v-for="skill in remoteSkills" :key="remoteId(skill)" class="remote-skill-item">
-            <div>
-              <h4>{{ remoteName(skill) }}</h4>
-              <p>{{ truncate(remoteDescription(skill), 220) || 'SkillHub 未提供简介。' }}</p>
-            </div>
-            <t-button size="small" variant="outline" @click="previewRemoteSkill(skill)">预览并导入</t-button>
-          </article>
-        </div>
-      </template>
+      <div v-if="remoteLoading" class="remote-empty">正在加载技能…</div>
+      <div v-else-if="remoteSkills.length === 0" class="remote-empty">未找到可导入的技能。</div>
+      <div v-else class="remote-skill-list">
+        <article v-for="skill in remoteSkills" :key="remoteId(skill)" class="remote-skill-item">
+          <div>
+            <h4>{{ remoteName(skill) }}</h4>
+            <p>{{ truncate(remoteDescription(skill), 220) || '暂无简介。' }}</p>
+          </div>
+          <t-button size="small" variant="outline" @click="previewRemoteSkill(skill)">预览并导入</t-button>
+        </article>
+      </div>
     </t-dialog>
 
-    <t-dialog v-model:visible="showRemotePreview" header="预览 SkillHub 技能" width="760px" :footer="false">
+      <t-dialog v-model:visible="showRemotePreview" header="预览技能" width="760px" :footer="false">
       <template v-if="selectedRemote">
         <div class="remote-preview-meta">
           <strong>{{ remoteName(selectedRemote) }}</strong>
           <a v-if="remoteUrl(selectedRemote)" :href="remoteUrl(selectedRemote)" target="_blank" rel="noreferrer">查看来源</a>
         </div>
-        <pre class="remote-preview-content">{{ remoteContent(selectedRemote) || 'SkillHub 未返回完整内容；将导入当前简介。' }}</pre>
+        <div v-if="previewContentLoading" class="remote-empty">正在加载技能详情…</div>
+        <pre v-else class="remote-preview-content">{{ previewContent || remoteContent(selectedRemote) || '未返回完整内容；将导入当前简介。' }}</pre>
         <div class="dialog-footer">
           <t-button theme="default" variant="text" @click="showRemotePreview = false">取消</t-button>
           <t-button theme="primary" :loading="importingRemote" @click="importRemoteSkill">导入到本地仓库</t-button>

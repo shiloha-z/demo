@@ -34,7 +34,7 @@ SETTINGS_SECTIONS = [
         "fields": [
             {"key": "DEEPSEEK_API_KEY",  "label": "DeepSeek API Key",      "type": "password"},
             {"key": "ANTHROPIC_API_KEY", "label": "Anthropic API Key",     "type": "password"},
-            {"key": "SKILLHUB_API_KEY",  "label": "SkillHub API Key",      "type": "password"},
+            {"key": "AGENT_SKILLS_HUB_URL",  "label": "Agent Skills Hub URL",    "type": "text"},
         ],
     },
     {

@@ -404,14 +404,14 @@ class MemoryHierarchyTests(unittest.TestCase):
 
 
 class SkillHubTests(DatabaseTestCase):
-    def test_import_copies_a_reviewed_remote_skill_to_local_library(self) -> None:
+    def test_import_copies_a_remote_skill_to_local_library(self) -> None:
         imported = import_skillhub_skill(
             SkillHubImportRequest(
                 name="PDF workflow",
                 description="Extract tables from PDF files",
                 prompt_content="# PDF workflow\nUse the checked extraction flow.",
                 source_id="vendor/pdf-workflow",
-                source_url="https://www.skillhub.club/skills/vendor-pdf-workflow",
+                source_url="https://raw.githubusercontent.com/agent-skills-hub/agent-skills-hub/main/skills/vendor/pdf-workflow/SKILL.md",
             ),
             self.db,
             self.owner,
@@ -421,24 +421,42 @@ class SkillHubTests(DatabaseTestCase):
         self.assertEqual(imported.source_id, "vendor/pdf-workflow")
         self.assertEqual(imported.creator_id, self.owner.id)
 
-    def test_search_uses_backend_key_without_returning_it(self) -> None:
-        class Response:
-            status_code = 200
+    def test_configured_always_true_for_public_registry(self) -> None:
+        self.assertTrue(skillhub_service.configured())
 
-            @staticmethod
-            def json() -> dict:
-                return {"data": [{"id": "skill-1", "name": "PDF workflow"}]}
+    def test_search_fetches_from_skills_index(self) -> None:
+        fake_index = [
+            {"id": "skill-1", "path": "skills/skill-1", "category": "dev",
+             "name": "skill-1", "description": "A test skill",
+             "risk": "safe", "source": "test"},
+        ]
 
-        with (
-            patch.object(skillhub_service.settings, "SKILLHUB_API_KEY", "sk-sh-test-key"),
-            patch.object(skillhub_service.httpx, "request", return_value=Response()) as request,
-        ):
-            result = skillhub_service.search_skills("PDF", limit=5)
+        with patch.object(skillhub_service, "_fetch_json", return_value=fake_index):
+            # Also patch _load_index to bypass the cache
+            with patch.object(skillhub_service, "_index_cache", None):
+                result = skillhub_service.search_skills("test", limit=5)
 
+        self.assertEqual(len(result["data"]), 1)
         self.assertEqual(result["data"][0]["id"], "skill-1")
-        self.assertEqual(request.call_args.args[:2], ("POST", f"{skillhub_service.BASE_URL}/skills/search"))
-        self.assertEqual(request.call_args.kwargs["headers"], {"Authorization": "Bearer sk-sh-test-key"})
-        self.assertEqual(request.call_args.kwargs["json"]["query"], "PDF")
+        self.assertEqual(result["total"], 1)
+
+    def test_fetch_skill_content_returns_markdown(self) -> None:
+        fake_index = [
+            {"id": "pdf-workflow", "path": "skills/pdf-workflow", "category": "data",
+             "name": "PDF workflow", "description": "PDF tools",
+             "risk": "safe", "source": "test"},
+        ]
+
+        class FakeResponse:
+            status_code = 200
+            text = "# PDF Workflow\nExtract tables."
+
+        with patch.object(skillhub_service, "_fetch_json", return_value=fake_index):
+            with patch.object(skillhub_service, "_index_cache", None):
+                with patch.object(skillhub_service.httpx, "get", return_value=FakeResponse()):
+                    content = skillhub_service.fetch_skill_content("pdf-workflow")
+
+        self.assertEqual(content, "# PDF Workflow\nExtract tables.")
 
 
 if __name__ == "__main__":

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     # 降低同一任务多次产出的随机性，让 Agent 输出更稳定、可复现。
     AGENT_TEMPERATURE: float = 0.3
     ANTHROPIC_API_KEY: str = ""
-    SKILLHUB_API_KEY: str = ""
+    AGENT_SKILLS_HUB_URL: str = "https://raw.githubusercontent.com/agent-skills-hub/agent-skills-hub/main"
     OPENCODE_SERVER_URL: str = "http://localhost:36000"
     # Executor limits are intentionally bounded: tasks queue instead of
     # exhausting the web server or the model provider's rate limit.

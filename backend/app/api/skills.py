@@ -73,7 +73,7 @@ class SkillHubImportRequest(BaseModel):
 
 
 def _skillhub_error(exc: skillhub_service.SkillHubError) -> HTTPException:
-    status_code = 503 if "not configured" in str(exc).lower() else 502
+    status_code = 503 if "not found" in str(exc).lower() else 502
     return HTTPException(status_code=status_code, detail=str(exc))
 
 
@@ -102,7 +102,7 @@ def search_skillhub(
     req: SkillHubSearchRequest,
     user: User = Depends(get_current_user),
 ):
-    """Proxy a SkillHub semantic search through the backend."""
+    """Proxy a skill search through the backend via Agent Skills Hub."""
     try:
         return skillhub_service.search_skills(
             req.query,
@@ -127,7 +127,7 @@ def skillhub_catalog(
     if offset < 0:
         raise HTTPException(status_code=422, detail="offset must be non-negative")
     if sort not in {"score", "stars", "recent", "composite"}:
-        raise HTTPException(status_code=422, detail="Unsupported SkillHub sort")
+        raise HTTPException(status_code=422, detail="Unsupported sort method")
     try:
         return skillhub_service.browse_catalog(
             limit=limit,
@@ -139,20 +139,33 @@ def skillhub_catalog(
         raise _skillhub_error(exc) from exc
 
 
+@router.get("/skillhub/content/{skill_id}")
+def get_skillhub_content(
+    skill_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Fetch the full SKILL.md content for a remote skill by its id."""
+    try:
+        content = skillhub_service.fetch_skill_content(skill_id)
+        return {"id": skill_id, "content": content}
+    except skillhub_service.SkillHubError as exc:
+        raise _skillhub_error(exc) from exc
+
+
 @router.post("/skillhub/import", response_model=SkillResponse, status_code=status.HTTP_201_CREATED)
 def import_skillhub_skill(
     req: SkillHubImportRequest,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Copy a reviewed SkillHub result into this user's local skill library."""
+    """Copy a remote skill result into this user's local skill library."""
     existing = db.query(Skill).filter(
         Skill.creator_id == user.id,
         Skill.source == "skillhub",
         Skill.source_id == req.source_id,
     ).first()
     if existing:
-        raise HTTPException(status_code=409, detail="This SkillHub skill is already imported")
+        raise HTTPException(status_code=409, detail="This skill is already imported")
     skill = Skill(
         creator_id=user.id,
         name=req.name,
