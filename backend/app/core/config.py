@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     WORKSPACE_ROOT: str = "../workspaces"
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
+    # Agent 生成时的采样温度。默认 0.3（远低于模型默认 0.7+），固定后可显著
+    # 降低同一任务多次产出的随机性，让 Agent 输出更稳定、可复现。
+    AGENT_TEMPERATURE: float = 0.3
     ANTHROPIC_API_KEY: str = ""
     SKILLHUB_API_KEY: str = ""
     OPENCODE_SERVER_URL: str = "http://localhost:36000"

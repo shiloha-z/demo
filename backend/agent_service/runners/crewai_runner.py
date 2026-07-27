@@ -424,6 +424,8 @@ class CrewAIRunner(BaseRunner):
             "base_url": base_url,
             "timeout": LLM_REQUEST_TIMEOUT_SECONDS,
             "max_tokens": LLM_MAX_OUTPUT_TOKENS,
+            # 固定采样温度：避免每次请求随机采样导致产出大幅波动。
+            "temperature": settings.AGENT_TEMPERATURE,
         }
         # DeepSeek V4 enables thinking by default. Non-thinking mode keeps
         # ordinary coding tasks responsive while complex tasks can still use a
@@ -432,6 +434,8 @@ class CrewAIRunner(BaseRunner):
             llm_kwargs["additional_params"] = {
                 "extra_body": {"thinking": {"type": "disabled"}},
             }
+            # 固定随机种子，进一步提升同一任务产出的确定性（仅 DeepSeek 支持）。
+            llm_kwargs["seed"] = 42
         return llm_kwargs
 
     def _make_agents(self, llm_kwargs: dict, tools: dict,
