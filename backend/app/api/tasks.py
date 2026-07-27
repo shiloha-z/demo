@@ -2,8 +2,8 @@ import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
-from pydantic import BaseModel, Field
-from sqlalchemy import desc, asc, and_, or_
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import desc, asc, and_, or_, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
@@ -75,11 +75,19 @@ class TaskResponse(BaseModel):
     reviewer_agent_name: str | None = None
     security_agent_name: str | None = None
     project_name: str | None = None
+    sort_order: int = 0
     # Nested-agent fields
     parent_task_id: int | None = None
     plan_json: str = "[]"
     subtask_count: int = 0
     subtask_done: int = 0
+
+    @field_validator("sort_order", mode="before")
+    @classmethod
+    def _coerce_sort_order(cls, v: object) -> int:
+        if v is None:
+            return 0
+        return int(v)
 
     class Config:
         from_attributes = True
@@ -147,6 +155,7 @@ def _task_to_response(t: Task) -> TaskResponse:
         reviewer_agent_name=t.reviewer_agent.name if t.reviewer_agent else None,
         security_agent_name=t.security_agent.name if t.security_agent else None,
         project_name=t.project.name if t.project else None,
+        sort_order=t.sort_order or 0,
         parent_task_id=t.parent_task_id,
         plan_json=t.plan_json or "[]",
         subtask_count=t.subtask_count or 0,
@@ -186,7 +195,7 @@ def _quality_gate_to_dict(run: QualityGateRun | None) -> dict | None:
 def list_tasks(
     project_id: int,
     archived: bool = False,
-    sort: str = Query(default="created_desc", description="created_desc | created_asc | status | title_asc | title_desc"),
+    sort: str = Query(default="order", description="order | created_desc | created_asc | status | title_asc | title_desc"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -195,6 +204,7 @@ def list_tasks(
     """List tasks for a project. Set ?archived=true to show only archived tasks."""
     _check_task_access(project_id, user, db)
     sort_map = {
+        "order": asc(Task.sort_order),
         "created_desc": desc(Task.created_at),
         "created_asc": asc(Task.created_at),
         "title_asc": asc(Task.title),
@@ -206,12 +216,11 @@ def list_tasks(
         .filter(Task.project_id == project_id, Task.parent_task_id.is_(None))
         .options(joinedload(Task.agent), joinedload(Task.reviewer_agent), joinedload(Task.security_agent), joinedload(Task.project))
     )
-    # Filter by archived status — default shows active (non-archived) tasks
     q = q.filter(Task.archived == bool(archived))
     if order is not None:
         q = q.order_by(order)
     else:
-        q = q.order_by(Task.id.desc())
+        q = q.order_by(asc(Task.sort_order))
 
     tasks, paging = paginate(q, page, page_size)
 
@@ -344,6 +353,10 @@ def create_task(
     # Worktree isolation (per top-level task) and parent-level serialisation
     # (for children sharing a parent branch) ensure safety.
 
+    max_order = db.query(func.coalesce(func.max(Task.sort_order), -1)).filter(
+        Task.project_id == project_id, Task.parent_task_id.is_(None)
+    ).scalar() or -1
+
     task = Task(
         agent_id=req.agent_id,
         reviewer_agent_id=reviewer_agent.id if reviewer_agent else None,
@@ -353,6 +366,7 @@ def create_task(
         description=req.description,
         approval_percent=req.approval_percent,
         status=TaskStatus.PENDING,
+        sort_order=max_order + 1,
         parent_task_id=req.parent_task_id,
     )
     db.add(task)
@@ -858,6 +872,37 @@ def resume_task(
     )
 
     return _task_to_response(task)
+
+
+# ── Reorder ────────────────────────────────────────────────────────────
+
+class ReorderRequest(BaseModel):
+    task_ids: list[int] = Field(..., min_length=1, max_length=200)
+
+
+@router.put("/reorder")
+def reorder_tasks(
+    project_id: int,
+    req: ReorderRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Update sort_order for a batch of tasks in this project."""
+    _check_task_access(project_id, user, db)
+    existing = set(
+        row[0] for row in db.query(Task.id).filter(
+            Task.project_id == project_id, Task.id.in_(req.task_ids)
+        ).all()
+    )
+    for tid in req.task_ids:
+        if tid not in existing:
+            raise HTTPException(status_code=404, detail=f"Task {tid} not found")
+    for idx, tid in enumerate(req.task_ids):
+        db.query(Task).filter(Task.id == tid).update({"sort_order": idx}, synchronize_session=False)
+    db.commit()
+    from app.api.ws import broadcast_sync
+    broadcast_sync("task_reorder", {"project_id": project_id, "task_ids": req.task_ids})
+    return {"message": f"已更新 {len(req.task_ids)} 个任务的顺序"}
 
 
 # ── Archive / Unarchive / Delete ──────────────────────────────────────

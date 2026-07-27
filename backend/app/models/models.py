@@ -113,6 +113,7 @@ class Project(Base):
     description = Column(Text, default="")
     owner_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     workspace_path = Column(String(500), default="")
+    auto_sequence = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
@@ -231,6 +232,7 @@ class Task(Base):
     security_agent = relationship("Agent", foreign_keys=[security_agent_id])
     project = relationship("Project")
 
+    sort_order = Column(Integer, default=0, nullable=False, index=True)
     # ── Nested-agent task tree (阶段 B) ──
     # A parent task (status PLANNING / SUBTASK_RUNNING) is decomposed by a
     # planning agent into child tasks that share the parent's worktree branch.

@@ -27,7 +27,7 @@ const archivedTasks = ref<any[]>([])
 const selectedTask = ref<any>(null)
 const taskDetail = ref<any>(null)
 const loadingDetail = ref(false)
-const sortBy = ref('created_desc')
+const sortBy = ref('order')
 const showArchived = ref(false)
 const archiveChecked = ref<Set<number>>(new Set())
 const taskProgress = ref<{ message: string; step: string; timestamp: string }[]>([])
@@ -314,7 +314,64 @@ onUnmounted(() => {
 watch(() => store.currentProject?.id, async (pid) => {
   if (!pid) { tasks.value = []; archivedTasks.value = []; return }
   await loadTasks()
+  await loadAutoSequence()
 }, { immediate: true })
+
+// ── Auto-sequential execution ─────────────────────────────────────────
+const autoSequence = ref(false)
+async function loadAutoSequence() {
+  if (!filterProjectId.value) return
+  try {
+    const { data } = await api.get(`/projects/${filterProjectId.value}`)
+    autoSequence.value = !!(data.auto_sequence)
+  } catch { autoSequence.value = false }
+}
+async function toggleAutoSequence() {
+  if (!filterProjectId.value) return
+  try {
+    const { data } = await api.put(`/projects/${filterProjectId.value}/auto-sequence`, { enabled: !autoSequence.value })
+    autoSequence.value = !!(data.auto_sequence)
+    MessagePlugin.success(autoSequence.value ? '已开启自动顺序执行' : '已关闭自动顺序执行')
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '切换失败')) }
+}
+
+// ── Reorder ───────────────────────────────────────────────────────────
+async function moveTask(task: any, direction: 'up' | 'down', event: Event) {
+  event.stopPropagation()
+  const list = tasks.value
+  const idx = list.indexOf(task)
+  if (idx < 0) return
+  const swapIdx = direction === 'up' ? idx - 1 : idx + 1
+  if (swapIdx < 0 || swapIdx >= list.length) return
+  const reordered = [...list]
+  ;[reordered[idx], reordered[swapIdx]] = [reordered[swapIdx], reordered[idx]]
+  try {
+    await api.put(`/projects/${task.project_id}/tasks/reorder`, { task_ids: reordered.map((t: any) => t.id) })
+    MessagePlugin.success('顺序已更新')
+    await loadTasks()
+  } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '排序失败')) }
+}
+
+// ── Delete task ───────────────────────────────────────────────────────
+async function deleteTask(task: any, event: Event) {
+  event.stopPropagation()
+  if (!task.archived) { MessagePlugin.warning('请先归档任务再删除'); return }
+  const dlg = DialogPlugin.confirm({
+    header: '确认删除',
+    body: `确定要永久删除「${task.title}」吗？不可撤销。`,
+    confirmBtn: { content: '删除', theme: 'danger' },
+    cancelBtn: '取消',
+    onConfirm: async () => {
+      try {
+        await api.delete(`/projects/${task.project_id}/tasks/${task.id}`)
+        MessagePlugin.success('已删除')
+        if (selectedTask.value?.id === task.id) { selectedTask.value = null; taskDetail.value = null }
+        await loadTasks()
+      } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '删除失败')) }
+      dlg.destroy()
+    },
+  })
+}
 
 // 进入树形视图时，自动展开有子任务的父任务，立即呈现嵌套结构。
 watch(viewMode, (mode) => {
@@ -723,12 +780,16 @@ async function resumeTask(task: any, event: Event) {
           <t-option value="failed" label="失败" />
         </t-select>
         <t-select v-model="sortBy" size="small" style="width: 110px" @change="loadTasks()">
+          <t-option value="order" label="自定义顺序" />
           <t-option value="created_desc" label="最新创建" />
           <t-option value="created_asc" label="最早创建" />
           <t-option value="status" label="按状态" />
           <t-option value="title_asc" label="标题 A-Z" />
           <t-option value="title_desc" label="标题 Z-A" />
         </t-select>
+        <t-button v-if="sortBy === 'order'" size="small" :variant="autoSequence ? 'base' : 'outline'" :theme="autoSequence ? 'primary' : 'default'" @click="toggleAutoSequence" :title="autoSequence ? '点击关闭自动顺序执行' : '点击开启自动顺序执行'">
+          {{ autoSequence ? '🔗 自动执行中' : '🔓 手动执行' }}
+        </t-button>
         <t-button shape="square" variant="text" @click="loadTasks()" title="刷新">
           <template #icon>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
@@ -934,6 +995,17 @@ async function resumeTask(task: any, event: Event) {
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
                 </button>
+                <!-- Reorder arrows (only when sorted by custom order) -->
+                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="上移" @click="moveTask(t, 'up', $event)" :disabled="tasks.indexOf(t) === 0">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+                </button>
+                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="下移" @click="moveTask(t, 'down', $event)" :disabled="tasks.indexOf(t) === tasks.length - 1">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <!-- Delete (only archived tasks) -->
+                <button v-if="t.archived" class="delete-btn" title="永久删除" @click="deleteTask(t, $event)">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                </button>
                 <span class="task-status" :style="{ color: statusColors[t.status] }">
                   <span class="status-dot" :class="t.status"></span>
                   {{ statusLabels[t.status] || t.status }}
@@ -1079,6 +1151,11 @@ async function resumeTask(task: any, event: Event) {
               </div>
             </div>
             <div class="detail-header-right">
+              <t-button
+                v-if="taskDetail.review?.status === 'pending'"
+                size="small" theme="primary"
+                @click="goToReview(taskDetail)"
+              >前往审查</t-button>
               <button
                 v-if="['running','paused','reviewing','conflict_resolution','subtask_running','subtask_done','planning'].includes(taskDetail.status)"
                 class="workspace-btn"
@@ -1160,9 +1237,6 @@ async function resumeTask(task: any, event: Event) {
                   class="diff-toggle"
                   @click="showReviewDiff = !showReviewDiff"
                 >{{ showReviewDiff ? '收起代码' : '展开代码' }}</button>
-                <div class="review-actions" v-if="taskDetail.review.status === 'pending'">
-                  <t-button size="small" theme="primary" @click="goToReview(taskDetail)">前往审查</t-button>
-                </div>
               </div>
 
               <div class="diff-container" v-if="showReviewDiff && taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'">
@@ -1456,6 +1530,24 @@ async function resumeTask(task: any, event: Event) {
   transition: all var(--transition-fast);
 }
 .resume-btn:hover { background: #8b5cf6; color: #fff; }
+
+.order-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast); opacity: 0;
+}
+.order-btn:disabled { opacity: 0; cursor: default; }
+.task-item:hover .order-btn { opacity: 0.6; }
+.task-item:hover .order-btn:hover:not(:disabled) { opacity: 1; background: var(--surface-hover); color: var(--foreground); }
+
+.delete-btn {
+  width: 24px; height: 24px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast);
+}
+.delete-btn:hover { background: var(--danger); color: #fff; }
 
 /* Archived section */
 .archived-section { border-top: 2px solid var(--surface-border); margin-top: auto; }

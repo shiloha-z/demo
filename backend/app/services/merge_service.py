@@ -1,5 +1,6 @@
 """Project-level serial integration, validation, and conflict hand-off."""
 
+import logging
 from datetime import datetime, timezone
 
 from app.api.ws import broadcast_sync
@@ -18,6 +19,55 @@ from app.models.models import (
 from app.services import git_service as git
 from app.services.audit_service import record as audit_record
 from app.models.models import AuditAction, AuditActorType
+
+logger = logging.getLogger(__name__)
+
+
+def _auto_start_next(project_id: int, db) -> None:
+    """If project has auto_sequence on, start the next PENDING task."""
+    try:
+        proj = db.get(Project, project_id)
+        if not proj:
+            logger.warning("auto_sequence: project %s not found", project_id)
+            return
+        if not proj.auto_sequence:
+            logger.info("auto_sequence: disabled for project %s", project_id)
+            return
+        next_task = (
+            db.query(Task)
+            .filter(
+                Task.project_id == project_id,
+                Task.parent_task_id.is_(None),
+                Task.status == TaskStatus.PENDING,
+                Task.archived == False,
+            )
+            .order_by(Task.sort_order.asc(), Task.id.asc())
+            .first()
+        )
+        if not next_task:
+            logger.info("auto_sequence: no PENDING tasks in project %s", project_id)
+            return
+        agent = db.get(Agent, next_task.agent_id)
+        if not agent or agent.status not in (AgentStatus.IDLE, AgentStatus.DONE):
+            agent = (
+                db.query(Agent)
+                .filter(Agent.role == "code_gen", Agent.status.in_([AgentStatus.IDLE, AgentStatus.DONE]))
+                .first()
+            )
+        if not agent:
+            logger.info("auto_sequence: no idle code_gen agent available")
+            return
+        next_task.agent_id = agent.id
+        next_task.status = TaskStatus.RUNNING
+        next_task.started_at = datetime.now(timezone.utc)
+        agent.status = AgentStatus.WORKING
+        db.commit()
+        from app.services.execution_service import enqueue_agent_run
+        enqueue_agent_run(next_task.id)
+        broadcast_sync("task_update", {"id": next_task.id, "project_id": project_id, "status": "running"})
+        logger.info("auto_sequence: started task #%s with agent #%s", next_task.id, agent.id)
+    except Exception:
+        logger.exception("auto_sequence: failed to start next task")
 from app.core.config import settings
 
 
@@ -172,6 +222,9 @@ def integrate_task(task_id: int) -> None:
                 task.completed_at = datetime.now(timezone.utc)
                 task.merge_error = ""
                 db.commit()
+
+                # Auto-start next task if project has sequential execution enabled
+                _auto_start_next(project.id, db)
 
                 # Audit: 对项目的影响 —— 合并完成（落库版本，记录影响范围）。
                 audit_record(

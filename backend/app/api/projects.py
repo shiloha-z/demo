@@ -3,7 +3,7 @@ import os, re, shutil, secrets, string
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Form
 from typing import List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import desc, asc
 
@@ -46,9 +46,17 @@ class ProjectResponse(BaseModel):
     owner_id: int
     owner_name: str = ""
     workspace_path: str
+    auto_sequence: bool = False
     is_member: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+    @field_validator("auto_sequence", mode="before")
+    @classmethod
+    def _coerce_auto_sequence(cls, v: object) -> bool:
+        if v is None:
+            return False
+        return bool(v)
 
     class Config:
         from_attributes = True
@@ -271,6 +279,26 @@ def create_project(req: ProjectCreate, db: Session = Depends(get_db), user: User
     )
     _broadcast_project_update("created", project.id)
     return response
+
+
+# ── Auto-sequence toggle ──────────────────────────────────────────────
+
+class AutoSequenceToggle(BaseModel):
+    enabled: bool
+
+
+@router.put("/{project_id}/auto-sequence")
+def toggle_auto_sequence(
+    project_id: int,
+    req: AutoSequenceToggle,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Enable or disable automatic sequential task execution."""
+    proj = _require_membership(project_id, user, db)
+    proj.auto_sequence = req.enabled
+    db.commit()
+    return {"auto_sequence": proj.auto_sequence}
 
 
 # ── File management (MUST be before /{project_id}) ────────────────────
