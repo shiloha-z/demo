@@ -7,19 +7,27 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.api.messages import list_messages, mark_read, unread_message_count
+from app.api.messages import (
+    delete_all_messages,
+    delete_message,
+    list_messages,
+    mark_read,
+    unread_message_count,
+)
 from app.api.projects import ProjectCreate, create_project, delete_project
 from app.api.reviews import VoteRequest, cast_review_vote
 from app.api.skills import SkillHubImportRequest, import_skillhub_skill
 from app.api.tasks import resume_task, start_task, stop_task
 from app.core.config import settings
 from app.services import memory_service as mem
+from app.services import message_service
 from app.services import skillhub_service
 from app.models.models import (
     Agent,
     AgentStatus,
     Base,
     Message,
+    MessageCategory,
     Project,
     ProjectMember,
     ProjectRole,
@@ -163,6 +171,119 @@ class MessageReadTests(DatabaseTestCase):
         self.assertFalse(other_messages[0].read)
         self.assertEqual(unread_message_count(None, self.db, self.owner)["count"], 0)
         self.assertEqual(unread_message_count(None, self.db, other)["count"], 1)
+
+    def test_visibility_is_scoped_to_recipient_and_project_members(self) -> None:
+        outsider = User(username="outsider", password_hash="x", display_name="Outsider")
+        member = User(username="member", password_hash="x", display_name="Member")
+        self.db.add_all([outsider, member])
+        self.db.flush()
+        self.db.add(ProjectMember(
+            project_id=self.project.id,
+            user_id=member.id,
+            role=ProjectRole.MEMBER,
+        ))
+        self.db.add_all([
+            Message(title="Global"),
+            Message(title="Project", project_id=self.project.id),
+            Message(
+                title="Owner only",
+                project_id=self.project.id,
+                recipient_id=self.owner.id,
+            ),
+            Message(
+                title="Outsider only",
+                project_id=self.project.id,
+                recipient_id=outsider.id,
+            ),
+        ])
+        self.db.commit()
+
+        owner_titles = {
+            item.title for item in list_messages(None, False, None, 100, self.db, self.owner)
+        }
+        member_titles = {
+            item.title for item in list_messages(None, False, None, 100, self.db, member)
+        }
+        outsider_titles = {
+            item.title for item in list_messages(None, False, None, 100, self.db, outsider)
+        }
+
+        self.assertEqual(owner_titles, {"Global", "Project", "Owner only"})
+        self.assertEqual(member_titles, {"Global", "Project"})
+        self.assertEqual(outsider_titles, {"Global", "Outsider only"})
+
+    def test_dismissal_only_hides_message_for_current_user(self) -> None:
+        other = User(username="other", password_hash="x", display_name="Other")
+        message = Message(title="Shared")
+        self.db.add_all([other, message])
+        self.db.commit()
+
+        delete_message(message.id, self.db, self.owner)
+
+        self.assertEqual(
+            list_messages(None, False, None, 100, self.db, self.owner),
+            [],
+        )
+        self.assertEqual(
+            [item.title for item in list_messages(None, False, None, 100, self.db, other)],
+            ["Shared"],
+        )
+        self.assertIsNotNone(self.db.get(Message, message.id))
+
+    def test_delete_all_only_dismisses_selected_category(self) -> None:
+        task_message = Message(title="Task", category=MessageCategory.TASK)
+        system_message = Message(title="System", category=MessageCategory.SYSTEM)
+        self.db.add_all([task_message, system_message])
+        self.db.commit()
+
+        result = delete_all_messages(None, self.db, self.owner, "task")
+
+        self.assertEqual(result["count"], 1)
+        self.assertEqual(
+            [item.title for item in list_messages(None, False, None, 100, self.db, self.owner)],
+            ["System"],
+        )
+        self.assertIsNotNone(self.db.get(Message, task_message.id))
+
+    def test_resolved_message_stays_unread_until_user_reads_it(self) -> None:
+        self.db.add(Message(title="Resolved", resolved=True))
+        self.db.commit()
+
+        self.assertEqual(unread_message_count(None, self.db, self.owner)["count"], 1)
+
+    def test_inaccessible_message_cannot_be_marked_read(self) -> None:
+        other = User(username="other", password_hash="x", display_name="Other")
+        self.db.add(other)
+        self.db.flush()
+        message = Message(title="Private", recipient_id=other.id)
+        self.db.add(message)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            mark_read(message.id, self.db, self.owner)
+
+        self.assertEqual(raised.exception.status_code, 404)
+
+    @patch("app.api.ws.manager.send_to_user")
+    @patch("app.api.ws.broadcast_sync_to_project")
+    def test_targeted_message_is_not_broadcast_to_project(
+        self,
+        project_broadcast,
+        send_to_user,
+    ) -> None:
+        message = Message(
+            id=99,
+            title="Private",
+            body="Only for the owner",
+            project_id=self.project.id,
+            recipient_id=self.owner.id,
+        )
+
+        message_service._broadcast(message)
+
+        send_to_user.assert_called_once()
+        self.assertEqual(send_to_user.call_args.args[:2], (self.owner.id, "message_new"))
+        project_broadcast.assert_not_called()
 
 
 class ReviewThresholdTests(DatabaseTestCase):

@@ -25,10 +25,12 @@ sys.stderr = _force_utf8(sys.stderr)
 
 from contextlib import asynccontextmanager
 import logging
+import os
 
 from fastapi import FastAPI, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.core.database import init_db
 from app.core.http_stability import install_http_stability

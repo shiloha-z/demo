@@ -34,6 +34,7 @@ class ReviewResponse(BaseModel):
     task_id: int
     project_id: int
     diff_content: str
+    evidence_json: str = "{}"
     agent_review_summary: str
     status: str
     human_feedback: str
@@ -621,7 +622,7 @@ def reject_review(
             category=MessageCategory.REVIEW,
             level=MessageLevel.WARNING,
             project_id=review.project_id,
-            link=f"/reviews?review_id={review_id}",
+            link=f"/reviews?project_id={review.project_id}&review_id={review_id}",
         )
     except Exception:
         pass
@@ -798,7 +799,7 @@ def close_review(
             category=MessageCategory.REVIEW,
             level=MessageLevel.INFO,
             project_id=review.project_id,
-            link=f"/reviews?review_id={review_id}",
+            link=f"/reviews?project_id={review.project_id}&review_id={review_id}",
         )
     except Exception:
         pass

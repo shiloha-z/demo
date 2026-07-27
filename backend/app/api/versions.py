@@ -94,15 +94,18 @@ def rollback_version(
 
     # Record this rollback as a new auditable version entry — but only when a
     # real new commit was created (skip no-op rollbacks to the current version).
+    notified_version_id = target.id
     if new_hash != target.commit_hash:
-        rollback_version = Version(
+        rollback_record = Version(
             project_id=project_id,
             commit_hash=new_hash,
             commit_message=f"Revert to {target.commit_hash[:7]}",
             review_id=target.review_id,
         )
-        db.add(rollback_version)
+        db.add(rollback_record)
         db.commit()
+        db.refresh(rollback_record)
+        notified_version_id = rollback_record.id
 
     # Notify the frontend to refresh the file tree.
     try:
@@ -122,7 +125,10 @@ def rollback_version(
             category=MessageCategory.VERSION,
             level=MessageLevel.INFO,
             project_id=project_id,
-            link=f"/versions",
+            link=(
+                f"/versions?project_id={project_id}"
+                f"&version_id={notified_version_id}"
+            ),
         )
     except Exception:
         pass

@@ -66,13 +66,20 @@ def _review_workspace_snapshot(workspace: str) -> str:
         paths = sorted(paths)[:200]
         diff = git.diff_vs_master(workspace)
         changed = "No changed files detected." if not diff else diff[:12000]
+        evidence = git.build_review_evidence(workspace)
+        evidence_text = git.format_review_evidence(evidence)
         files = "\n".join(f"- {path}" for path in paths) or "(no files)"
         return (
             "\n\n[AUTHORITATIVE WORKSPACE SNAPSHOT]\n"
             "This snapshot was captured by the orchestrator immediately after code generation. "
-            "Both review roles receive the exact same snapshot. Do not claim the workspace is empty "
-            "or omit a listed file without first reading it.\n"
+            "Both review roles receive the exact same snapshot. The MACHINE FILE EVIDENCE "
+            "is computed directly from the staged bytes and overrides historical memory or "
+            "unsupported claims. A disk-integrity finding is allowed only when "
+            "placeholder=true, conflicts>0, exists=false, or worktree_match=false. "
+            "Never claim that a file has one line when its evidence reports another "
+            "line_count.\n"
             f"Files:\n{files}\n\nChanges versus base branch:\n{changed}\n"
+            f"\nMACHINE FILE EVIDENCE:\n{evidence_text}\n"
             "[/AUTHORITATIVE WORKSPACE SNAPSHOT]\n"
         )
     except Exception as exc:
@@ -289,8 +296,7 @@ class CrewAIRunner(BaseRunner):
                 "## 一般问题\n（中等问题，建议修复）\n"
                 "## 建议改进\n（低优先级改进建议）\n"
                 "## 审查结论\n（是否建议通过/需要修改）\n\n"
-                "最后，用 MemoryRecord 将本次审查中值得注意的发现"
-                "记录到项目记忆（scope: project）或全局记忆（scope: global）。"
+                "审查发现尚未经过人工或确定性门禁验证，不得写入长期记忆。"
             ),
             expected_output="结构化的 Markdown 中文审查报告",
             agent=summarizer,
@@ -507,10 +513,9 @@ class CrewAIRunner(BaseRunner):
             backstory=(
                 "你是一位技术项目经理，擅长将技术审查意见整理成"
                 "结构化的报告。你会保留关键问题，合并重复意见，"
-                "并按严重程度排序。汇总完成后，用 MemoryRecord "
-                "将有价值的发现记录到项目记忆中。"
+                "并按严重程度排序。未经确定性验证的审查发现不得写入长期记忆。"
             ),
-            tools=[tools["mem_search"], tools["mem_record"]],
+            tools=[tools["mem_search"]],
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
@@ -650,7 +655,7 @@ class CrewAIRunner(BaseRunner):
                 "请将代码审查员和安全审查员的审查意见汇总为一份统一报告。所有输出必须使用中文。\n"
                 "报告结构：\n"
                 "## 审查总结\n## 严重问题\n## 一般问题\n## 建议改进\n## 审查结论\n\n"
-                "最后，用 MemoryRecord 将值得注意的发现记录到项目记忆（scope: project）。"
+                "审查发现尚未经过人工或确定性门禁验证，不得写入长期记忆。"
             ),
             expected_output="结构化的 Markdown 中文审查报告",
             agent=summarizer,

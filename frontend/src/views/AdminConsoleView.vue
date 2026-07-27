@@ -29,7 +29,6 @@ interface PromoteForm {
   is_system_admin: boolean
 }
 
-const tab = ref('users')
 const users = ref<AdminUser[]>([])
 const loading = ref(false)
 const promoteForm = ref<PromoteForm>({ username: '', is_system_admin: true })

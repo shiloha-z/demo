@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onActivated, onDeactivated } from 'vue'
 import api from '../api'
 
 const props = defineProps<{ projectId: number }>()
@@ -22,20 +22,32 @@ interface TreeNode {
 const treeData = ref<TreeNode[]>([])
 const loading = ref(false)
 const selectedPath = ref<string>('')
+let active = false
+let loadedProjectId: number | null = null
+let loadRequest: Promise<void> | null = null
 
 async function loadFiles() {
-  loading.value = true
-  try {
-    const { data } = await api.get(`/projects/${props.projectId}/files`)
-    treeData.value = data.files.map((n: TreeNode) => ({ ...n, expanded: n.type === 'dir' ? false : undefined, loaded: n.type === 'dir' ? false : undefined }))
-    // Auto-expand root directories
-    for (const node of treeData.value) {
-      if (node.type === 'dir') {
-        await expandDir(node)
-      }
+  if (loadRequest) return loadRequest
+  loadRequest = (async () => {
+    loading.value = true
+    try {
+      const { data } = await api.get(`/projects/${props.projectId}/files`)
+      treeData.value = data.files.map((n: TreeNode) => ({ ...n, expanded: n.type === 'dir' ? false : undefined, loaded: n.type === 'dir' ? false : undefined }))
+      // Load root directories concurrently; they are independent.
+      await Promise.all(
+        treeData.value
+          .filter(node => node.type === 'dir')
+          .map(node => expandDir(node)),
+      )
+      loadedProjectId = props.projectId
+    } finally {
+      loading.value = false
     }
+  })()
+  try {
+    await loadRequest
   } finally {
-    loading.value = false
+    loadRequest = null
   }
 }
 
@@ -75,8 +87,16 @@ function handleDelete(e: Event, path: string) {
   emit('deleteNode', path)
 }
 
-onMounted(() => loadFiles())
-watch(() => props.projectId, () => loadFiles())
+onActivated(() => {
+  active = true
+  if (loadedProjectId !== props.projectId) void loadFiles()
+})
+onDeactivated(() => {
+  active = false
+})
+watch(() => props.projectId, () => {
+  if (active) void loadFiles()
+})
 
 defineExpose({ loadFiles })
 </script>

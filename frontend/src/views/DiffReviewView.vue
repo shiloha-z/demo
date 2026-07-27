@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
+import {
+  ref, onActivated, onDeactivated, onUnmounted, watch, computed,
+} from 'vue'
 import { useRoute } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
@@ -40,8 +42,10 @@ const statusColors: Record<string, string> = {
 let unsubReview: (() => void) | null = null
 let unsubVote: (() => void) | null = null
 let unsubGate: (() => void) | null = null
+let pageActive = false
 
-onMounted(() => {
+function subscribeRealtime() {
+  if (unsubReview) return
   unsubReview = wsStore.on('review_update', (data: any) => {
     const pid = store.currentProject?.id
     if (pid && data.project_id === pid) {
@@ -54,31 +58,38 @@ onMounted(() => {
   unsubGate = wsStore.on('quality_gate_update', (data: any) => {
     if (selectedReview.value?.task_id === data.task_id) qualityGate.value = data
   })
-})
+}
 
-onUnmounted(() => {
-  if (unsubReview) unsubReview()
-  if (unsubVote) unsubVote()
-  if (unsubGate) unsubGate()
+function unsubscribeRealtime() {
+  unsubReview?.()
+  unsubVote?.()
+  unsubGate?.()
+  unsubReview = null
+  unsubVote = null
+  unsubGate = null
+}
+
+onActivated(() => {
+  pageActive = true
+  subscribeRealtime()
+  if (store.currentProject?.id) void loadReviews()
 })
+onDeactivated(() => {
+  pageActive = false
+  unsubscribeRealtime()
+})
+onUnmounted(unsubscribeRealtime)
 
 watch(() => store.currentProject?.id, async (pid) => {
-  if (!pid) return
+  if (!pid || !pageActive) return
   await loadReviews()
-}, { immediate: true })
+})
 
-// The route instance is cached, so query changes must select the target
+// The route instance is cached, so entity query changes must reload and select
 // explicitly instead of relying on a component remount.
-watch(() => route.query.review_id, async (rawReviewId) => {
+watch([() => route.query.review_id, () => route.query.task_id], async () => {
   if (route.path !== '/reviews') return
-  const targetId = Number(rawReviewId)
-  if (!targetId) return
-  let target = reviews.value.find((review: any) => review.id === targetId)
-  if (!target) {
-    await loadReviews()
-    target = reviews.value.find((review: any) => review.id === targetId)
-  }
-  if (target) selectedReview.value = target
+  await loadReviews()
 })
 
 watch(() => selectedReview.value?.id, async (reviewId) => {
@@ -99,12 +110,33 @@ watch(() => selectedReview.value?.id, async (reviewId) => {
 async function loadReviews() {
   if (!selectedProjectId.value) { reviews.value = []; return }
   try {
-    const { data } = await api.get(`/projects/${selectedProjectId.value}/reviews`)
+    const { data } = await api.get(
+      `/projects/${selectedProjectId.value}/reviews`,
+      { params: { page_size: 100 } },
+    )
     reviews.value = data.items || data || []
-    // Auto-select review when navigated with ?review_id=X
-    const targetId = Number(route.query.review_id)
-    if (targetId && !selectedReview.value) {
-      selectedReview.value = reviews.value.find((r: any) => r.id === targetId) || null
+    const targetReviewId = Number(route.query.review_id)
+    const targetTaskId = Number(route.query.task_id)
+    if (targetReviewId || targetTaskId) {
+      let target = reviews.value.find((review: any) => (
+        targetReviewId ? review.id === targetReviewId : review.task_id === targetTaskId
+      ))
+      if (!target && targetReviewId) {
+        try {
+          const { data: directReview } = await api.get(`/reviews/${targetReviewId}`)
+          target = directReview
+          reviews.value = [
+            directReview,
+            ...reviews.value.filter((review: any) => review.id !== directReview.id),
+          ]
+        } catch {
+          target = null
+        }
+      }
+      selectedReview.value = target || null
+    } else if (selectedReview.value) {
+      selectedReview.value =
+        reviews.value.find((review: any) => review.id === selectedReview.value.id) || null
     }
   } catch (e: any) {
     console.error('加载审查记录失败:', e?.response?.status, e?.response?.data || e?.message)

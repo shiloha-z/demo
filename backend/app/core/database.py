@@ -139,6 +139,15 @@ def _migrate_schema():
             conn.execute(text("UPDATE tasks SET subtask_count = 0 WHERE subtask_count IS NULL"))
             conn.execute(text("UPDATE tasks SET subtask_done = 0 WHERE subtask_done IS NULL"))
 
+        # Review evidence was added after existing review rows were created.
+        # Keep legacy responses serializable until those reviews are naturally
+        # superseded by manifests generated from immutable commits.
+        if "reviews" in existing_tables:
+            conn.execute(text(
+                "UPDATE reviews SET evidence_json = '{}' "
+                "WHERE evidence_json IS NULL OR evidence_json = ''"
+            ))
+
 
 def _repair_project_memberships(conn, existing_tables: set[str]) -> None:
     """Repair legacy membership data and enforce one owner per project.

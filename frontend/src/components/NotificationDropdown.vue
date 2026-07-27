@@ -1,36 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onUnmounted, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import api from '../api'
-import { useMessageStore } from '../stores/message'
-import { useWebSocketStore } from '../stores/websocket'
+import { MessagePlugin } from 'tdesign-vue-next'
+import { useMessageStore, type MessageItem } from '../stores/message'
+import { messageLocation, navigateToMessage } from '../utils/messageNavigation'
 
 const props = defineProps<{ visible: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
-
-interface MessageItem {
-  id: number
-  recipient_id: number | null
-  project_id: number | null
-  category: string
-  level: string
-  title: string
-  body: string
-  link: string
-  read: boolean
-  resolved: boolean
-  created_at: string | null
-}
 
 type TabKey = 'all' | 'task' | 'review' | 'member' | 'version' | 'system'
 
 const router = useRouter()
 const msgStore = useMessageStore()
-const wsStore = useWebSocketStore()
 
-const messages = ref<MessageItem[]>([])
-const loading = ref(false)
 const activeTab = ref<TabKey>('all')
+const messages = computed(() => msgStore.items)
+const loading = computed(() => msgStore.loading)
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -59,39 +44,30 @@ const filtered = computed(() => {
   return messages.value.filter(m => m.category === activeTab.value).slice(0, 30)
 })
 
-const unreadTotal = computed(() => messages.value.filter(m => !m.read).length)
-
-async function load() {
-  loading.value = true
-  try {
-    const { data } = await api.get('/messages', { params: { limit: 100 } })
-    messages.value = data
-  } catch { /* ignore */ }
-  finally { loading.value = false }
-}
+const unreadTotal = computed(() => msgStore.unreadCount)
 
 async function markRead(id: number) {
   try {
-    await api.post(`/messages/${id}/read`)
-    const m = messages.value.find(x => x.id === id)
-    if (m) m.read = true
-    await msgStore.refresh()
-  } catch { /* ignore */ }
+    await msgStore.markRead(id)
+  } catch {
+    MessagePlugin.error('标记已读失败，请重试')
+  }
 }
 
 async function markAllRead() {
   try {
-    await api.post('/messages/read-all')
-    messages.value.forEach(m => (m.read = true))
-    await msgStore.refresh()
-  } catch { /* ignore */ }
+    await msgStore.markAllRead()
+    MessagePlugin.success('已全部标为已读')
+  } catch {
+    MessagePlugin.error('操作失败，未读状态已恢复')
+  }
 }
 
 function openLink(m: MessageItem) {
-  if (!m.read) markRead(m.id)
-  if (m.link) {
+  if (!m.read) void markRead(m.id)
+  if (messageLocation(m)) {
     emit('close')
-    router.push(m.link)
+    void navigateToMessage(m, router)
   }
 }
 
@@ -111,33 +87,17 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-// ── Mark all as seen on open ────────────────────────────────────
 async function refreshOnOpen() {
-  await load()
-  // Silently mark all as seen so the red dot clears immediately.
-  const hadUnread = messages.value.some(m => !m.read)
-  if (hadUnread) {
-    try { await api.post('/messages/read-all') } catch { /* ignore */ }
-    messages.value.forEach(m => (m.read = true))
-    await msgStore.refresh()
+  try {
+    await Promise.all([msgStore.load(true), msgStore.refresh()])
+  } catch {
+    MessagePlugin.error('加载消息失败')
   }
 }
 
 watch(() => props.visible, (visible) => {
   if (visible) refreshOnOpen()
 }, { immediate: true })
-
-// ── Refresh on new message ──────────────────────────────────────
-let unsubMsg: (() => void) | null = null
-watch(() => wsStore.connected, (ok) => {
-  if (ok && !unsubMsg) {
-    unsubMsg = wsStore.on('message_new', () => {
-      if (props.visible) load()
-    })
-  }
-}, { immediate: true })
-
-onUnmounted(() => { unsubMsg?.() })
 
 // ── Click outside ───────────────────────────────────────────────
 function onBackdropClick(e: MouseEvent) {
@@ -175,15 +135,15 @@ function onBackdropClick(e: MouseEvent) {
 
         <!-- List -->
         <div class="nd-body">
-          <div v-if="loading" class="nd-empty">加载中...</div>
+          <div v-if="loading && messages.length === 0" class="nd-empty">加载中...</div>
           <div v-else-if="filtered.length === 0" class="nd-empty">暂无消息</div>
           <div v-else class="nd-list">
             <div
               v-for="m in filtered"
               :key="m.id"
               class="nd-item"
-              :class="{ unread: !m.read, resolved: m.resolved, clickable: !!m.link && !m.resolved }"
-              @click="m.link ? openLink(m) : null"
+              :class="{ unread: !m.read, resolved: m.resolved, clickable: !!messageLocation(m) && !m.resolved }"
+              @click="messageLocation(m) ? openLink(m) : null"
             >
               <div class="nd-item-top">
                 <span class="nd-dot" :class="levelMeta[m.level]?.cls || 'lv-info'"></span>

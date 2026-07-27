@@ -1,27 +1,38 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
-import { useMessageStore } from './message'
+import { computed, ref } from 'vue'
 
 /**
- * Unified notification store.
+ * Ephemeral per-conversation chat unread state.
  *
- * Aggregates unread counts from two sources into a single badge:
- *   - system / task messages   (useMessageStore.unreadCount)
- *   - chat conversations        (chatUnread)
- * so the top bar only needs ONE notification dot instead of two.
+ * Persistent system/task notifications live in useMessageStore. Keeping the
+ * two domains separate prevents the bell from advertising chat messages that
+ * the notification dropdown cannot display.
  */
 export const useNotificationStore = defineStore('notification', () => {
-  const chatUnread = ref(0)
+  const chatUnreadByConversation = ref<Record<string, number>>({})
 
-  function incrementChatUnread() {
-    chatUnread.value++
+  const chatUnread = computed(() => Object.values(chatUnreadByConversation.value)
+    .reduce((sum, count) => sum + count, 0))
+
+  function incrementChatUnread(conversationKey: string) {
+    if (!conversationKey) return
+    chatUnreadByConversation.value[conversationKey] =
+      (chatUnreadByConversation.value[conversationKey] || 0) + 1
   }
+
+  function clearChatUnread(conversationKey: string) {
+    if (!conversationKey) return
+    delete chatUnreadByConversation.value[conversationKey]
+  }
+
   function resetChatUnread() {
-    chatUnread.value = 0
+    chatUnreadByConversation.value = {}
   }
 
-  const msgStore = useMessageStore()
-  const total = computed(() => chatUnread.value + msgStore.unreadCount)
-
-  return { chatUnread, incrementChatUnread, resetChatUnread, total }
+  return {
+    chatUnread,
+    incrementChatUnread,
+    clearChatUnread,
+    resetChatUnread,
+  }
 })

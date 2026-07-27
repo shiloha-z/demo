@@ -6,10 +6,14 @@ import { useProjectStore } from '../stores/project'
 import api from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{
+  visible: boolean
+  focusMessageId?: number | null
+}>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
-  'unreadCount': [count: number]
+  'unreadCount': [conversationKey: string]
+  'conversationViewed': [conversationKey: string]
 }>()
 
 const ws = useWebSocketStore()
@@ -112,6 +116,29 @@ interface ChatMsg {
   file_size?: number
 }
 
+function conversationKeyForMessage(message: ChatMsg): string {
+  const projectId = message.project_id ?? projectStore.currentProject?.id
+  if (projectId == null) return ''
+  if (message.recipient_id == null) return `${projectId}:team`
+  const otherUserId = message.user_id === auth.userId
+    ? message.recipient_id
+    : message.user_id
+  return `${projectId}:dm:${otherUserId}`
+}
+
+function activeConversationKey(): string {
+  const projectId = projectStore.currentProject?.id
+  if (projectId == null) return ''
+  return chatMode.value === 'dm' && dmUser.value
+    ? `${projectId}:dm:${dmUser.value.id}`
+    : `${projectId}:team`
+}
+
+function markActiveConversationViewed() {
+  const key = activeConversationKey()
+  if (props.visible && key) emit('conversationViewed', key)
+}
+
 interface OnlineUser {
   user_id: number
   username: string
@@ -136,6 +163,8 @@ let unsubOnline: (() => void) | null = null
 let unsubOffline: (() => void) | null = null
 let unsubTyping: (() => void) | null = null
 let typingTimer: ReturnType<typeof setTimeout> | null = null
+let focusTimer: ReturnType<typeof setTimeout> | null = null
+const focusedMessageId = ref<number | null>(null)
 
 // ── Grouped messages with date separators ─────────────────────
 interface MessageGroup {
@@ -185,6 +214,7 @@ onUnmounted(() => {
   unsubOnline?.()
   unsubOffline?.()
   unsubTyping?.()
+  if (focusTimer) clearTimeout(focusTimer)
   document.removeEventListener('paste', onGlobalPaste)
 })
 
@@ -199,8 +229,21 @@ watch(() => projectStore.currentProject?.id, (newId, oldId) => {
   }
 })
 
-function switchToTeam() { chatMode.value = 'team'; dmUser.value = null; messages.value = []; loadMessages() }
-function switchToDM(user: typeof members.value[0]) { chatMode.value = 'dm'; dmUser.value = user; messages.value = []; loadMessages() }
+function switchToTeam() {
+  chatMode.value = 'team'
+  dmUser.value = null
+  messages.value = []
+  void loadMessages()
+  markActiveConversationViewed()
+}
+
+function switchToDM(user: typeof members.value[0]) {
+  chatMode.value = 'dm'
+  dmUser.value = user
+  messages.value = []
+  void loadMessages()
+  markActiveConversationViewed()
+}
 
 async function joinProjectRoom(projectId: number) {
   try {
@@ -212,28 +255,22 @@ async function joinProjectRoom(projectId: number) {
   await loadMessages()
   await loadOnlineUsers()
   loadMembers()
+  markActiveConversationViewed()
 }
 
 function setupWS() {
   unsubChat = ws.on('chat_message', (data: ChatMsg & { system?: boolean }) => {
     const currentPid = projectStore.currentProject?.id
     if (currentPid == null || data.project_id !== currentPid) return
-    // For DM mode, only show if it's between the two participants
-    if (chatMode.value === 'dm' && dmUser.value) {
-      const isParticipant = (data.user_id === auth.userId && data.recipient_id === dmUser.value.id)
-        || (data.user_id === dmUser.value.id && data.recipient_id === auth.userId)
-      if (!isParticipant && data.recipient_id != null) return
-      // Team messages (recipient_id=null) shouldn't appear in DM mode
-      if (data.recipient_id == null) return
-    } else {
-      // Team mode: skip private messages
-      if (data.recipient_id != null) return
+    const belongsToActiveConversation =
+      conversationKeyForMessage(data) === activeConversationKey()
+    if (data.user_id !== auth.userId && (!props.visible || !belongsToActiveConversation)) {
+      emit('unreadCount', conversationKeyForMessage(data))
     }
+    if (!belongsToActiveConversation) return
     if (!messages.value.some(m => m.id === data.id)) {
       messages.value.push(data)
-      if (!props.visible && data.user_id !== auth.userId) {
-        emit('unreadCount', 1)
-      }
+      if (props.visible) markActiveConversationViewed()
       scrollToBottom()
     }
   })
@@ -288,7 +325,7 @@ async function loadMessages(beforeId?: number) {
       messages.value = arr
       hasMore.value = arr.length >= 50
       await nextTick()
-      scrollToBottom()
+      if (!focusRequestedMessage()) scrollToBottom()
     } else {
       messages.value = [...arr, ...messages.value]
       hasMore.value = arr.length >= 50
@@ -322,6 +359,20 @@ function scrollToBottom() {
       scrollEl.value.scrollTop = scrollEl.value.scrollHeight
     }
   })
+}
+
+function focusRequestedMessage(): boolean {
+  const id = Number(props.focusMessageId)
+  if (!id || !scrollEl.value) return false
+  const target = scrollEl.value.querySelector<HTMLElement>(`[data-message-id="${id}"]`)
+  if (!target) return false
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  focusedMessageId.value = id
+  if (focusTimer) clearTimeout(focusTimer)
+  focusTimer = setTimeout(() => {
+    if (focusedMessageId.value === id) focusedMessageId.value = null
+  }, 3000)
+  return true
 }
 
 // ── Send ───────────────────────────────────────────────────────
@@ -531,7 +582,16 @@ function fileIcon(ext: string): string {
 
 // ── Watch visibility ───────────────────────────────────────────
 watch(() => props.visible, (v) => {
-  if (v) nextTick(() => scrollToBottom())
+  if (v) {
+    markActiveConversationViewed()
+    nextTick(() => {
+      if (!focusRequestedMessage()) scrollToBottom()
+    })
+  }
+})
+
+watch(() => props.focusMessageId, () => {
+  if (props.visible) nextTick(focusRequestedMessage)
 })
 </script>
 
@@ -634,11 +694,13 @@ watch(() => props.visible, (v) => {
         <div
           v-for="msg in group.items"
           :key="msg.id"
+          :data-message-id="msg.id"
           class="chat-msg"
           :class="{
             mine: msg.user_id === auth.userId && !msg.system,
             system: msg.system,
             consecutive: !msg.showMeta,
+            focused: focusedMessageId === msg.id,
           }"
         >
           <!-- System message -->
@@ -851,9 +913,17 @@ watch(() => props.visible, (v) => {
 
 /* ── Message rows ───────────────────── */
 .chat-msg { display: flex; align-items: flex-start; gap: 8px; padding: 2px 16px; }
+.chat-msg.focused {
+  background: var(--primary-light);
+  animation: focused-message-pulse 1.2s ease-out 2;
+}
 .chat-msg.consecutive { padding-top: 1px; }
 .chat-msg.mine { flex-direction: row-reverse; }
 .chat-msg.system { justify-content: center; padding: 6px 16px; }
+@keyframes focused-message-pulse {
+  0%, 100% { box-shadow: inset 3px 0 0 transparent; }
+  50% { box-shadow: inset 3px 0 0 var(--primary); }
+}
 
 .msg-avatar {
   width: 32px; height: 32px; border-radius: var(--radius-md);

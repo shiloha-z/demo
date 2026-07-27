@@ -270,6 +270,7 @@ class Review(Base):
     task_id = Column(Integer, ForeignKey("tasks.id"), nullable=False)
     project_id = Column(Integer, ForeignKey("projects.id"), nullable=False)
     diff_content = Column(Text, default="")
+    evidence_json = Column(Text, default="{}", nullable=False)
     agent_review_summary = Column(Text, default="")
     status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING)
     human_feedback = Column(Text, default="")
@@ -357,8 +358,8 @@ class MessageLevel(str, Enum):
 class Message(Base):
     """系统/项目消息中心。
 
-    为后续多人协作预留 recipient_id：当前阶段可置 None 表示系统级广播，
-    将来定向推送给具体用户时写入 recipient_id 即可，前端结构无需改动。
+    ``recipient_id`` 为空表示系统或项目广播；有值时仅投递给指定用户。
+    阅读和个人删除状态保存在 ``MessageRead`` 中，不修改共享消息本体。
     """
 
     __tablename__ = "messages"
@@ -377,11 +378,11 @@ class Message(Base):
 
 
 class MessageRead(Base):
-    """Per-user read receipt for a message.
+    """Per-user state for a message.
 
     ``Message.read`` is retained for compatibility with legacy databases, but
-    new read operations are recorded here so one user no longer changes the
-    unread state seen by everyone else.
+    new read and dismissal operations are recorded here so one user's actions
+    never change the message state seen by everyone else.
     """
 
     __tablename__ = "message_reads"
@@ -391,6 +392,7 @@ class MessageRead(Base):
     message_id = Column(Integer, ForeignKey("messages.id"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     read_at = Column(DateTime, default=_now, nullable=False)
+    dismissed_at = Column(DateTime, nullable=True)
 
 
 class AuditLog(Base):

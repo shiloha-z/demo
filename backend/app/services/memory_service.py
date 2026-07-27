@@ -222,57 +222,26 @@ def _get_or_create(name: str):
 
 
 def _summarise_batch(documents: list[str], category: str = "") -> str:
-    """Call the LLM to compact a batch of old memory entries into one summary.
-
-    Falls back to a mechanical join when the LLM is unavailable so no knowledge
-    is silently lost.
-    """
+    """Compact old entries deterministically without blocking on a model call."""
     if not documents:
         return ""
-    joined = "\n\n---\n\n".join(
-        f"{i}. {d[:MAX_MEMORY_CHARS]}" for i, d in enumerate(documents, 1)
-    )
-    cat_label = f" about {category}" if category else ""
-    prompt = (
-        f"You are summarising a project's accumulated AI agent memories{cat_label}. "
-        f"Below are {len(documents)} older memory entries. "
-        "Condense them into a single compact summary (max 300 words) that preserves "
-        "key lessons, recurring patterns, error types, fixes that worked, and "
-        "important decisions. Write in plain English. Output only the summary, "
-        "no preamble or meta-commentary.\n\n{joined}"
-    )
-    try:
-        from app.core.config import settings
-        import urllib.request, json
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": "You are a technical knowledge archivist. Output only the requested summary text."},
-                {"role": "user", "content": prompt},
-            ],
-            "temperature": 0.3,
-            "max_tokens": 600,
-        }
-        if settings.DEEPSEEK_API_KEY and settings.DEEPSEEK_BASE_URL:
-            url = settings.DEEPSEEK_BASE_URL.rstrip("/") + "/chat/completions"
-            data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                url, data=data, method="POST",
-                headers={"Content-Type": "application/json",
-                         "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                body = json.loads(resp.read().decode("utf-8"))
-            return body["choices"][0]["message"]["content"].strip()
-    except Exception:
-        logger.debug("Memory summarisation LLM call failed; falling back to mechanical join", exc_info=True)
-    # Mechanical fallback: keep first line of each entry.
+    # Keep one bounded, unique first paragraph per entry. Model-generated
+    # summaries can turn an unsupported claim into a more authoritative-looking
+    # statement, so compaction deliberately performs no inference.
     lines: list[str] = []
+    seen: set[str] = set()
     for d in documents:
-        first = d.strip().split("\n")[0][:200]
-        if first:
+        first = re.sub(r"\s+", " ", d.strip().split("\n\n", 1)[0])[:300]
+        key = first.casefold()
+        if first and key not in seen:
+            seen.add(key)
             lines.append(f"• {first}")
-    return "Compacted memories:\n" + "\n".join(lines[:20])
+    label = f" [{category}]" if category else ""
+    return (
+        f"Deterministic memory compaction{label}; "
+        f"{len(documents)} source entries (unverified unless metadata says otherwise):\n"
+        + "\n".join(lines[:MEMORY_SUMMARISE_BATCH])
+    )
 
 
 def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
@@ -282,6 +251,10 @@ def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
     memories when the capacity limit is hit.
     """
     if col is None or cap <= 0:
+        return
+    if not all(hasattr(col, attr) for attr in ("get", "add", "delete")):
+        # Compatibility with lightweight collection fakes and older backends.
+        _enforce_cap(col, cap)
         return
     try:
         all_data = col.get()
@@ -298,10 +271,12 @@ def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
             return ""
         triples = sorted(zip(ids, docs, metas), key=lambda p: _ts(p[2]))
         excess = total - cap
-        # Summarise at most MEMORY_SUMMARISE_BATCH old entries; drop the rest.
-        batch = min(excess, MEMORY_SUMMARISE_BATCH)
-        to_summarise = triples[:batch]
-        to_drop = triples[batch:excess] if excess > batch else []
+        # Adding one summary also consumes one slot. Remove excess + 1 source
+        # entries so the final count is exactly cap, not cap + 1.
+        remove_count = min(total, excess + 1)
+        to_remove = triples[:remove_count]
+        to_summarise = to_remove[:MEMORY_SUMMARISE_BATCH]
+        to_drop = to_remove[MEMORY_SUMMARISE_BATCH:]
         # Guess a category from the metadata of the batch.
         cat = ""
         for _, _, m in to_summarise:
@@ -320,14 +295,13 @@ def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
             "source": "auto_compaction",
             "category": cat,
             "original_count": len(to_summarise),
+            "verified": False,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         summary_id = _new_uid("sum")
         col.add(documents=[summary_doc], metadatas=[summary_meta], ids=[summary_id])
         # Delete the summarised originals and any excess beyond the batch.
-        delete_ids = [pid for pid, _, _ in to_summarise]
-        if to_drop:
-            delete_ids += [pid for pid, _, _ in to_drop]
+        delete_ids = [pid for pid, _, _ in to_remove]
         if delete_ids:
             col.delete(ids=delete_ids)
         logger.info(
@@ -335,7 +309,10 @@ def _summarise_and_evict(col, cap: int, collection_name: str) -> None:
             f"in {collection_name} (cap={cap}, dropped={len(to_drop)})"
         )
     except Exception:
-        logger.exception(f"Failed to summarise/evict in {col.name if col else '?'}")
+        logger.exception(
+            "Failed to summarise/evict in %s",
+            getattr(col, "name", collection_name),
+        )
 
 
 def _enforce_cap(col, cap: int) -> None:
@@ -361,9 +338,17 @@ def _enforce_cap(col, cap: int) -> None:
         pairs = sorted(zip(ids, metas), key=lambda p: _ts(p[1]))
         stale = [pid for pid, _ in pairs[: total - cap]]
         col.delete(ids=stale)
-        logger.info(f"Evicted {len(stale)} old entries from {col.name} (cap={cap})")
+        logger.info(
+            "Evicted %s old entries from %s (cap=%s)",
+            len(stale),
+            getattr(col, "name", "?"),
+            cap,
+        )
     except Exception:
-        logger.exception(f"Failed to enforce cap on {col.name if col else '?'}")
+        logger.exception(
+            "Failed to enforce cap on %s",
+            getattr(col, "name", "?"),
+        )
 
 
 # ── Public API ───────────────────────────────────────────────────────────

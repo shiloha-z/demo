@@ -1,35 +1,19 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onActivated, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import api from '../api'
-import { useMessageStore } from '../stores/message'
-import { useNotificationStore } from '../stores/notification'
-
-interface MessageItem {
-  id: number
-  recipient_id: number | null
-  project_id: number | null
-  category: string
-  level: string
-  title: string
-  body: string
-  link: string
-  read: boolean
-  resolved: boolean
-  created_at: string | null
-}
+import { useMessageStore, type MessageItem } from '../stores/message'
+import { messageLocation, navigateToMessage } from '../utils/messageNavigation'
 
 type TabKey = 'all' | 'system' | 'task' | 'review' | 'member' | 'version'
 
 const router = useRouter()
 const msgStore = useMessageStore()
-const notifStore = useNotificationStore()
-const messages = ref<MessageItem[]>([])
-const loading = ref(false)
+const messages = computed(() => msgStore.items)
+const loading = computed(() => msgStore.loading)
 const activeTab = ref<TabKey>('all')
-const unreadTotal = ref(0)
-const mounted = ref(false)
+const unreadTotal = computed(() => msgStore.unreadCount)
 
 const tabs: { key: TabKey; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -61,55 +45,35 @@ const filtered = computed(() => {
 })
 
 async function load() {
-  loading.value = true
   try {
-    const { data } = await api.get('/messages', { params: { limit: 200 } })
-    messages.value = data
-    unreadTotal.value = data.filter((m: MessageItem) => !m.read).length
+    await Promise.all([msgStore.load(true), msgStore.refresh()])
   } catch {
     MessagePlugin.error('加载消息失败')
-  } finally {
-    loading.value = false
+  }
+}
+
+async function loadMore() {
+  try {
+    await msgStore.load(false)
+  } catch {
+    MessagePlugin.error('加载更多消息失败')
   }
 }
 
 async function markRead(id: number) {
   try {
-    await api.post(`/messages/${id}/read`)
-    const m = messages.value.find((x) => x.id === id)
-    if (m) m.read = true
-    await msgStore.refresh()
+    await msgStore.markRead(id)
   } catch {
-    MessagePlugin.error('操作失败')
+    MessagePlugin.error('标记已读失败，状态已恢复')
   }
 }
 
 async function markAllRead() {
   try {
-    await api.post('/messages/read-all')
-    messages.value.forEach((m) => (m.read = true))
-    await msgStore.refresh()
+    await msgStore.markAllRead()
     MessagePlugin.success('已全部标为已读')
   } catch {
-    MessagePlugin.error('操作失败')
-  }
-}
-
-async function markAllSeen() {
-  // 进入消息中心即视为已读，静默清除统一通知红点，避免“看过仍提示”的反复红点。
-  const hadUnread = unreadTotal.value > 0 || notifStore.chatUnread > 0
-  // 乐观更新：无论后端 read-all 是否成功，本地先清零，确保红点不会因接口
-  // 偶发失败（如“服务暂时不可用”那类 5xx）而残留不消失。
-  messages.value.forEach((m) => (m.read = true))
-  unreadTotal.value = 0
-  notifStore.resetChatUnread()
-  msgStore.unreadCount = 0
-  if (!hadUnread) return
-  try {
-    await api.post('/messages/read-all')
-    await msgStore.refresh()
-  } catch {
-    /* ignore: 本地已乐观清零，红点不会卡住 */
+    MessagePlugin.error('操作失败，未读状态已恢复')
   }
 }
 
@@ -121,9 +85,7 @@ async function deleteMessage(m: MessageItem) {
     cancelBtn: '取消',
     onConfirm: async () => {
       try {
-        await api.delete(`/messages/${m.id}`)
-        messages.value = messages.value.filter((x) => x.id !== m.id)
-        await msgStore.refresh()
+        await msgStore.dismiss(m.id)
         MessagePlugin.success('已删除')
       } catch {
         MessagePlugin.error('删除失败')
@@ -135,18 +97,17 @@ async function deleteMessage(m: MessageItem) {
 
 async function deleteAllMessages() {
   if (filtered.value.length === 0) return
-  const count = filtered.value.length
+  const visibleCount = filtered.value.length
+  const category = activeTab.value === 'all' ? undefined : activeTab.value
   const dlg = DialogPlugin.confirm({
     header: '确认删除全部',
-    body: `确定要删除当前列表中的 ${count} 条消息吗？此操作不可撤销。`,
+    body: `确定要从你的消息中心移除当前${category ? '分类' : '列表'}中的消息吗？当前已加载 ${visibleCount} 条。`,
     confirmBtn: { content: '删除全部', theme: 'danger' },
     cancelBtn: '取消',
     onConfirm: async () => {
       try {
-        await api.delete('/messages')
-        messages.value = messages.value.filter((x) => !filtered.value.includes(x))
-        await msgStore.refresh()
-        MessagePlugin.success(`已删除 ${count} 条消息`)
+        const count = await msgStore.dismissAll(category)
+        MessagePlugin.success(`已移除 ${count} 条消息`)
       } catch {
         MessagePlugin.error('删除失败')
       }
@@ -169,6 +130,7 @@ async function handleJoinAction(msg: MessageItem, action: 'approve' | 'reject') 
   try {
     const url = `/projects/${msg.project_id}/applications/${requestId}/${action === 'approve' ? 'approve' : 'reject'}`
     await api.post(url)
+    if (!msg.read) void msgStore.markRead(msg.id).catch(() => msgStore.refresh())
     MessagePlugin.success(action === 'approve' ? '已通过' : '已驳回')
     // Replace the action buttons with the result
     msg.link = ''  // clear so buttons disappear
@@ -182,7 +144,7 @@ async function handleJoinAction(msg: MessageItem, action: 'approve' | 'reject') 
 
 function openLink(m: MessageItem) {
   if (m && !m.read) markRead(m.id)
-  if (m.link) router.push(m.link)
+  void navigateToMessage(m, router)
 }
 
 function fmtTime(iso: string | null): string {
@@ -191,35 +153,7 @@ function fmtTime(iso: string | null): string {
   return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
 }
 
-// Refresh when a new message arrives over WS
-import { useWebSocketStore } from '../stores/websocket'
-import { onUnmounted } from 'vue'
-const wsStore = useWebSocketStore()
-let unsubMsg: (() => void) | null = null
-watch(
-  () => wsStore.connected,
-  (ok) => {
-    if (ok && !unsubMsg) {
-      unsubMsg = wsStore.on('message_new', async () => {
-        await load()
-        // 用户在消息中心查看期间，新消息立即视为已读，红点不会重新亮起
-        if (mounted.value) markAllSeen()
-      })
-    }
-  },
-  { immediate: true },
-)
-
-onMounted(async () => {
-  mounted.value = true
-  await load()
-  // 进入消息中心即视为已读，清除统一通知红点（提示消息“看过即消失”）
-  await markAllSeen()
-})
-onUnmounted(() => {
-  mounted.value = false
-  unsubMsg?.()
-})
+onActivated(load)
 </script>
 
 <template>
@@ -269,7 +203,7 @@ onUnmounted(() => {
     </div>
 
     <!-- List -->
-    <div v-if="loading" class="empty-card">
+    <div v-if="loading && messages.length === 0" class="empty-card">
       <p>加载中...</p>
     </div>
     <div v-else-if="filtered.length === 0" class="empty-card">
@@ -280,8 +214,8 @@ onUnmounted(() => {
         v-for="m in filtered"
         :key="m.id"
         class="msg-card"
-        :class="{ unread: !m.read, resolved: m.resolved, clickable: !!m.link && !parseJoinRequest(m.link) && !m.resolved }"
-        @click="m.link && !parseJoinRequest(m.link) ? openLink(m) : null"
+        :class="{ unread: !m.read, resolved: m.resolved, clickable: !!messageLocation(m) && !parseJoinRequest(m.link) && !m.resolved }"
+        @click="messageLocation(m) && !parseJoinRequest(m.link) ? openLink(m) : null"
       >
         <div class="msg-main">
           <div class="msg-top">
@@ -298,7 +232,7 @@ onUnmounted(() => {
           </div>
           <div class="msg-foot">
             <span class="msg-time">{{ fmtTime(m.created_at) }}</span>
-            <span v-if="m.link" class="msg-link">查看详情 →</span>
+            <span v-if="messageLocation(m) && !parseJoinRequest(m.link)" class="msg-link">查看详情 →</span>
             <button
               v-if="!m.read"
               class="mark-btn"
@@ -312,6 +246,16 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
+    </div>
+    <div v-if="messages.length > 0 && msgStore.hasMore" class="load-more-row">
+      <t-button
+        variant="outline"
+        size="small"
+        :loading="msgStore.loadingMore"
+        @click="loadMore"
+      >
+        加载更多
+      </t-button>
     </div>
   </div>
 </template>
@@ -354,6 +298,7 @@ onUnmounted(() => {
 
 /* ── Message list ───────────────────────────────────────────────────── */
 .msg-list { display: flex; flex-direction: column; gap: 10px; }
+.load-more-row { display: flex; justify-content: center; padding: 18px 0 4px; }
 .msg-card {
   background: var(--surface);
   border: 1px solid var(--surface-border);

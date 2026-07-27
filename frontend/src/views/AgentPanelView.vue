@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, onActivated } from 'vue'
+import { ref, computed, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -61,32 +61,43 @@ const runnerColors: Record<string, string> = {
 
 let unsubAgent: (() => void) | null = null
 let agentsLoadedAt = 0
-
-onMounted(async () => {
-  if (store.projects.length === 0) await store.fetchProjects()
-  await loadAgents()
-  unsubAgent = wsStore.on('agent_update', () => loadAgents(true))
-})
+let agentsLoad: Promise<void> | null = null
 
 // KeepAlive preserves this page. Only reconcile after a meaningful stale
 // window; WebSocket events keep normal navigation returns up to date.
-onActivated(() => {
-  if (agentsLoadedAt > 0 && Date.now() - agentsLoadedAt > 30_000) {
-    loadAgents()
+onActivated(async () => {
+  if (!unsubAgent) {
+    unsubAgent = wsStore.on('agent_update', () => loadAgents(true))
+  }
+  if (store.projects.length === 0) await store.fetchProjects()
+  if (agentsLoadedAt === 0 || Date.now() - agentsLoadedAt > 30_000) {
+    await loadAgents(agentsLoadedAt > 0)
   }
 })
 
-onUnmounted(() => {
-  if (unsubAgent) unsubAgent()
-})
+function unsubscribeAgent() {
+  unsubAgent?.()
+  unsubAgent = null
+}
+
+onDeactivated(unsubscribeAgent)
+onUnmounted(unsubscribeAgent)
 
 async function loadAgents(silent = false) {
+  if (agentsLoad) return agentsLoad
+  agentsLoad = (async () => {
+    try {
+      const { data } = await api.get('/agents', { silent })
+      agents.value = data.items || data
+      agentsLoadedAt = Date.now()
+    } catch (e: any) {
+      MessagePlugin.error(e?.response?.data?.detail || '加载 Agent 列表失败')
+    }
+  })()
   try {
-    const { data } = await api.get('/agents', { silent })
-    agents.value = data.items || data
-    agentsLoadedAt = Date.now()
-  } catch (e: any) {
-    MessagePlugin.error(e?.response?.data?.detail || '加载 Agent 列表失败')
+    await agentsLoad
+  } finally {
+    agentsLoad = null
   }
 }
 

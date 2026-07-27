@@ -61,12 +61,16 @@ class ConcurrentTaskMergeTests(unittest.TestCase):
         resolution_commit = self._commit_task(
             self.task_two, resolved_content, "Resolve task two conflict"
         )
-        resolution = Repo(str(self.task_two)).commit(resolution_commit)
-        self.assertEqual(
-            len(resolution.parents),
-            2,
-            "Conflict resolution must create a real two-parent merge commit",
-        )
+        task_repo = Repo(str(self.task_two))
+        try:
+            resolution = task_repo.commit(resolution_commit)
+            self.assertEqual(
+                len(resolution.parents),
+                2,
+                "Conflict resolution must create a real two-parent merge commit",
+            )
+        finally:
+            task_repo.close()
 
         # Once master is a parent, a fresh synchronization cannot rediscover
         # the same conflict and integration into master is clean.
@@ -86,5 +90,8 @@ class ConcurrentTaskMergeTests(unittest.TestCase):
             (self.base / "shared.txt").read_text(encoding="utf-8"),
             resolved_content,
         )
-        self.assertEqual(len(Repo(str(self.base)).commit(second_commit).parents), 2)
-
+        base_repo = Repo(str(self.base))
+        try:
+            self.assertEqual(len(base_repo.commit(second_commit).parents), 2)
+        finally:
+            base_repo.close()

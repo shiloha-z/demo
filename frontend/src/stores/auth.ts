@@ -10,6 +10,10 @@ export const useAuthStore = defineStore('auth', () => {
   const userId = ref(Number(localStorage.getItem('userId')) || 0)
 
   const isLoggedIn = computed(() => !!token.value)
+  // The current authentication API does not expose a system-admin claim.
+  // Fail closed so unfinished debug-only administration UI cannot grant
+  // itself access based on client-controlled storage.
+  const isSystemAdmin = computed(() => false)
 
   function setUser(data: { token: string; username: string; display_name: string; user_id: number }) {
     token.value = data.token
@@ -55,5 +59,9 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('userId')
   }
 
-  return { token, username, displayName, avatarUrl, userId, isLoggedIn, setUser, updateDisplayName, loadAvatar, setAvatarUrl, logout }
+  return {
+    token, username, displayName, avatarUrl, userId,
+    isLoggedIn, isSystemAdmin,
+    setUser, updateDisplayName, loadAvatar, setAvatarUrl, logout,
+  }
 })

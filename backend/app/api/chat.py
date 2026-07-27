@@ -232,7 +232,7 @@ def send_message(
         broadcast_sync_to_project(project_id, "chat_message", payload)
 
     # Notify @mentioned users
-    _notify_mentions(message_text, user, project_id, db)
+    _notify_mentions(message_text, user, project_id, msg.id, db)
 
     return resp
 
@@ -268,7 +268,13 @@ def serve_chat_file(filename: str):
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
-def _notify_mentions(text: str, sender: User, project_id: int, db: Session) -> None:
+def _notify_mentions(
+    text: str,
+    sender: User,
+    project_id: int,
+    chat_message_id: int,
+    db: Session,
+) -> None:
     """Push message-centre notifications for every @username in *text*."""
     import re
     mentioned = set(re.findall(r"@(\w+)", text))
@@ -290,7 +296,10 @@ def _notify_mentions(text: str, sender: User, project_id: int, db: Session) -> N
                     level=MessageLevel.INFO,
                     project_id=project_id,
                     recipient_id=target.id,
-                    link="/dashboard",
+                    link=(
+                        f"/dashboard?project_id={project_id}&open_chat=team"
+                        f"&message_id={chat_message_id}"
+                    ),
                 )
             except Exception:
                 pass

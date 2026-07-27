@@ -1,6 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, computed, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import {
+  ref, onActivated, onDeactivated, onUnmounted,
+  watch, computed, nextTick,
+} from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -15,6 +18,7 @@ import { renderMarkdown } from '../utils/markdown'
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
 const router = useRouter()
+const route = useRoute()
 
 function goToReview(taskDetail: any) {
   if (taskDetail?.review?.id) {
@@ -145,7 +149,7 @@ async function planTask(t: any, ev?: Event) {
   const dialog = DialogPlugin.confirm({
     header: '自主任务规划',
     body: `将让规划模型把「${t.title}」拆解为多个子任务并自动派发执行。确定继续？`,
-    theme: 'primary',
+    theme: 'default',
     onConfirm: async () => {
       planning.value = new Set(planning.value).add(t.id)
       dialog.hide()
@@ -257,8 +261,11 @@ let unsubTask: (() => void) | null = null
 let unsubProgress: (() => void) | null = null
 let unsubStage: (() => void) | null = null
 let unsubGate: (() => void) | null = null
+let pageActive = false
+let loadedProjectId: number | null = null
 
-onMounted(() => {
+function subscribeRealtime() {
+  if (unsubTask) return
   unsubTask = wsStore.on('task_update', (data: any) => {
     const pid = store.currentProject?.id
     if (pid && data.project_id === pid) {
@@ -302,20 +309,55 @@ onMounted(() => {
       taskDetail.value.quality_gate = data
     }
   })
+}
+
+function unsubscribeRealtime() {
+  unsubTask?.()
+  unsubProgress?.()
+  unsubStage?.()
+  unsubGate?.()
+  unsubTask = null
+  unsubProgress = null
+  unsubStage = null
+  unsubGate = null
+  if (wsRefreshTimer) {
+    clearTimeout(wsRefreshTimer)
+    wsRefreshTimer = null
+  }
+}
+
+async function loadCurrentProject() {
+  const pid = store.currentProject?.id ?? null
+  if (!pid) {
+    tasks.value = []
+    archivedTasks.value = []
+    loadedProjectId = null
+    return
+  }
+  const hasCachedPage = loadedProjectId === pid
+  await loadTasks(hasCachedPage)
+  await loadAutoSequence()
+  loadedProjectId = pid
+}
+
+onActivated(() => {
+  pageActive = true
+  subscribeRealtime()
+  void loadCurrentProject()
 })
 
-onUnmounted(() => {
-  if (unsubTask) unsubTask()
-  if (unsubProgress) unsubProgress()
-  if (unsubStage) unsubStage()
-  if (unsubGate) unsubGate()
+onDeactivated(() => {
+  pageActive = false
+  unsubscribeRealtime()
 })
+
+onUnmounted(unsubscribeRealtime)
 
 watch(() => store.currentProject?.id, async (pid) => {
   if (!pid) { tasks.value = []; archivedTasks.value = []; return }
-  await loadTasks()
-  await loadAutoSequence()
-}, { immediate: true })
+  if (!pageActive) return
+  await loadCurrentProject()
+})
 
 // ── Auto-sequential execution ─────────────────────────────────────────
 const autoSequence = ref(false)
@@ -400,6 +442,7 @@ async function loadTasks(silent = false) {
     if (t.status === 'planning') planning.value = new Set(planning.value).add(t.id)
   }
   await refreshSubtrees(silent)
+  await selectTaskFromRoute()
 }
 
 // 后台 WS 事件频繁到达时，把多次刷新合并为一次（且静默，不触发顶部进度条）。
@@ -475,6 +518,37 @@ async function selectTask(task: any, silent = false) {
     loadingDetail.value = false
   }
 }
+
+async function selectTaskFromRoute() {
+  if (route.path !== '/tasks') return
+  const taskId = Number(route.query.task_id)
+  if (!taskId) return
+  const activeTask = tasks.value.find((task: any) => task.id === taskId)
+  const archivedTask = archivedTasks.value.find((task: any) => task.id === taskId)
+  let target = activeTask || archivedTask
+  if (!target && store.currentProject?.id) {
+    try {
+      const { data } = await api.get(
+        `/projects/${store.currentProject.id}/tasks/${taskId}`,
+        { silent: true },
+      )
+      target = data
+      tasks.value = [data, ...tasks.value.filter((task: any) => task.id !== data.id)]
+    } catch {
+      return
+    }
+  }
+  if (!target) return
+  statusFilter.value = 'all'
+  if (archivedTask) showArchived.value = true
+  await selectTask(target, true)
+}
+
+watch(() => route.query.task_id, async () => {
+  if (!pageActive || route.path !== '/tasks') return
+  if (loadedProjectId !== store.currentProject?.id) await loadCurrentProject()
+  else await selectTaskFromRoute()
+})
 
 async function archiveTask(task: any, event: Event) {
   event.stopPropagation()
@@ -845,7 +919,7 @@ async function resumeTask(task: any, event: Event) {
                       v-if="isParentState(t) || hasChildren(t)"
                       class="tree-toggle"
                       :class="{ rotated: expanded.has(t.id) }"
-                      @click.stop="toggleExpand(t, $event)"
+                      @click.stop="toggleExpand(t)"
                       title="展开/收起子任务"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
@@ -944,7 +1018,7 @@ async function resumeTask(task: any, event: Event) {
                   class="tree-toggle"
                   :class="{ rotated: expanded.has(t.id) }"
                   title="展开/收起子任务"
-                  @click="toggleExpand(t, $event)"
+                  @click.stop="toggleExpand(t)"
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
                 </button>

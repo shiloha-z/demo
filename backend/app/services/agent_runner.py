@@ -13,6 +13,7 @@ Supports multiple runner backends via agent.runner_type:
 import logging
 import time
 import math
+import json
 from datetime import datetime, timezone
 from app.core.database import SessionLocal
 from app.core.config import settings
@@ -686,10 +687,12 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
     from app.api.ws import broadcast_sync
     project_id = task.project_id
 
+    evidence = git.build_review_evidence(workspace, commit_hash) if commit_hash else {}
     review = Review(
         task_id=task.id,
         project_id=project_id,
         diff_content=diff,
+        evidence_json=json.dumps(evidence, ensure_ascii=False, sort_keys=True),
         agent_review_summary=summary,
     )
     db.add(review)
@@ -735,13 +738,21 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
             "review_id": review.id, "status": "passed", "checks": [],
         })
 
-    if mem:
+    if mem and gate_run.status == "passed":
         try:
-            memory_doc = f"Task #{task.id} ({task.title}) [{runner_type}]: {summary[:500]}"
+            evidence_digest = str(evidence.get("digest") or "")
+            memory_doc = (
+                f"Task #{task.id} ({task.title}) [{runner_type}] committed as "
+                f"{commit_hash}; deterministic quality gate passed; "
+                f"evidence_digest={evidence_digest}"
+            )
             memory_metadata = {
-                "type": "review_result", "task_id": str(task.id),
+                "type": "verified_task_result", "task_id": str(task.id),
                 "project_id": str(project_id), "agent_id": str(task.agent_id),
                 "runner_type": runner_type,
+                "verified": True,
+                "commit_hash": commit_hash or "",
+                "evidence_digest": evidence_digest,
             }
             mem.add_agent_memory(task.agent_id, memory_doc, memory_metadata)
             mem.add_project_memory(project_id, memory_doc, memory_metadata)
@@ -815,7 +826,7 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
             category=MessageCategory.REVIEW,
             level=MessageLevel.WARNING if gate_passed else MessageLevel.ERROR,
             project_id=project_id,
-            link=f"/reviews?task_id={task.id}",
+            link=f"/reviews?project_id={project_id}&task_id={task.id}",
         )
     except Exception as msg_err:
         logger.warning("Failed to push review notification message", exc_info=msg_err)
@@ -907,7 +918,7 @@ def _fail_task(db, task: Task | None, error: str, runner_type: str = "unknown"):
             category=MessageCategory.TASK,
             level=MessageLevel.ERROR,
             project_id=project_id,
-            link=f"/tasks",
+            link=f"/tasks?project_id={project_id}&task_id={task_id}",
         )
     except Exception as msg_err:
         logger.warning("Failed to push task-failure notification message", exc_info=msg_err)

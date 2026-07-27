@@ -3,7 +3,6 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
-import { useMessageStore } from '../stores/message'
 import api from '../api'
 
 const props = defineProps<{ collapsed: boolean }>()
@@ -11,7 +10,6 @@ const props = defineProps<{ collapsed: boolean }>()
 const route = useRoute()
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
-const msgStore = useMessageStore()
 
 const pendingCount = ref(0)
 
@@ -29,7 +27,7 @@ onMounted(async () => {
     if (store.switchableProjects.length === 0) await store.fetchSwitchableProjects()
   } catch { /* backend may not be ready yet */ }
   fetchPendingCount()
-  msgStore.refresh()
+  unsubReview = wsStore.on('review_update', () => fetchPendingCount())
 })
 
 // Refetch when project changes
@@ -37,17 +35,15 @@ watch(() => store.currentProject?.id, () => fetchPendingCount())
 
 // Listen for WebSocket events
 let unsubReview: (() => void) | null = null
-let unsubMessage: (() => void) | null = null
 watch(() => wsStore.connected, (ok) => {
   if (ok) {
-    unsubReview = wsStore.on('review_update', () => fetchPendingCount())
-    unsubMessage = wsStore.on('message_new', () => msgStore.refresh())
-    // Catch up on any messages that arrived while disconnected
-    msgStore.refresh()
+    // Catch up on events that may have arrived while disconnected. Event
+    // subscriptions themselves are registered once on mount.
+    fetchPendingCount()
   }
 }, { immediate: true })
 
-onUnmounted(() => { unsubReview?.(); unsubMessage?.() })
+onUnmounted(() => { unsubReview?.() })
 
 const selectedProjectId = computed({
   get: () => store.currentProject?.id ?? null,
@@ -190,6 +186,10 @@ const icons: Record<string, string> = {
   border: none; background: transparent; color: var(--foreground);
   font-size: 13px; font-weight: 500; font-family: var(--font-sans);
   outline: none; cursor: pointer;
+}
+.project-select option {
+  color: var(--foreground);
+  background: var(--surface);
 }
 
 .sidebar-nav {

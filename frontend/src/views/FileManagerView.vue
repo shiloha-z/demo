@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import {
+  ref, watch, onActivated, onDeactivated, onUnmounted, computed,
+} from 'vue'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import FileTree from '../components/FileTree.vue'
@@ -83,16 +85,21 @@ watch(() => store.currentProject?.id, () => {
 // Refresh the file tree when the backend reports a change to this project
 // (e.g. after a version rollback or an approved review merge).
 let unsubFileChange: (() => void) | null = null
-onMounted(() => {
+function subscribeFileChanges() {
+  if (unsubFileChange) return
   unsubFileChange = wsStore.on('file_change', (data: any) => {
     if (data?.project_id && data.project_id === selectedProjectId.value) {
       fileTreeRef.value?.loadFiles()
     }
   })
-})
-onUnmounted(() => {
+}
+function unsubscribeFileChanges() {
   unsubFileChange?.()
-})
+  unsubFileChange = null
+}
+onActivated(subscribeFileChanges)
+onDeactivated(unsubscribeFileChanges)
+onUnmounted(unsubscribeFileChanges)
 
 async function handleSelect(path: string) {
   if (!selectedProjectId.value) return

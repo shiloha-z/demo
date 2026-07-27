@@ -402,6 +402,7 @@ def transfer_ownership(
             category=MessageCategory.MEMBER,
             level=MessageLevel.WARNING,
             project_id=project_id,
+            link=f"/dashboard?project_id={project_id}&panel=members",
         )
     except Exception:
         pass

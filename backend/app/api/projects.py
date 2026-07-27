@@ -681,7 +681,10 @@ def apply_join_project(
             level=MessageLevel.INFO,
             project_id=project.id,
             recipient_id=project.owner_id,
-            link=f"/dashboard?join_request={join_req.id}",
+            link=(
+                f"/dashboard?project_id={project.id}&panel=members"
+                f"&join_request={join_req.id}"
+            ),
         )
     except Exception:
         pass

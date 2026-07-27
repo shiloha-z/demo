@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, onMounted, onUnmounted } from 'vue'
+import {
+  ref, watch, computed, nextTick, onActivated, onDeactivated, onUnmounted,
+} from 'vue'
+import { useRoute } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
@@ -8,11 +11,14 @@ import api from '../api'
 
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
+const route = useRoute()
 
 const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const versions = ref<any[]>([])
 const loading = ref(false)
 const rollingBack = ref<string | null>(null)
+const focusedVersionId = ref<number | null>(null)
+let pageActive = false
 
 // 审计责任链弹窗（按版本关联的任务）
 const chainVisible = ref(false)
@@ -30,17 +36,31 @@ async function openChainForVersion(v: any) {
 }
 
 watch(() => store.currentProject?.id, async (pid) => {
-  if (!pid) return
+  if (!pid || !pageActive) return
   await loadVersions()
-}, { immediate: true })
+})
 
 let unsubVersion: (() => void) | null = null
-onMounted(() => {
+function subscribeVersions() {
+  if (unsubVersion) return
   unsubVersion = wsStore.on('version_update', (data: any) => {
     if (data.project_id === selectedProjectId.value) loadVersions()
   })
+}
+function unsubscribeVersions() {
+  unsubVersion?.()
+  unsubVersion = null
+}
+onActivated(() => {
+  pageActive = true
+  subscribeVersions()
+  if (selectedProjectId.value) void loadVersions()
 })
-onUnmounted(() => { unsubVersion?.() })
+onDeactivated(() => {
+  pageActive = false
+  unsubscribeVersions()
+})
+onUnmounted(unsubscribeVersions)
 
 async function loadVersions() {
   if (!selectedProjectId.value) return
@@ -48,9 +68,28 @@ async function loadVersions() {
   try {
     const { data } = await api.get(`/projects/${selectedProjectId.value}/versions`)
     versions.value = data.items || data
+    await focusRouteVersion()
   } catch { versions.value = [] }
   finally { loading.value = false }
 }
+
+async function focusRouteVersion() {
+  if (route.path !== '/versions') return
+  const versionId = Number(route.query.version_id)
+  const commit = String(route.query.commit || '').toLowerCase()
+  const target = versions.value.find((version: any) => (
+    versionId ? version.id === versionId : commit && version.commit_hash.toLowerCase().startsWith(commit)
+  ))
+  focusedVersionId.value = target?.id ?? null
+  if (!target) return
+  await nextTick()
+  document.querySelector(`[data-version-id="${target.id}"]`)
+    ?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+watch([() => route.query.version_id, () => route.query.commit], () => {
+  void focusRouteVersion()
+})
 
 function rollback(v: any) {
   const confirmDialog = DialogPlugin.confirm({
@@ -118,7 +157,13 @@ function formatDate(d: string) {
 
     <!-- Timeline -->
     <div v-else class="timeline">
-      <div v-for="(v, i) in versions" :key="v.id" class="timeline-item">
+      <div
+        v-for="(v, i) in versions"
+        :key="v.id"
+        class="timeline-item"
+        :class="{ focused: focusedVersionId === v.id }"
+        :data-version-id="v.id"
+      >
         <div class="timeline-track">
           <div class="timeline-dot" :class="{ latest: i === 0 }"></div>
           <div v-if="i < versions.length - 1" class="timeline-line"></div>
@@ -201,6 +246,14 @@ function formatDate(d: string) {
   transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
 .timeline-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); }
+.timeline-item.focused .timeline-card {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-light), var(--shadow-card-hover);
+}
+.timeline-item.focused .timeline-dot {
+  background: var(--primary);
+  box-shadow: 0 0 0 4px var(--primary-light);
+}
 
 .card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .commit-hash {

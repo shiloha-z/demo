@@ -1,5 +1,7 @@
 import os
 import subprocess
+import json
+import hashlib
 from contextlib import contextmanager
 from functools import wraps
 from pathlib import Path
@@ -802,6 +804,212 @@ def diff_commit_vs_base(workspace: str, commit_hash: str) -> str:
         return repo.git.diff(base, commit_hash)
     except GitCommandError:
         return ""
+
+
+def _evidence_file_facts(
+    *,
+    path: str,
+    content: bytes | None,
+    blob_hash: str,
+    worktree_content: bytes | None,
+    worktree_blob_hash: str,
+) -> dict[str, Any]:
+    """Return deterministic facts for one file snapshot."""
+    exists = content is not None
+    binary = bool(content and b"\0" in content)
+    digest = hashlib.sha256(content or b"").hexdigest() if exists else ""
+    worktree_exists = worktree_content is not None
+    worktree_digest = (
+        hashlib.sha256(worktree_content or b"").hexdigest()
+        if worktree_exists
+        else ""
+    )
+    text = ""
+    if exists and not binary:
+        text = (content or b"").decode("utf-8", errors="replace")
+    nonempty_lines = [line for line in text.splitlines() if line.strip()]
+    is_readme = Path(path).name.lower() in {
+        "readme",
+        "readme.md",
+        "readme.rst",
+        "readme.txt",
+    }
+    placeholder = bool(
+        exists
+        and not binary
+        and is_readme
+        and (
+            text.strip() == "# Project Workspace"
+            or (
+                len(nonempty_lines) <= 2
+                and not any(line.startswith("##") for line in nonempty_lines)
+            )
+        )
+    )
+    if not exists:
+        line_count = 0
+    else:
+        raw = content or b""
+        line_count = raw.count(b"\n") + (
+            1 if raw and not raw.endswith(b"\n") else 0
+        )
+    conflict_markers = 0 if binary else sum(
+        1
+        for line in text.splitlines()
+        if (
+            line.startswith("<<<<<<< ")
+            or line == "======="
+            or line.startswith(">>>>>>> ")
+        )
+    )
+    return {
+        "path": path.replace("\\", "/"),
+        "exists": exists,
+        "bytes": len(content or b"") if exists else 0,
+        "line_count": line_count,
+        "sha256": digest,
+        "git_blob": blob_hash,
+        "binary": binary,
+        "placeholder": placeholder,
+        "conflict_markers": conflict_markers,
+        "worktree_exists": worktree_exists,
+        "worktree_sha256": worktree_digest,
+        "worktree_git_blob": worktree_blob_hash,
+        "worktree_matches_snapshot": (
+            worktree_exists == exists
+            and (not exists or worktree_blob_hash == blob_hash)
+        ),
+    }
+
+
+@_workspace_locked
+def build_review_evidence(workspace: str, ref: str = "") -> dict[str, Any]:
+    """Build a machine-verifiable manifest for a staged or committed review."""
+    repo = get_repo(workspace)
+    if not repo:
+        return {
+            "schema_version": 1,
+            "source": "unavailable",
+            "ref": ref,
+            "base": "",
+            "file_count": 0,
+            "files": [],
+            "digest": "",
+        }
+    base = _get_base_branch(repo)
+    try:
+        if ref:
+            snapshot_ref = repo.commit(ref).hexsha
+            changed = sorted(set(filter(
+                None,
+                repo.git.diff("--name-only", base, snapshot_ref).splitlines(),
+            )))
+            commit = repo.commit(snapshot_ref)
+            source = "commit"
+        else:
+            _stage_agent_changes(repo)
+            snapshot_ref = "INDEX"
+            changed = sorted(set(filter(
+                None,
+                repo.git.diff("--cached", "--name-only", base).splitlines(),
+            )))
+            commit = None
+            source = "index"
+
+        facts: list[dict[str, Any]] = []
+        root = Path(repo.working_dir)
+        for raw_path in changed[:500]:
+            path = raw_path.replace("\\", "/")
+            content: bytes | None = None
+            blob_hash = ""
+            if commit is not None:
+                try:
+                    blob = commit.tree / path
+                    if blob.type == "blob":
+                        content = blob.data_stream.read()
+                        blob_hash = blob.hexsha
+                except (KeyError, AttributeError):
+                    content = None
+            else:
+                entry = repo.index.entries.get((path, 0))
+                if entry is not None:
+                    blob_hash = entry.hexsha
+                    content = repo.odb.stream(entry.binsha).read()
+
+            worktree_path = root / Path(path)
+            try:
+                worktree_content = (
+                    worktree_path.read_bytes()
+                    if worktree_path.is_file()
+                    else None
+                )
+            except OSError:
+                worktree_content = None
+            worktree_blob_hash = ""
+            if worktree_content is not None:
+                try:
+                    worktree_blob_hash = repo.git.hash_object(
+                        "--path",
+                        path,
+                        str(worktree_path),
+                    ).strip()
+                except GitCommandError:
+                    worktree_blob_hash = ""
+            facts.append(_evidence_file_facts(
+                path=path,
+                content=content,
+                blob_hash=blob_hash,
+                worktree_content=worktree_content,
+                worktree_blob_hash=worktree_blob_hash,
+            ))
+
+        canonical = json.dumps(
+            facts,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return {
+            "schema_version": 1,
+            "source": source,
+            "ref": snapshot_ref,
+            "base": base,
+            "file_count": len(facts),
+            "files": facts,
+            "digest": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+        }
+    except (GitCommandError, ValueError):
+        return {
+            "schema_version": 1,
+            "source": "unavailable",
+            "ref": ref,
+            "base": base,
+            "file_count": 0,
+            "files": [],
+            "digest": "",
+        }
+    finally:
+        repo.close()
+
+
+def format_review_evidence(evidence: dict[str, Any]) -> str:
+    """Render a compact, prompt-safe view of an evidence manifest."""
+    lines = [
+        (
+            f"source={evidence.get('source', 'unavailable')} "
+            f"ref={evidence.get('ref', '')} "
+            f"digest={evidence.get('digest', '')} "
+            f"files={evidence.get('file_count', 0)}"
+        )
+    ]
+    for item in evidence.get("files", []):
+        lines.append(
+            "- {path} | exists={exists} lines={line_count} bytes={bytes} "
+            "sha256={sha256} blob={git_blob} binary={binary} "
+            "placeholder={placeholder} conflicts={conflict_markers} "
+            "worktree_match={worktree_matches_snapshot}".format(**item)
+        )
+    return "\n".join(lines)
 
 
 @_workspace_locked

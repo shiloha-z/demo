@@ -189,31 +189,64 @@ def enqueue_merge(task_id: int) -> bool:
         if project_id in _active_merge_projects:
             return False
         _active_merge_projects.add(project_id)
-    _merge_executor.submit(_drain_project_merges, project_id)
+    try:
+        _merge_executor.submit(_drain_project_merges, project_id)
+    except RuntimeError:
+        with _lock:
+            _active_merge_projects.discard(project_id)
+        return False
     return True
 
 
+def _next_queued_merge_task_id(project_id: int) -> int | None:
+    db = SessionLocal()
+    try:
+        task = (
+            db.query(Task)
+            .filter(
+                Task.project_id == project_id,
+                Task.status == TaskStatus.MERGE_QUEUED,
+            )
+            .order_by(Task.merge_queued_at.asc(), Task.id.asc())
+            .first()
+        )
+        return task.id if task else None
+    finally:
+        db.close()
+
+
+def _release_or_reclaim_merge_project(project_id: int) -> bool:
+    """Release an idle worker, reclaiming it if work arrived while it exited.
+
+    The database recheck happens while ``_lock`` blocks ``enqueue_merge``.
+    Therefore an enqueue either observes the existing worker, in which case
+    this recheck sees its durable row, or observes the released project and
+    starts a new worker. No queued task can be left without an owner.
+    """
+    with _lock:
+        _active_merge_projects.discard(project_id)
+        if _next_queued_merge_task_id(project_id) is None:
+            return False
+        _active_merge_projects.add(project_id)
+        return True
+
+
 def _drain_project_merges(project_id: int) -> None:
+    owns_project = True
     try:
         while True:
-            db = SessionLocal()
-            try:
-                task = (
-                    db.query(Task)
-                    .filter(Task.project_id == project_id, Task.status == TaskStatus.MERGE_QUEUED)
-                    .order_by(Task.merge_queued_at.asc(), Task.id.asc())
-                    .first()
-                )
-                task_id = task.id if task else None
-            finally:
-                db.close()
+            task_id = _next_queued_merge_task_id(project_id)
             if task_id is None:
+                if _release_or_reclaim_merge_project(project_id):
+                    continue
+                owns_project = False
                 return
             from app.services.merge_service import integrate_task
             integrate_task(task_id)
     finally:
-        with _lock:
-            _active_merge_projects.discard(project_id)
+        if owns_project:
+            with _lock:
+                _active_merge_projects.discard(project_id)
 
 
 def recover_merge_queue() -> None:

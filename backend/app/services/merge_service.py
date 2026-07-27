@@ -308,7 +308,7 @@ def integrate_task(task_id: int) -> None:
                 category=MessageCategory.TASK,
                 level=MessageLevel.WARNING,
                 project_id=project.id,
-                link=f"/tasks",
+                link=f"/tasks?project_id={project.id}&task_id={task.id}",
             )
         except Exception:
             pass

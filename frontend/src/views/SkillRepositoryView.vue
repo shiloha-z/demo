@@ -26,7 +26,6 @@ const formData = ref({ name: '', description: '', prompt_content: '' })
 const saving = ref(false)
 const showSkillHubDialog = ref(false)
 const showRemotePreview = ref(false)
-const skillHubConfigured = ref(false)
 const importInput = ref<HTMLInputElement | null>(null)
 const importingFile = ref(false)
 const remoteQuery = ref('')
@@ -207,6 +206,12 @@ async function previewRemoteSkill(skill: any) {
 }
 
 const scanResult = ref<any>(null)
+const severityLabels: Record<string, string> = {
+  critical: '严重',
+  high: '高危',
+  medium: '中危',
+  low: '低危',
+}
 
 async function importRemoteSkill() {
   if (!selectedRemote.value) return
@@ -414,7 +419,7 @@ function fmtTime(iso: string | null): string {
           </div>
           <div v-if="scanResult.findings.length > 0" class="scan-findings">
             <div v-for="(f, i) in scanResult.findings.slice(0, 5)" :key="i" class="scan-finding-item" :class="'sev-' + f.severity">
-              <span class="sev-tag">{{ {critical:'严重',high:'高危',medium:'中危',low:'低危'}[f.severity] || f.severity }}</span>
+              <span class="sev-tag">{{ severityLabels[String(f.severity)] || f.severity }}</span>
               <span class="finding-msg">{{ f.message }}</span>
               <span v-if="f.line" class="finding-line">L{{ f.line }}</span>
             </div>

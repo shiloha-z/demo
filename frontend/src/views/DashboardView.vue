@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onActivated, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import MemberManager from '../components/MemberManager.vue'
@@ -9,6 +9,7 @@ import api from '../api'
 
 const store = useProjectStore()
 const router = useRouter()
+const route = useRoute()
 const dialogVisible = ref(false)
 const newProject = ref({ name: '', description: '', workspace_name: '' })
 const creating = ref(false)
@@ -82,7 +83,10 @@ async function loadDashboard() {
   }
 }
 
-onMounted(loadDashboard)
+onMounted(async () => {
+  await loadDashboard()
+  handleRoutePanel()
+})
 
 // Returning to a cached dashboard is instant. Reconcile only when its summary
 // has been inactive long enough to be meaningfully stale.
@@ -90,7 +94,22 @@ onActivated(() => {
   if (dashboardLoadedAt > 0 && Date.now() - dashboardLoadedAt > 60_000) {
     loadDashboard()
   }
+  handleRoutePanel()
 })
+
+function handleRoutePanel() {
+  if (route.path !== '/dashboard') return
+  const projectId = Number(route.query.project_id)
+  if (!projectId) return
+  const project = store.projects.find(item => item.id === projectId)
+  if (!project) return
+  if (route.query.panel === 'members') openMembers(project)
+}
+
+watch(
+  [() => route.query.project_id, () => route.query.panel, () => store.projects],
+  handleRoutePanel,
+)
 
 watch(() => store.sortBy, () => { store.fetchProjects(); loadStats() })
 

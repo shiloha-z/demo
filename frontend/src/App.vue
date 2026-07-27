@@ -56,8 +56,13 @@ const pageTitles: Record<string, string> = {
 }
 
 const currentPageTitle = computed(() => pageTitles[route.path] || '')
+const focusedChatMessageId = computed(() => {
+  const id = Number(route.query.message_id)
+  return Number.isFinite(id) && id > 0 ? id : null
+})
 
 let unsubProject: (() => void) | null = null
+let unsubMessage: (() => void) | null = null
 
 async function refreshProjects() {
   const currentId = projectStore.currentProject?.id
@@ -75,9 +80,17 @@ function joinCurrentProject() {
   }
 }
 
+function toggleChat() {
+  chatVisible.value = !chatVisible.value
+}
+
 onMounted(() => {
   if (!isLoginPage.value) ws.connect()
   unsubProject = ws.on('project_update', refreshProjects)
+  unsubMessage = ws.on('message_new', (message) => {
+    msgStore.receive(message)
+    void msgStore.refresh()
+  })
   // Initial notification count + periodic polling fallback
   msgStore.refresh()
   pollNotifTimer = setInterval(() => msgStore.refresh(), 30_000)
@@ -91,6 +104,26 @@ watch(isLoginPage, (isLogin) => {
   if (isLogin) ws.disconnect()
   else ws.connect()
 })
+
+watch(() => route.query.project_id, async (rawProjectId) => {
+  if (isLoginPage.value) return
+  const projectId = Number(rawProjectId)
+  if (!projectId || projectStore.currentProject?.id === projectId) return
+  let project = projectStore.switchableProjects.find(item => item.id === projectId)
+  if (!project) {
+    try {
+      await projectStore.fetchSwitchableProjects()
+      project = projectStore.switchableProjects.find(item => item.id === projectId)
+    } catch {
+      return
+    }
+  }
+  if (project) projectStore.setCurrentProject(project)
+}, { immediate: true })
+
+watch(() => route.query.open_chat, (openChat) => {
+  if (openChat === 'team' || openChat === 'dm') chatVisible.value = true
+}, { immediate: true })
 
 watch([() => ws.connected, () => projectStore.currentProject?.id], joinCurrentProject, { immediate: true })
 
@@ -115,12 +148,15 @@ watch(() => route.name, async (nextName, previousName) => {
 
 onUnmounted(() => {
   unsubProject?.()
+  unsubMessage?.()
   ws.disconnect()
   if (pollNotifTimer) { clearInterval(pollNotifTimer); pollNotifTimer = null }
 })
 
 function handleLogout() {
   ws.disconnect()
+  msgStore.reset()
+  notifStore.resetChatUnread()
   auth.logout()
   router.push('/login')
 }
@@ -232,18 +268,19 @@ function handleLogout() {
         <div class="topbar-right">
           <button
             class="topbar-icon-btn notif-toggle-btn"
-            :title="`通知 (${notifStore.total})`"
+            :title="`通知 (${msgStore.unreadCount})`"
             @click="notifDropdownVisible = !notifDropdownVisible"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span class="notif-badge" v-if="notifStore.total > 0">{{ notifStore.total > 99 ? '99+' : notifStore.total }}</span>
+            <span class="notif-badge" v-if="msgStore.unreadCount > 0">{{ msgStore.unreadCount > 99 ? '99+' : msgStore.unreadCount }}</span>
           </button>
           <button
             class="topbar-icon-btn chat-toggle-btn"
-            :title="chatVisible ? '关闭聊天' : '打开聊天'"
-            @click="chatVisible = !chatVisible; if (chatVisible) notifStore.resetChatUnread()"
+            :title="chatVisible ? '关闭聊天' : `打开聊天 (${notifStore.chatUnread})`"
+            @click="toggleChat"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <span class="notif-badge" v-if="notifStore.chatUnread > 0">{{ notifStore.chatUnread > 99 ? '99+' : notifStore.chatUnread }}</span>
           </button>
           <button class="topbar-icon-btn" :title="theme.isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="theme.toggleDark()">
             <svg v-if="theme.isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
@@ -270,7 +307,12 @@ function handleLogout() {
       </main>
     </div>
 
-    <ChatSidebar v-model:visible="chatVisible" @unread-count="notifStore.incrementChatUnread()" />
+    <ChatSidebar
+      v-model:visible="chatVisible"
+      :focus-message-id="focusedChatMessageId"
+      @unread-count="notifStore.incrementChatUnread"
+      @conversation-viewed="notifStore.clearChatUnread"
+    />
     <NotificationDropdown :visible="notifDropdownVisible" @close="notifDropdownVisible = false" />
   </div>
 </template>

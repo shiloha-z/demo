@@ -86,7 +86,6 @@ class MemoryRecordTool(BaseTool):
     def _run(self, input_str: str) -> str:
         from app.services.memory_service import (
             add_agent_memory,
-            add_global_memory,
             add_project_memory,
             add_task_memory,
         )
@@ -111,8 +110,10 @@ class MemoryRecordTool(BaseTool):
             uid = add_agent_memory(self.agent_id, content, metadata)
             return f"✅ 已记录到 Agent 记忆 [{uid}]" if uid else "Agent 记忆不可用"
         if scope == "global":
-            uid = add_global_memory(content, metadata)
-            return f"✅ 已记录到全局记忆 [{uid}]"
+            # Cross-project facts require platform-side verification. Allowing
+            # an LLM to promote its own observation created self-reinforcing
+            # review hallucinations.
+            return "全局记忆写入被拒绝：需要平台确定性验证后提升"
         else:
             uid = add_project_memory(self.project_id, content, metadata)
             return f"✅ 已记录到项目记忆 [{uid}]"
