@@ -185,18 +185,28 @@ const previewContent = ref('')
 async function previewRemoteSkill(skill: any) {
   selectedRemote.value = skill
   previewContent.value = ''
+  scanResult.value = null
   showRemotePreview.value = true
   // Fetch full SKILL.md content from Agent Skills Hub
   previewContentLoading.value = true
   try {
     const { data } = await api.get(`/skills/skillhub/content/${remoteId(skill)}`)
     previewContent.value = data.content || ''
+    // Run security scan on the fetched content
+    if (previewContent.value) {
+      try {
+        const scanResp = await api.post('/skills/scan-content', { name: remoteName(skill), content: previewContent.value })
+        scanResult.value = scanResp.data
+      } catch { scanResult.value = null }
+    }
   } catch {
     previewContent.value = ''
   } finally {
     previewContentLoading.value = false
   }
 }
+
+const scanResult = ref<any>(null)
 
 async function importRemoteSkill() {
   if (!selectedRemote.value) return
@@ -267,6 +277,17 @@ async function importSkill(event: Event) {
   }
 }
 
+function scanBadge(skill: any): { status: string; label: string } | null {
+  if (!skill.security_scan_result) return null
+  try {
+    const r = typeof skill.security_scan_result === 'string' ? JSON.parse(skill.security_scan_result) : skill.security_scan_result
+    if (r.status === 'safe') return { status: 'safe', label: '✅ 安全' }
+    if (r.status === 'warning') return { status: 'warning', label: `⚠️ ${r.findings?.length || 0} 风险` }
+    if (r.status === 'danger') return { status: 'danger', label: `🚫 ${r.critical_count || 0} 严重` }
+  } catch { return null }
+  return null
+}
+
 function fmtTime(iso: string | null): string {
   if (!iso) return ''
   const d = new Date(iso)
@@ -330,6 +351,7 @@ function fmtTime(iso: string | null): string {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
           </div>
           <h3 class="skill-name">{{ s.name }}</h3>
+          <span v-if="scanBadge(s)" class="scan-card-badge" :class="'scan-card-' + scanBadge(s)!.status">{{ scanBadge(s)!.label }}</span>
         </div>
 
         <p v-if="s.description" class="skill-desc">{{ truncate(s.description, 120) }}</p>
@@ -383,6 +405,22 @@ function fmtTime(iso: string | null): string {
         </div>
         <div v-if="previewContentLoading" class="remote-empty">正在加载技能详情…</div>
         <pre v-else class="remote-preview-content">{{ previewContent || remoteContent(selectedRemote) || '未返回完整内容；将导入当前简介。' }}</pre>
+        <!-- Security scan result -->
+        <div v-if="scanResult" class="scan-result" :class="'scan-' + scanResult.status">
+          <div class="scan-result-header">
+            <span v-if="scanResult.status === 'safe'" class="scan-badge safe">✅ 安全检测通过</span>
+            <span v-else-if="scanResult.status === 'warning'" class="scan-badge warning">⚠️ 发现 {{ scanResult.findings.length }} 个风险项</span>
+            <span v-else class="scan-badge danger">🚫 发现 {{ scanResult.critical_count }} 个严重风险</span>
+          </div>
+          <div v-if="scanResult.findings.length > 0" class="scan-findings">
+            <div v-for="(f, i) in scanResult.findings.slice(0, 5)" :key="i" class="scan-finding-item" :class="'sev-' + f.severity">
+              <span class="sev-tag">{{ {critical:'严重',high:'高危',medium:'中危',low:'低危'}[f.severity] || f.severity }}</span>
+              <span class="finding-msg">{{ f.message }}</span>
+              <span v-if="f.line" class="finding-line">L{{ f.line }}</span>
+            </div>
+            <div v-if="scanResult.findings.length > 5" class="scan-more">另有 {{ scanResult.findings.length - 5 }} 项未展示</div>
+          </div>
+        </div>
         <div class="dialog-footer">
           <t-button theme="default" variant="text" @click="showRemotePreview = false">取消</t-button>
           <t-button theme="primary" :loading="importingRemote" @click="importRemoteSkill">导入到本地仓库</t-button>
@@ -593,4 +631,64 @@ function fmtTime(iso: string | null): string {
   gap: 8px;
   margin-top: 16px;
 }
+
+/* ── Security scan results ───────────────────────────────────────── */
+.scan-result {
+  margin: 10px 0 0;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.scan-result.scan-safe { border: 1px solid #22c55e33; background: #22c55e0d; }
+.scan-result.scan-warning { border: 1px solid #eab30833; background: #eab3080d; }
+.scan-result.scan-danger { border: 1px solid #ef444433; background: #ef44440d; }
+
+.scan-result-header {
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.scan-badge.safe { color: #16a34a; }
+.scan-badge.warning { color: #ca8a04; }
+.scan-badge.danger { color: #dc2626; }
+
+.scan-findings { padding: 0 12px 8px; }
+.scan-finding-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--surface-border);
+}
+.scan-finding-item:last-child { border-bottom: none; }
+
+.sev-tag {
+  display: inline-block;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.sev-critical .sev-tag { color: #dc2626; background: #dc262622; }
+.sev-high .sev-tag { color: #ea580c; background: #ea580c22; }
+.sev-medium .sev-tag { color: #ca8a04; background: #ca8a0422; }
+.sev-low .sev-tag { color: #6b7280; background: #6b728022; }
+
+.finding-msg { flex: 1; color: var(--foreground); }
+.finding-line { color: var(--muted-foreground); font-size: 11px; }
+.scan-more { padding: 4px 0 0; font-size: 11px; color: var(--muted-foreground); }
+
+/* ── Scan badge on skill cards ──────────────────────────────────── */
+.scan-card-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.scan-card-safe { color: #16a34a; background: #22c55e18; }
+.scan-card-warning { color: #ca8a04; background: #eab30818; }
+.scan-card-danger { color: #dc2626; background: #ef444418; }
 </style>

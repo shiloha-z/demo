@@ -189,6 +189,7 @@ class Skill(Base):
     source = Column(String(30), default="local", nullable=False)
     source_id = Column(String(300), default="")
     source_url = Column(String(1000), default="")
+    security_scan_result = Column(Text, default="")  # JSON from skill_security_service
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 

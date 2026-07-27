@@ -8,8 +8,11 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.auth import get_current_user
 from app.core.pagination import paginate
+import json
+
 from app.models.models import User, Skill
 from app.services import skillhub_service
+from app.services import skill_security_service
 
 router = APIRouter(prefix="/api/skills", tags=["Skills"])
 
@@ -36,19 +39,16 @@ class SkillResponse(BaseModel):
     source: str = "local"
     source_id: str = ""
     source_url: str = ""
+    security_scan_result: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
     class Config:
         from_attributes = True
 
-    @field_validator("source_id", "source_url", "description", "prompt_content", mode="before")
+    @field_validator("source_id", "source_url", "description", "prompt_content", "security_scan_result", mode="before")
     @classmethod
     def _empty_string_default(cls, v: object) -> object:
-        # Legacy rows migrated via additive ALTER TABLE can hold NULL in columns
-        # that the ORM declares as non-nullable strings. Pydantic's `from_attributes`
-        # would otherwise surface a ResponseValidationError -> HTTP 500 on the list
-        # endpoint. Normalise NULL to the safe default so the API never 500s on data.
         return v if v is not None else ""
 
     @field_validator("source", mode="before")
@@ -77,6 +77,30 @@ def _skillhub_error(exc: skillhub_service.SkillHubError) -> HTTPException:
     return HTTPException(status_code=status_code, detail=str(exc))
 
 
+def _run_security_scan(skill: Skill) -> dict:
+    """Run security scan on *skill* content, persist the result, return it."""
+    result = skill_security_service.scan_skill_content(skill.name, skill.prompt_content or "")
+    skill.security_scan_result = json.dumps(result.to_dict(), ensure_ascii=False)
+    return result
+
+
+def _skill_to_response(skill: Skill) -> dict:
+    """Build a response dict including parsed security scan result."""
+    data = {
+        "id": skill.id,
+        "name": skill.name,
+        "description": skill.description or "",
+        "prompt_content": skill.prompt_content or "",
+        "source": skill.source or "local",
+        "source_id": skill.source_id or "",
+        "source_url": skill.source_url or "",
+        "security_scan_result": skill.security_scan_result or "",
+        "created_at": skill.created_at,
+        "updated_at": skill.updated_at,
+    }
+    return data
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("")
@@ -89,6 +113,23 @@ def list_skills(
     q = db.query(Skill).filter(Skill.creator_id == user.id).order_by(Skill.updated_at.desc())
     skills, paging = paginate(q, page, page_size)
     return {"items": skills, **paging}
+
+
+class ScanContentRequest(BaseModel):
+    name: str = Field(default="", max_length=100)
+    content: str = Field(default="")
+
+
+@router.post("/scan-content")
+def scan_skill_content(
+    req: ScanContentRequest,
+    user: User = Depends(get_current_user),
+):
+    """Run the security scanner on arbitrary content without saving.
+    Returns findings so the frontend can preview them before import.
+    """
+    result = skill_security_service.scan_skill_content(req.name or "preview", req.content)
+    return result.to_dict()
 
 
 @router.get("/skillhub/status")
@@ -175,6 +216,7 @@ def import_skillhub_skill(
         source_id=req.source_id,
         source_url=req.source_url,
     )
+    _run_security_scan(skill)
     try:
         db.add(skill)
         db.commit()
@@ -185,7 +227,7 @@ def import_skillhub_skill(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"导入技能失败：{exc}",
         )
-    return skill
+    return _skill_to_response(skill)
 
 
 @router.get("/{skill_id}", response_model=SkillResponse)
@@ -212,6 +254,7 @@ def create_skill(
         description=req.description,
         prompt_content=req.prompt_content,
     )
+    _run_security_scan(skill)
     try:
         db.add(skill)
         db.commit()
@@ -222,7 +265,7 @@ def create_skill(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建技能失败：{exc}",
         )
-    return skill
+    return _skill_to_response(skill)
 
 
 @router.put("/{skill_id}", response_model=SkillResponse)
@@ -239,6 +282,7 @@ def update_skill(
     skill.name = req.name
     skill.description = req.description
     skill.prompt_content = req.prompt_content
+    _run_security_scan(skill)
     try:
         db.commit()
         db.refresh(skill)
@@ -248,7 +292,7 @@ def update_skill(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新技能失败：{exc}",
         )
-    return skill
+    return _skill_to_response(skill)
 
 
 @router.delete("/{skill_id}")
@@ -270,6 +314,29 @@ def delete_skill(
             detail=f"删除技能失败：{exc}",
         )
     return {"message": "Deleted"}
+
+
+@router.post("/{skill_id}/rescan", response_model=SkillResponse)
+def rescan_skill(
+    skill_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Re-run the security scan on an existing skill and return updated results."""
+    skill = db.query(Skill).filter(Skill.id == skill_id, Skill.creator_id == user.id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    result = _run_security_scan(skill)
+    try:
+        db.commit()
+        db.refresh(skill)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"重新扫描失败：{exc}",
+        )
+    return _skill_to_response(skill)
 
 
 class SkillImportRequest(BaseModel):
@@ -316,6 +383,7 @@ def import_skill(
         prompt_content=source.prompt_content or "",
         source="local",
     )
+    _run_security_scan(skill)
     db.add(skill)
     try:
         db.commit()
@@ -323,14 +391,4 @@ def import_skill(
     except SQLAlchemyError as exc:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"导入失败：{exc}")
-    return SkillResponse(
-        id=skill.id,
-        name=skill.name,
-        description=skill.description or "",
-        prompt_content=skill.prompt_content or "",
-        source=skill.source or "local",
-        source_id=skill.source_id or "",
-        source_url=skill.source_url or "",
-        created_at=skill.created_at,
-        updated_at=skill.updated_at,
-    )
+    return _skill_to_response(skill)
