@@ -2,14 +2,15 @@ import os
 import uuid
 from datetime import datetime
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.auth import get_current_user
-from app.models.models import User, ChatMessage
+from app.core.permissions import require_project_member
+from app.models.models import User, ChatMessage, Project, ProjectMember
 from app.api.ws import broadcast_sync, broadcast_sync_to_project
 
 router = APIRouter(prefix="/api", tags=["Chat"])
@@ -25,9 +26,9 @@ def _avatar_url(value: str | None) -> str:
 _UPLOAD_DIR = Path(__file__).resolve().parent.parent.parent / "uploads" / "chat"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 20 MB
-_ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"}
+_ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
 _ALLOWED_FILE_EXTENSIONS = {
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp",
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
     ".txt", ".md", ".csv", ".json", ".xml", ".yaml", ".yml",
     ".zip", ".rar", ".7z", ".tar", ".gz",
@@ -90,12 +91,16 @@ class ChatMessageResponse(BaseModel):
 def get_messages(
     project_id: int,
     recipient_id: int | None = None,
-    limit: int = 50,
-    before_id: int | None = None,
+    limit: int = Query(50, ge=1, le=100),
+    before_id: int | None = Query(None, gt=0),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Get recent chat messages. Team chat by default; pass `recipient_id` for DM."""
+    require_project_member(project_id, user, db)
+    if recipient_id is not None:
+        _require_project_recipient(project_id, recipient_id, user, db)
+
     q = db.query(ChatMessage).filter(
         ChatMessage.project_id == project_id,
         ChatMessage.recipient_id == recipient_id,  # None = team, int = DM
@@ -126,31 +131,34 @@ def get_project_members(
     user: User = Depends(get_current_user),
 ):
     """Return project members for @mention and DM selection."""
-    from app.models.models import Project, ProjectMember
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project = require_project_member(project_id, user, db)
     members = []
+    seen_user_ids = {user.id}
     # Owner
     owner = db.query(User).filter(User.id == project.owner_id).first()
-    if owner and owner.id != user.id:
+    if owner and owner.id not in seen_user_ids:
         members.append({"id": owner.id, "username": owner.username, "display_name": owner.display_name or owner.username, "avatar_url": _avatar_url(owner.avatar_url), "role": "owner"})
+        seen_user_ids.add(owner.id)
     # Members
     rows = db.query(ProjectMember, User).join(User, ProjectMember.user_id == User.id).filter(
         ProjectMember.project_id == project_id
     ).all()
     for pm, u in rows:
-        if u.id != user.id:
+        if u.id not in seen_user_ids:
             members.append({"id": u.id, "username": u.username, "display_name": u.display_name or u.username, "avatar_url": _avatar_url(u.avatar_url), "role": pm.role.value if hasattr(pm.role, 'value') else str(pm.role)})
+            seen_user_ids.add(u.id)
     return {"members": members}
 
 
 @router.post("/chat/upload")
 def upload_chat_file(
+    project_id: int = Form(...),
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """Upload a file for chat sharing. Returns file metadata."""
+    require_project_member(project_id, user, db)
     # Validate size
     file.file.seek(0, 2)
     size = file.file.tell()
@@ -173,7 +181,7 @@ def upload_chat_file(
 
     # Determine if image
     content_type = file.content_type or ""
-    is_image = content_type in _ALLOWED_IMAGE_TYPES or ext in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+    is_image = content_type in _ALLOWED_IMAGE_TYPES or ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
     return {
         "file_url": f"/api/chat/file/{safe_name}",
@@ -196,6 +204,10 @@ def send_message(
     file_size: int = Form(0),
 ):
     """Send a chat message. Set `recipient_id` for private DM; omit for team chat."""
+    require_project_member(project_id, user, db)
+    if recipient_id is not None:
+        _require_project_recipient(project_id, recipient_id, user, db)
+
     message_text = message.strip()
     file_url_str = file_url.strip()
     file_name_str = file_name.strip()
@@ -205,6 +217,16 @@ def send_message(
         raise HTTPException(status_code=400, detail="Message or file is required")
     if len(message_text) > 2000:
         raise HTTPException(status_code=400, detail="Message too long (max 2000 chars)")
+    if len(file_name_str) > 200:
+        raise HTTPException(status_code=400, detail="File name too long")
+    if file_size < 0 or file_size > _MAX_FILE_SIZE:
+        raise HTTPException(status_code=400, detail="Invalid file size")
+    if file_url_str:
+        _validate_uploaded_file_url(file_url_str)
+        if file_type_str not in {"image", "file"}:
+            raise HTTPException(status_code=400, detail="Invalid file type")
+    elif file_name_str or file_type_str or file_size:
+        raise HTTPException(status_code=400, detail="File metadata requires a file URL")
 
     msg = ChatMessage(
         user_id=user.id,
@@ -232,34 +254,37 @@ def send_message(
         broadcast_sync_to_project(project_id, "chat_message", payload)
 
     # Notify @mentioned users
-    _notify_mentions(message_text, user, project_id, msg.id, db)
+    if recipient_id is None:
+        _notify_mentions(message_text, user, project_id, msg.id, db)
 
     return resp
 
 
 @router.get("/chat/online")
 def get_online_users(
-    project_id: int | None = None,
+    project_id: int,
+    db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Get list of currently online users. Optionally filter by project."""
+    """Get online users in a project."""
+    require_project_member(project_id, user, db)
     from app.api.ws import manager
-    if project_id is not None:
-        return {"online_users": manager.get_online_users_in_project(project_id)}
-    return {"online_users": manager.get_online_users()}
+    return {"online_users": manager.get_online_users_in_project(project_id)}
 
 
 @router.get("/chat/file/{filename}")
 def serve_chat_file(filename: str):
     """Serve an uploaded chat file."""
-    file_path = _UPLOAD_DIR / filename
-    if not file_path.exists() or not file_path.is_file():
+    if not filename or filename != Path(filename).name:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_path = (_UPLOAD_DIR / filename).resolve()
+    if file_path.parent != _UPLOAD_DIR.resolve() or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     # Determine MIME type
     ext = file_path.suffix.lower()
     mime_map = {
         ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        ".gif": "image/gif", ".webp": "image/webp",
         ".pdf": "application/pdf",
     }
     media_type = mime_map.get(ext, "application/octet-stream")
@@ -267,6 +292,39 @@ def serve_chat_file(filename: str):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+
+def _require_project_recipient(
+    project_id: int,
+    recipient_id: int,
+    sender: User,
+    db: Session,
+) -> User:
+    """Return a valid DM recipient who belongs to the same project."""
+    if recipient_id == sender.id:
+        raise HTTPException(status_code=400, detail="Cannot send a private message to yourself")
+    recipient = db.query(User).filter(User.id == recipient_id).first()
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+    try:
+        require_project_member(project_id, recipient, db)
+    except HTTPException as exc:
+        if exc.status_code == 403:
+            raise HTTPException(status_code=400, detail="Recipient is not a project member") from exc
+        raise
+    return recipient
+
+
+def _validate_uploaded_file_url(file_url: str) -> None:
+    """Only allow references to files created by the chat upload endpoint."""
+    prefix = "/api/chat/file/"
+    if not file_url.startswith(prefix):
+        raise HTTPException(status_code=400, detail="Invalid chat file URL")
+    filename = file_url[len(prefix):]
+    if not filename or filename != Path(filename).name:
+        raise HTTPException(status_code=400, detail="Invalid chat file URL")
+    file_path = (_UPLOAD_DIR / filename).resolve()
+    if file_path.parent != _UPLOAD_DIR.resolve() or not file_path.is_file():
+        raise HTTPException(status_code=400, detail="Uploaded chat file not found")
 
 def _notify_mentions(
     text: str,
@@ -280,14 +338,13 @@ def _notify_mentions(
     mentioned = set(re.findall(r"@(\w+)", text))
     if not mentioned:
         return
-    from app.models.models import Project
     from app.services import message_service as msg
     from app.models.models import MessageCategory, MessageLevel
     project = db.query(Project).filter(Project.id == project_id).first()
     project_name = project.name if project else f"项目 #{project_id}"
     for username in mentioned:
         target = db.query(User).filter(User.username == username).first()
-        if target and target.id != sender.id:
+        if target and target.id != sender.id and _user_belongs_to_project(project, target.id, db):
             try:
                 msg.push(
                     title=f"{sender.username} @ 了你",
@@ -303,3 +360,14 @@ def _notify_mentions(
                 )
             except Exception:
                 pass
+
+
+def _user_belongs_to_project(project: Project | None, user_id: int, db: Session) -> bool:
+    if not project:
+        return False
+    if project.owner_id == user_id:
+        return True
+    return db.query(ProjectMember.id).filter(
+        ProjectMember.project_id == project.id,
+        ProjectMember.user_id == user_id,
+    ).first() is not None

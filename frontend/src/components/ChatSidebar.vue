@@ -3,7 +3,8 @@ import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useWebSocketStore } from '../stores/websocket'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
-import api from '../api'
+import { MessagePlugin } from 'tdesign-vue-next'
+import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
 const props = defineProps<{
@@ -94,9 +95,31 @@ function handleMentionKeydown(e: KeyboardEvent) {
 
 function renderMsgWithMentions(text: string): string {
   if (!text) return ''
-  let html = renderMsg(text)
-  html = html.replace(/@(\w+)/g, '<span class="mention-tag">@$1</span>')
-  return html
+  const html = renderMsg(text)
+  const template = document.createElement('template')
+  template.innerHTML = html
+  const walker = document.createTreeWalker(template.content, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  let node: Node | null
+  while ((node = walker.nextNode())) textNodes.push(node as Text)
+  for (const textNode of textNodes) {
+    if (textNode.parentElement?.closest('code, pre, a')) continue
+    const parts = textNode.data.split(/(@\w+)/g)
+    if (parts.length === 1) continue
+    const fragment = document.createDocumentFragment()
+    for (const part of parts) {
+      if (/^@\w+$/.test(part)) {
+        const span = document.createElement('span')
+        span.className = 'mention-tag'
+        span.textContent = part
+        fragment.appendChild(span)
+      } else {
+        fragment.appendChild(document.createTextNode(part))
+      }
+    }
+    textNode.replaceWith(fragment)
+  }
+  return template.innerHTML
 }
 
 interface ChatMsg {
@@ -154,6 +177,7 @@ const scrollEl = ref<HTMLElement>()
 const loading = ref(false)
 const hasMore = ref(true)
 const showOnlineUsers = ref(true)
+const newMessagesBelow = ref(0)
 const fileInput = ref<HTMLInputElement>()
 const uploading = ref(false)
 const lightboxImage = ref<string | null>(null)
@@ -214,6 +238,9 @@ onUnmounted(() => {
   unsubOnline?.()
   unsubOffline?.()
   unsubTyping?.()
+  sendTyping(false)
+  if (typingTimer) clearTimeout(typingTimer)
+  for (const entry of typingUsers.value.values()) clearTimeout(entry.timer)
   if (focusTimer) clearTimeout(focusTimer)
   document.removeEventListener('paste', onGlobalPaste)
 })
@@ -226,21 +253,34 @@ watch(() => projectStore.currentProject?.id, (newId, oldId) => {
     // No project selected — clear chat
     messages.value = []
     onlineUsers.value = []
+    members.value = []
+    newMessagesBelow.value = 0
+  }
+})
+
+watch(() => ws.connected, (connected, wasConnected) => {
+  const projectId = projectStore.currentProject?.id
+  if (connected && wasConnected === false && projectId != null) {
+    void rejoinAndReconcile(projectId)
   }
 })
 
 function switchToTeam() {
+  sendTyping(false)
   chatMode.value = 'team'
   dmUser.value = null
   messages.value = []
+  newMessagesBelow.value = 0
   void loadMessages()
   markActiveConversationViewed()
 }
 
 function switchToDM(user: typeof members.value[0]) {
+  sendTyping(false)
   chatMode.value = 'dm'
   dmUser.value = user
   messages.value = []
+  newMessagesBelow.value = 0
   void loadMessages()
   markActiveConversationViewed()
 }
@@ -252,10 +292,20 @@ async function joinProjectRoom(projectId: number) {
   messages.value = []
   chatMode.value = 'team'
   dmUser.value = null
+  inputText.value = ''
+  mentionActive.value = false
+  newMessagesBelow.value = 0
   await loadMessages()
   await loadOnlineUsers()
-  loadMembers()
+  await loadMembers()
   markActiveConversationViewed()
+}
+
+async function rejoinAndReconcile(projectId: number) {
+  try {
+    ws.send(JSON.stringify({ type: 'join_project', project_id: projectId }))
+  } catch { /* connection state is checked by the watcher */ }
+  await Promise.all([reconcileLatestMessages(), loadOnlineUsers(), loadMembers()])
 }
 
 function setupWS() {
@@ -264,14 +314,24 @@ function setupWS() {
     if (currentPid == null || data.project_id !== currentPid) return
     const belongsToActiveConversation =
       conversationKeyForMessage(data) === activeConversationKey()
-    if (data.user_id !== auth.userId && (!props.visible || !belongsToActiveConversation)) {
-      emit('unreadCount', conversationKeyForMessage(data))
+    const wasNearBottom = isNearBottom()
+    if (!belongsToActiveConversation) {
+      if (data.user_id !== auth.userId) {
+        emit('unreadCount', conversationKeyForMessage(data))
+      }
+      return
     }
-    if (!belongsToActiveConversation) return
     if (!messages.value.some(m => m.id === data.id)) {
       messages.value.push(data)
-      if (props.visible) markActiveConversationViewed()
-      scrollToBottom()
+      const isOwnMessage = data.user_id === auth.userId
+      if (isOwnMessage || (props.visible && wasNearBottom)) {
+        newMessagesBelow.value = 0
+        scrollToBottom()
+        if (props.visible) markActiveConversationViewed()
+      } else {
+        if (props.visible) newMessagesBelow.value += 1
+        if (!isOwnMessage) emit('unreadCount', conversationKeyForMessage(data))
+      }
     }
   })
   unsubOnline = ws.on('user_online', (data: { user_id: number; username: string; display_name: string; online_users: OnlineUser[] }) => {
@@ -281,11 +341,15 @@ function setupWS() {
     onlineUsers.value = data.online_users || []
     typingUsers.value.delete(data.user_id)
   })
-  unsubTyping = ws.on('user_typing', (data: { user_id: number; username: string; display_name: string; project_id?: number; typing: boolean }) => {
+  unsubTyping = ws.on('user_typing', (data: { user_id: number; username: string; display_name: string; project_id?: number; recipient_id?: number | null; typing: boolean }) => {
     // Only process typing for the current project
     const currentPid = projectStore.currentProject?.id
     if (currentPid == null || data.project_id !== currentPid) return
     if (data.user_id === auth.userId) return
+    const typingConversation = data.recipient_id == null
+      ? `${currentPid}:team`
+      : `${currentPid}:dm:${data.user_id}`
+    if (typingConversation !== activeConversationKey()) return
     if (data.typing) {
       const existing = typingUsers.value.get(data.user_id)
       if (existing) clearTimeout(existing.timer)
@@ -305,6 +369,7 @@ async function loadMembers() {
   if (pid == null) return
   try {
     const { data } = await api.get('/chat/members', { params: { project_id: pid } })
+    if (projectStore.currentProject?.id !== pid) return
     members.value = data.members || []
   } catch { /* ignore */ }
 }
@@ -312,12 +377,17 @@ async function loadMembers() {
 async function loadMessages(beforeId?: number) {
   const pid = projectStore.currentProject?.id
   if (pid == null) return
+  const requestConversationKey = activeConversationKey()
   loading.value = true
   try {
     const params: Record<string, any> = { project_id: pid, limit: 50 }
     if (chatMode.value === 'dm' && dmUser.value) params.recipient_id = dmUser.value.id
     if (beforeId) params.before_id = beforeId
-    const { data } = await api.get('/chat/messages', { params })
+    const viewport = scrollEl.value
+    const previousScrollHeight = viewport?.scrollHeight ?? 0
+    const previousScrollTop = viewport?.scrollTop ?? 0
+    const { data } = await api.get('/chat/messages', { params, silent: true } as any)
+    if (activeConversationKey() !== requestConversationKey) return
     const arr: ChatMsg[] = Array.isArray(data) ? data : []
     if (beforeId && arr.length === 0) {
       hasMore.value = false
@@ -327,38 +397,93 @@ async function loadMessages(beforeId?: number) {
       await nextTick()
       if (!focusRequestedMessage()) scrollToBottom()
     } else {
-      messages.value = [...arr, ...messages.value]
+      const knownIds = new Set(messages.value.map(message => message.id))
+      messages.value = [...arr.filter(message => !knownIds.has(message.id)), ...messages.value]
       hasMore.value = arr.length >= 50
+      await nextTick()
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight - previousScrollHeight + previousScrollTop
+      }
     }
-  } catch { /* ignore */ }
+  } catch (error) {
+    MessagePlugin.error(getErrorMessage(error, '聊天记录加载失败'))
+  }
   finally { loading.value = false }
+}
+
+async function reconcileLatestMessages() {
+  const pid = projectStore.currentProject?.id
+  if (pid == null) return
+  const requestConversationKey = activeConversationKey()
+  const params: Record<string, any> = { project_id: pid, limit: 50 }
+  if (chatMode.value === 'dm' && dmUser.value) params.recipient_id = dmUser.value.id
+  try {
+    const wasNearBottom = isNearBottom()
+    const { data } = await api.get('/chat/messages', { params, silent: true } as any)
+    if (activeConversationKey() !== requestConversationKey) return
+    const latest: ChatMsg[] = Array.isArray(data) ? data : []
+    const knownIds = new Set(messages.value.map(message => message.id))
+    const missed = latest.filter(message => !knownIds.has(message.id))
+    if (!missed.length) return
+    const merged = new Map(messages.value.map(message => [message.id, message]))
+    for (const message of latest) merged.set(message.id, message)
+    messages.value = [...merged.values()].sort((a, b) => a.id - b.id)
+    const incomingCount = missed.filter(message => message.user_id !== auth.userId).length
+    if (props.visible && wasNearBottom) {
+      scrollToBottom()
+      markActiveConversationViewed()
+    } else if (incomingCount) {
+      if (props.visible) newMessagesBelow.value += incomingCount
+      for (let index = 0; index < incomingCount; index += 1) {
+        emit('unreadCount', activeConversationKey())
+      }
+    }
+  } catch {
+    // The next reconnect or explicit conversation switch retries the sync.
+  }
 }
 
 async function loadOnlineUsers() {
   try {
     const pid = projectStore.currentProject?.id
-    const params: Record<string, any> = {}
-    if (pid != null) params.project_id = pid
-    const { data } = await api.get('/chat/online', { params })
+    if (pid == null) return
+    const { data } = await api.get('/chat/online', { params: { project_id: pid }, silent: true } as any)
     onlineUsers.value = data.online_users || []
   } catch { /* ignore */ }
 }
 
 // ── Scroll ─────────────────────────────────────────────────────
 function onScroll() {
-  if (!scrollEl.value || loading.value || !hasMore.value) return
+  if (!scrollEl.value) return
+  if (isNearBottom()) {
+    newMessagesBelow.value = 0
+    markActiveConversationViewed()
+  }
+  if (loading.value || !hasMore.value) return
   if (scrollEl.value.scrollTop < 60) {
     const firstId = messages.value[0]?.id
     if (firstId) loadMessages(firstId)
   }
 }
 
-function scrollToBottom() {
+function isNearBottom(threshold = 80): boolean {
+  const element = scrollEl.value
+  if (!element) return true
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold
+}
+
+function scrollToBottom(behavior: ScrollBehavior = 'auto') {
   nextTick(() => {
     if (scrollEl.value) {
-      scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+      scrollEl.value.scrollTo({ top: scrollEl.value.scrollHeight, behavior })
     }
   })
+}
+
+function jumpToLatest() {
+  newMessagesBelow.value = 0
+  scrollToBottom('smooth')
+  markActiveConversationViewed()
 }
 
 function focusRequestedMessage(): boolean {
@@ -382,10 +507,12 @@ async function sendMessage() {
   if (sending.value) return
 
   sending.value = true
+  const targetConversationKey = activeConversationKey()
+  const targetRecipientId = chatMode.value === 'dm' ? dmUser.value?.id : undefined
   try {
     // Upload pending files first
     for (const pf of pendingFiles.value) {
-      await uploadAndSendFile(pf)
+      await uploadAndSendFile(pf, targetRecipientId)
     }
     pendingFiles.value = []
 
@@ -396,20 +523,24 @@ async function sendMessage() {
       const form = new FormData()
       form.append('project_id', String(pid))
       form.append('message', text)
-      if (chatMode.value === 'dm' && dmUser.value) {
-        form.append('recipient_id', String(dmUser.value.id))
+      if (targetRecipientId != null) {
+        form.append('recipient_id', String(targetRecipientId))
       }
       const { data } = await api.post('/chat/messages', form)
       // Optimistically add message to local list so it appears immediately.
       // Dedup: the WebSocket broadcast will also deliver it, so skip duplicates.
-      if (!messages.value.some(m => m.id === data.id)) {
+      if (activeConversationKey() === targetConversationKey && !messages.value.some(m => m.id === data.id)) {
         messages.value.push(data)
         scrollToBottom()
       }
-      inputText.value = ''
+      if (activeConversationKey() === targetConversationKey && inputText.value.trim() === text) {
+        inputText.value = ''
+      }
       sendTyping(false)
     }
-  } catch { /* ignore */ }
+  } catch (error) {
+    MessagePlugin.error(getErrorMessage(error, '消息发送失败，请重试'))
+  }
   finally { sending.value = false }
 }
 
@@ -425,20 +556,28 @@ async function handleFileSelect(e: Event) {
   const files = input.files
   if (!files || files.length === 0) return
 
+  const targetRecipientId = chatMode.value === 'dm' ? dmUser.value?.id : undefined
   for (const f of files) {
-    await uploadAndSendFile(f)
+    await uploadAndSendFile(f, targetRecipientId)
   }
   input.value = ''
 }
 
-async function uploadAndSendFile(file: File) {
+async function uploadAndSendFile(
+  file: File,
+  targetRecipientId = chatMode.value === 'dm' ? dmUser.value?.id : undefined,
+) {
   uploading.value = true
   try {
     const pid = projectStore.currentProject?.id
     if (pid == null) return
+    const targetConversationKey = targetRecipientId == null
+      ? `${pid}:team`
+      : `${pid}:dm:${targetRecipientId}`
 
     // Upload file
     const uploadForm = new FormData()
+    uploadForm.append('project_id', String(pid))
     uploadForm.append('file', file)
     const { data } = await api.post('/chat/upload', uploadForm)
 
@@ -450,9 +589,24 @@ async function uploadAndSendFile(file: File) {
     msgForm.append('file_name', data.file_name)
     msgForm.append('file_type', data.file_type)
     msgForm.append('file_size', String(data.file_size))
-    await api.post('/chat/messages', msgForm)
-    inputText.value = ''
-  } catch { /* ignore */ }
+    if (targetRecipientId != null) {
+      msgForm.append('recipient_id', String(targetRecipientId))
+    }
+    const response = await api.post('/chat/messages', msgForm)
+    if (
+      activeConversationKey() === targetConversationKey
+      && !messages.value.some(message => message.id === response.data.id)
+    ) {
+      messages.value.push(response.data)
+    }
+    if (activeConversationKey() === targetConversationKey) {
+      inputText.value = ''
+      newMessagesBelow.value = 0
+      scrollToBottom()
+    }
+  } catch (error) {
+    MessagePlugin.error(getErrorMessage(error, '文件发送失败，请重试'))
+  }
   finally { uploading.value = false }
 }
 
@@ -498,7 +652,11 @@ function closeLightbox() {
 // ── Typing ─────────────────────────────────────────────────────
 function sendTyping(isTyping: boolean) {
   try {
-    ws.send(JSON.stringify({ type: 'typing', typing: isTyping }))
+    ws.send(JSON.stringify({
+      type: 'typing',
+      typing: isTyping,
+      recipient_id: chatMode.value === 'dm' ? dmUser.value?.id : undefined,
+    }))
   } catch { /* ignore */ }
 }
 
@@ -634,9 +792,9 @@ watch(() => props.focusMessageId, () => {
       </div>
     </div>
 
-    <!-- ── DM member list ────────────────── -->
-    <div class="chat-online-bar" v-if="chatMode === 'dm' && members.length > 0">
-      <span style="font-size:12px;color:var(--muted-foreground);padding:2px 4px">选择私聊对象：</span>
+    <!-- ── Team member / direct-message picker ─────────────── -->
+    <div class="chat-online-bar" v-if="showOnlineUsers && members.length > 0">
+      <span class="member-picker-label">{{ chatMode === 'dm' ? '切换私聊：' : '团队成员：' }}</span>
       <button
         v-for="m in members" :key="m.id"
         class="dm-chip"
@@ -646,13 +804,6 @@ watch(() => props.focusMessageId, () => {
         {{ m.display_name }}
         <span class="dm-chip-dot" :class="{ online: onlineUsers.some(u => u.user_id === m.id) }"></span>
       </button>
-    </div>
-    <!-- ── Online users ──────────────────── -->
-    <div class="chat-online-bar" v-if="chatMode === 'team' && showOnlineUsers && onlineUsers.length > 0">
-      <div v-for="u in onlineUsers" :key="u.user_id" class="online-user-chip" :title="u.display_name || u.username">
-        <span class="online-dot" />
-        {{ u.display_name || u.username }}
-      </div>
     </div>
 
     <!-- ── Messages ───────────────────────── -->
@@ -751,6 +902,15 @@ watch(() => props.focusMessageId, () => {
           </template>
         </div>
       </template>
+      <Transition name="inline-rise">
+        <button
+          v-if="newMessagesBelow > 0"
+          class="chat-new-messages"
+          @click="jumpToLatest"
+        >
+          {{ newMessagesBelow }} 条新消息 · 回到最新
+        </button>
+      </Transition>
     </div>
 
     <!-- ── Typing indicator ──────────────── -->
@@ -895,11 +1055,29 @@ watch(() => props.focusMessageId, () => {
 
 /* ── Online bar ──────────────────────── */
 .chat-online-bar { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--surface-border); flex-shrink: 0; }
+.member-picker-label { font-size: 12px; color: var(--muted-foreground); padding: 2px 4px; }
 .online-user-chip { display: flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; color: var(--muted-foreground); background: var(--surface-hover); padding: 2px 8px; border-radius: 999px; }
 .online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
 
 /* ── Messages ───────────────────────── */
 .chat-messages { flex: 1; overflow-y: auto; padding: 8px 0; display: flex; flex-direction: column; }
+.chat-new-messages {
+  position: sticky;
+  bottom: 10px;
+  z-index: 3;
+  align-self: center;
+  margin: 8px auto 2px;
+  padding: 7px 13px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--surface-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--card) 94%, var(--primary));
+  color: var(--primary);
+  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.14);
+  cursor: pointer;
+  font-size: 12px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.chat-new-messages:hover { transform: translateY(-1px); box-shadow: 0 7px 22px rgba(15, 23, 42, 0.2); }
 .chat-status, .chat-load-more, .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; color: var(--muted-foreground); font-size: 12px; gap: 8px; }
 .chat-empty { flex: 1; }
 .chat-empty-icon { opacity: 0.3; margin-bottom: 4px; }

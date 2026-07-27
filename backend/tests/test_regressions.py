@@ -14,6 +14,7 @@ from app.api.messages import (
     mark_read,
     unread_message_count,
 )
+from app.api.chat import get_messages, get_project_members, send_message
 from app.api.projects import ProjectCreate, create_project, delete_project
 from app.api.reviews import VoteRequest, cast_review_vote
 from app.api.skills import SkillHubImportRequest, import_skillhub_skill
@@ -26,6 +27,7 @@ from app.models.models import (
     Agent,
     AgentStatus,
     Base,
+    ChatMessage,
     Message,
     MessageCategory,
     Project,
@@ -284,6 +286,66 @@ class MessageReadTests(DatabaseTestCase):
         send_to_user.assert_called_once()
         self.assertEqual(send_to_user.call_args.args[:2], (self.owner.id, "message_new"))
         project_broadcast.assert_not_called()
+
+
+class ChatAuthorizationTests(DatabaseTestCase):
+    def test_non_member_cannot_read_chat_or_roster(self) -> None:
+        outsider = User(username="outsider", password_hash="x", display_name="Outsider")
+        self.db.add(outsider)
+        self.db.commit()
+
+        for action in (
+            lambda: get_messages(
+                self.project.id, None, 50, None, self.db, outsider
+            ),
+            lambda: get_project_members(self.project.id, self.db, outsider),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                action()
+            self.assertEqual(raised.exception.status_code, 403)
+
+    @patch("app.api.chat.broadcast_sync_to_project")
+    def test_non_member_cannot_send_team_message(self, _broadcast) -> None:
+        outsider = User(username="outsider", password_hash="x", display_name="Outsider")
+        self.db.add(outsider)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            send_message(
+                user=outsider,
+                db=self.db,
+                project_id=self.project.id,
+                recipient_id=None,
+                message="not allowed",
+                file_url="",
+                file_name="",
+                file_type="",
+                file_size=0,
+            )
+
+        self.assertEqual(raised.exception.status_code, 403)
+        self.assertEqual(self.db.query(ChatMessage).count(), 0)
+
+    def test_dm_recipient_must_belong_to_project(self) -> None:
+        outsider = User(username="outsider", password_hash="x", display_name="Outsider")
+        self.db.add(outsider)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            send_message(
+                user=self.owner,
+                db=self.db,
+                project_id=self.project.id,
+                recipient_id=outsider.id,
+                message="private",
+                file_url="",
+                file_name="",
+                file_type="",
+                file_size=0,
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(self.db.query(ChatMessage).count(), 0)
 
 
 class ReviewThresholdTests(DatabaseTestCase):

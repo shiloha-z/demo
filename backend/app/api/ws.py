@@ -299,13 +299,39 @@ async def websocket_endpoint(ws: WebSocket, token: str = Query(...)):
                     elif msg_type == "typing":
                         project_id = manager.get_user_project(user_id)
                         if project_id is not None:
-                            broadcast_sync_to_project(project_id, "user_typing", {
+                            recipient_id = msg.get("recipient_id")
+                            payload = {
                                 "user_id": user_id,
                                 "username": username,
                                 "display_name": display_name,
                                 "project_id": project_id,
                                 "typing": msg.get("typing", True),
-                            })
+                                "recipient_id": recipient_id,
+                            }
+                            if recipient_id is None:
+                                broadcast_sync_to_project(project_id, "user_typing", payload)
+                            else:
+                                try:
+                                    recipient_id = int(recipient_id)
+                                    db = SessionLocal()
+                                    try:
+                                        project = db.query(Project).filter(Project.id == project_id).first()
+                                        member = db.query(ProjectMember).filter(
+                                            ProjectMember.project_id == project_id,
+                                            ProjectMember.user_id == recipient_id,
+                                        ).first()
+                                        if (
+                                            recipient_id != user_id
+                                            and project
+                                            and (project.owner_id == recipient_id or member)
+                                        ):
+                                            payload["recipient_id"] = recipient_id
+                                            manager.send_to_user(user_id, "user_typing", payload)
+                                            manager.send_to_user(recipient_id, "user_typing", payload)
+                                    finally:
+                                        db.close()
+                                except (TypeError, ValueError):
+                                    pass
 
                 except (json.JSONDecodeError, KeyError):
                     pass
