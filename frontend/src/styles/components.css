@@ -901,3 +901,32 @@ html.theme-anim * {
   transition: background-color 0.32s ease, border-color 0.32s ease,
     color 0.32s ease, fill 0.32s ease, box-shadow 0.32s ease !important;
 }
+
+/* ── Visualization band (overview charts) ───────────────────────── */
+/* Shared by Audit / Agent / Review overview bands — keeps the three
+   pages consistent without duplicating layout styles per view. */
+.viz-band {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 900px) { .viz-band { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .viz-band { grid-template-columns: 1fr; } }
+
+.donut-wrap { display: flex; align-items: center; gap: 14px; width: 100%; }
+.legend { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.legend-item {
+  font-size: 12px;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}

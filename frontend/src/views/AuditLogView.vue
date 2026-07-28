@@ -3,6 +3,9 @@ import { ref, onMounted, onActivated, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuditStore, type AuditEntry } from '../stores/audit'
 import { useProjectStore } from '../stores/project'
+import DonutChart from '../components/charts/DonutChart.vue'
+import BarChart from '../components/charts/BarChart.vue'
+import VizCard from '../components/charts/VizCard.vue'
 
 const audit = useAuditStore()
 const projectStore = useProjectStore()
@@ -73,6 +76,65 @@ onActivated(async () => {
   filters.value.project_id = projectStore.currentProject?.id ?? null
   await applyFilters()
 })
+
+// ── Overview charts (pure front-end aggregation, no backend change) ──
+const showViz = ref(true)
+
+const actorColors: Record<string, string> = {
+  human: 'var(--primary)',
+  agent: '#a855f7',
+  system: 'var(--muted-foreground)',
+}
+const tokenColors: Record<string, string> = {
+  task: '#3b82f6',
+  agent: '#a855f7',
+  review: '#ec4899',
+  member: '#f59e0b',
+  config: '#64748b',
+  merge: '#14b8a6',
+  system: 'var(--muted-foreground)',
+}
+
+const actorDist = computed(() => {
+  const m: Record<string, number> = { human: 0, agent: 0, system: 0 }
+  for (const e of audit.entries) m[e.actor_type] = (m[e.actor_type] || 0) + 1
+  return [
+    { label: '人', value: m.human, color: actorColors.human },
+    { label: 'AI', value: m.agent, color: actorColors.agent },
+    { label: '系统', value: m.system, color: actorColors.system },
+  ]
+})
+
+const actionDist = computed(() => {
+  const m: Record<string, number> = {}
+  for (const e of audit.entries) {
+    const t = audit.metaFor(e.action).token || 'system'
+    m[t] = (m[t] || 0) + 1
+  }
+  const order = ['task', 'agent', 'review', 'member', 'config', 'merge', 'system']
+  return order.filter((k) => m[k]).map((k) => ({ label: k, value: m[k], color: tokenColors[k] }))
+})
+
+const dailyEvents = computed(() => {
+  const days = 30
+  const counts: Record<string, number> = {}
+  for (const e of audit.entries) {
+    if (!e.created_at) continue
+    const d = new Date(e.created_at)
+    if (isNaN(d.getTime())) continue
+    const key = `${d.getMonth() + 1}/${d.getDate()}`
+    counts[key] = (counts[key] || 0) + 1
+  }
+  const today = new Date()
+  const buckets: { label: string; value: number }[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    const key = `${d.getMonth() + 1}/${d.getDate()}`
+    buckets.push({ label: key, value: counts[key] || 0 })
+  }
+  return buckets
+})
 </script>
 
 <template>
@@ -82,6 +144,29 @@ onActivated(async () => {
         <h1 class="page-title">审计中心</h1>
         <p class="page-desc">全链路留痕：人为操作、人让 AI 干的事、对项目的影响，均可在责任链中追溯</p>
       </div>
+      <t-button theme="default" variant="outline" size="small" @click="showViz = !showViz">
+        {{ showViz ? '收起图表' : '展开图表' }}
+      </t-button>
+    </div>
+
+    <!-- Overview charts -->
+    <div v-if="showViz" class="viz-band">
+      <VizCard title="操作方分布" hint="按 actor_type 统计当前已加载审计记录中「人 / AI / 系统」三方各自发起的操作次数。">
+        <div class="donut-wrap">
+          <DonutChart :segments="actorDist" :center-top="String(audit.entries.length)" center-bottom="操作方" />
+          <div class="legend">
+            <span v-for="s in actorDist" :key="s.label" class="legend-item">
+              <i class="legend-dot" :style="{ background: s.color }"></i>{{ s.label }} · {{ s.value }}
+            </span>
+          </div>
+        </div>
+      </VizCard>
+      <VizCard title="操作类型分布" hint="按 action 的业务分类（token）聚合当前已加载记录的操作次数，分类色与下方标签一致。">
+        <BarChart :items="actionDist" :height="130" />
+      </VizCard>
+      <VizCard title="每日事件量（近 30 天）" hint="按 created_at 的日期分桶，统计近 30 天每天的事件数；数据源为当前已加载的记录。">
+        <BarChart :items="dailyEvents" :height="130" dense />
+      </VizCard>
     </div>
 
     <!-- Filters -->
@@ -148,7 +233,7 @@ onActivated(async () => {
 </template>
 
 <style scoped>
-.page-root { max-width: 960px; }
+.page-root { max-width: 1200px; }
 .page-header { margin-bottom: 16px; }
 .page-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--foreground); }
 .page-desc { margin: 4px 0 0; font-size: 13px; color: var(--muted-foreground); }
@@ -238,5 +323,21 @@ onActivated(async () => {
   padding: 48px; text-align: center; color: var(--muted-foreground);
   background: var(--surface); border: 1px solid var(--surface-border);
   border-radius: var(--radius-lg);
+}
+
+/* Audit-specific overview: stack donut above a centered legend so the
+   first card reads as a balanced stat card instead of a cramped h-split.
+   Scoped override wins over the shared .donut-wrap in components.css and
+   does not affect AgentPanelView. */
+.donut-wrap {
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+.donut-wrap .legend {
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px 14px;
 }
 </style>

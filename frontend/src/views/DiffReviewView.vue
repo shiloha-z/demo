@@ -10,6 +10,9 @@ import { useAuthStore } from '../stores/auth'
 import DiffViewer from '../components/DiffViewer.vue'
 import AuditChainPanel from '../components/AuditChainPanel.vue'
 import QualityGatePanel from '../components/QualityGatePanel.vue'
+import DonutChart from '../components/charts/DonutChart.vue'
+import BarChart from '../components/charts/BarChart.vue'
+import VizCard from '../components/charts/VizCard.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
@@ -251,6 +254,57 @@ function formatDate(d: string) {
   return new Date(d).toLocaleString('zh-CN')
 }
 
+// ── Overview charts (pure front-end aggregation, no backend change) ──
+const showViz = ref(true)
+
+const reviewStatusDist = computed(() => {
+  const m: Record<string, number> = {}
+  for (const r of reviews.value) m[r.status] = (m[r.status] || 0) + 1
+  return ['pending', 'approved', 'rejected']
+    .filter((k) => m[k])
+    .map((k) => ({
+      label: statusLabels[k] || k,
+      value: m[k],
+      color: statusColors[k] || 'var(--muted-foreground)',
+    }))
+})
+
+const passRateText = computed(() => {
+  const total = reviews.value.length
+  if (!total) return '0%'
+  const approved = reviews.value.filter((r) => r.status === 'approved').length
+  return Math.round((approved / total) * 100) + '%'
+})
+
+const reviewPassRate = computed(() => {
+  const total = reviews.value.length
+  const approved = reviews.value.filter((r) => r.status === 'approved').length
+  return [
+    { label: '已通过', value: approved, color: 'var(--success)' },
+    { label: '其他', value: total - approved, color: 'var(--surface-hover)' },
+  ]
+})
+
+const reviewTrends = computed(() => {
+  const days = 30
+  const counts: Record<string, number> = {}
+  for (const r of reviews.value) {
+    if (!r.created_at) continue
+    const d = new Date(r.created_at)
+    if (isNaN(d.getTime())) continue
+    const key = `${d.getMonth() + 1}/${d.getDate()}`
+    counts[key] = (counts[key] || 0) + 1
+  }
+  const today = new Date()
+  const buckets: { label: string; value: number }[] = []
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today)
+    d.setDate(today.getDate() - i)
+    const key = `${d.getMonth() + 1}/${d.getDate()}`
+    buckets.push({ label: key, value: counts[key] || 0 })
+  }
+  return buckets
+})
 </script>
 
 <template>
@@ -260,6 +314,9 @@ function formatDate(d: string) {
         <h1 class="page-title">审查记录</h1>
         <p class="page-desc">查看 Agent 代码审查结果，通过、驳回反馈或结束</p>
       </div>
+      <t-button theme="default" variant="outline" size="small" @click="showViz = !showViz">
+        {{ showViz ? '收起图表' : '展开图表' }}
+      </t-button>
     </div>
 
     <div v-if="!selectedProjectId" class="empty-card empty-card--full">
@@ -278,7 +335,20 @@ function formatDate(d: string) {
         <p>前往 Agent 面板创建任务，执行后将自动生成审查记录</p>
       </div>
 
-      <div v-else class="review-layout">
+      <template v-else>
+        <div v-if="showViz" class="viz-band">
+          <VizCard title="审查状态分布" hint="按 status 统计当前已加载审查记录中 待审查 / 已通过 / 已驳回 的数量。">
+            <DonutChart :segments="reviewStatusDist" center-bottom="审查" />
+          </VizCard>
+          <VizCard title="整体通过率" hint="已通过审查数 ÷ 当前已加载审查总数，环心显示百分比。">
+            <DonutChart :segments="reviewPassRate" :center-top="passRateText" center-bottom="通过率" />
+          </VizCard>
+          <VizCard title="审查量趋势（近 30 天）" hint="按 created_at 的日期分桶，统计近 30 天每天的审查数；数据源为当前已加载记录。">
+            <BarChart :items="reviewTrends" :height="130" dense />
+          </VizCard>
+        </div>
+
+        <div class="review-layout">
         <div class="review-list">
           <div
             v-for="r in reviews"
@@ -400,6 +470,7 @@ function formatDate(d: string) {
           <p>选择左侧审查记录查看详情</p>
         </div>
       </div>
+      </template>
     </template>
 
     <!-- Feedback dialog for reject-with-feedback -->
