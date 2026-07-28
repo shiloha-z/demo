@@ -14,9 +14,14 @@ class QualityGateInput(BaseModel):
 class QualityGateTool(BaseTool):
     name: str = "DeterministicQualityGate"
     description: str = (
-        "Run the project's seven deterministic approval checks on the current "
-        "workspace. Use it after writing code and tests. If a code-actionable "
-        "check fails, keep modifying files and run this tool again before ending."
+        "Run the project's seven deterministic approval checks (style, unit tests, "
+        "static analysis, secret scan, dependency audit, coverage, bank policy) on "
+        "the current workspace. Use it after writing code and tests, then KEEP fixing "
+        "files and re-running until everything passes. Common hard blockers (even in "
+        "lenient mode): SQL string concatenation, hardcoded secrets, plaintext PII in "
+        "logs, SQL/command injection, lines over 200 chars, trailing whitespace, mixed "
+        "indentation. If a check is '可由 Agent 修复', never end without re-running "
+        "this tool and confirming a pass first."
     )
     args_schema: type = QualityGateInput
 

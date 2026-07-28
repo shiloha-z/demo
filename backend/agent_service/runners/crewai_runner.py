@@ -7,7 +7,7 @@ import logging
 import re
 import threading
 import time
-from crewai import Agent, Task, Crew, Process
+from crewai import Agent, Task, Crew, Process, LLM
 from app.core.config import settings
 from app.services import git_service as git
 from agent_service.tools.file_tools import FileReadTool, FileWriteTool
@@ -225,9 +225,16 @@ class CrewAIRunner(BaseRunner):
                 "代码只能通过 FileWrite 落盘，禁止只在回答里贴代码而不调用工具\n"
                 "5. 用 GitDiff 工具确认你的改动——逐一核对任务要求的每个核心文件"
                 "是否都已出现在 diff 中且内容非空。若有遗漏或为空，立即用 FileWrite 补写后再次 GitDiff 确认\n"
-                "6. 用 DeterministicQualityGate 运行审批前七项检查。若提示“可由 Agent 修复”，"
-                "必须继续修改代码或测试并再次运行；不得只解释失败原因。"
-                "若提示“需平台管理员处理”，记录该项但不要伪造依赖或测试结果\n"
+                "6. 【关键】用 DeterministicQualityGate 运行审批前七项检查"
+                "（风格/单元测试/静态分析/密钥扫描/依赖审计/覆盖率/银行禁止项）。"
+                "以下情况即使宽松模式也必然被拦截，必须当场修复：SQL 字符串拼接、"
+                "硬编码密钥/密码、明文 PII 日志、SQL/命令注入、行长度 > 200、"
+                "行尾空白、混合缩进。\n"
+                "   流程：写代码 → 跑门禁 → 若失败则按输出逐条修改 → 再跑门禁，"
+                "循环直至全部通过或确认属『需平台管理员处理』项（不得伪造）。"
+                "若提示“可由 Agent 修复”，必须继续修改代码或测试并再次运行，"
+                "不得只解释失败原因；若提示“需平台管理员处理”，"
+                "记录该项但不要伪造依赖或测试结果。\n"
                 "7. 用 MemoryRecord 记录重要的设计决策（scope: project）\n\n"
                 "硬性要求：\n"
                 "- 生成的代码必须完整可运行，包含所有必要导入、完整函数体，"
@@ -464,6 +471,21 @@ class CrewAIRunner(BaseRunner):
                 "函数体和逻辑实现，不允许出现 TODO、pass 占位或省略号代替真实实现。\n"
                 "4. 自检闭环：写完后必须用 GitDiff 工具确认目标文件确实已写入且内容非空，"
                 "若发现核心文件缺失或为空，必须立即用 FileWrite 补写。\n\n"
+                "【银行级安全编码硬约束 — 生成时必须遵守，否则确定性门禁必拦截】\n"
+                "5. 数据库访问一律参数化：禁止字符串拼接 SQL（例如把变量名直接拼进 f-string 或 % 格式串），"
+                "必须用 ORM 或预处理语句传参；禁止在代码里拼接 WHERE/VALUES。\n"
+                "6. 禁止硬编码密钥/密码/Token：一律从环境变量或配置读取，"
+                "源码中出现明文密钥即判定失败。\n"
+                "7. 禁止在日志中打印身份证号、手机号、银行卡号、密码等 PII；"
+                "日志只输出脱敏后的值。\n"
+                "8. 密码/敏感数据必须强哈希（bcrypt/argon2/scrypt），"
+                "禁止明文或弱算法（MD5/SHA1 无盐）。\n"
+                "9. 代码风格：单行 ≤ 120 字符（留足余量）、无行尾空白、"
+                "无混合缩进、无 TODO/FIXME 占位。\n"
+                "10. 必须有异常处理（try/except）与输入校验；对外接口做输出编码防 XSS。\n"
+                "11. 核心逻辑必须附带单元测试；函数/模块有清晰命名与注释。\n"
+                "12. 严格聚焦任务，不生成范围外文件；生成后必须立即用 "
+                "DeterministicQualityGate 自检并逐条修复。\n\n"
                 "编写代码前，先用 MemorySearch 查找项目中是否有相关的经验和模式。"
                 "完成后，用 MemoryRecord 记录重要的设计决策供后续参考。"
             ),
@@ -471,7 +493,7 @@ class CrewAIRunner(BaseRunner):
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
-            **({"llm": llm_kwargs} if llm_kwargs else {}),
+            **({"llm": LLM(**llm_kwargs)} if llm_kwargs else {}),
         )
 
         reviewer = Agent(
@@ -488,7 +510,7 @@ class CrewAIRunner(BaseRunner):
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
-            **({"llm": llm_kwargs} if llm_kwargs else {}),
+            **({"llm": LLM(**llm_kwargs)} if llm_kwargs else {}),
         )
 
         security = Agent(
@@ -504,7 +526,7 @@ class CrewAIRunner(BaseRunner):
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
-            **({"llm": llm_kwargs} if llm_kwargs else {}),
+            **({"llm": LLM(**llm_kwargs)} if llm_kwargs else {}),
         )
 
         summarizer = Agent(
@@ -519,7 +541,7 @@ class CrewAIRunner(BaseRunner):
             verbose=True,
             allow_delegation=False,
             max_iter=AGENT_MAX_ITERATIONS,
-            **({"llm": llm_kwargs} if llm_kwargs else {}),
+            **({"llm": LLM(**llm_kwargs)} if llm_kwargs else {}),
         )
         return code_gen, reviewer, security, summarizer
 

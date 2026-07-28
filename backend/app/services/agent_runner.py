@@ -720,6 +720,29 @@ def _persist_review(db, task, runner_type, workspace, commit_hash, diff, summary
             _progress(task.id, project_id, "✅ 七项确定性检查全部通过，可以开始人工审批", "quality_gate_passed")
         else:
             _progress(task.id, project_id, f"⛔ {gate_run.summary}，请打回 Agent 修改", "quality_gate_failed")
+            # ③ 门禁失败明细回流：将可修复的失败项预填为打回默认反馈，
+            #    提升二次生成命中率（与 reject_failed_quality_gate 端点互补）。
+            if not review.human_feedback:
+                try:
+                    _checks = json.loads(gate_run.results_json or "[]")
+                except (TypeError, json.JSONDecodeError):
+                    _checks = []
+                _failed = [
+                    c for c in _checks
+                    if isinstance(c, dict) and c.get("status") == "failed"
+                    and quality_gates.is_agent_actionable_failure(c)
+                ]
+                _detail = "\n\n".join(
+                    f"【{c.get('label') or c.get('key') or '检查项'}】\n"
+                    f"{str(c.get('output') or '未提供失败详情')[:1500]}"
+                    for c in _failed
+                ) or (gate_run.summary or "门禁执行失败，请检查项目测试与安全配置。")
+                review.human_feedback = (
+                    "【系统预填 · 确定性门禁未通过，打回 Agent 时请一并转发以下失败明细】\n"
+                    f"{_detail}"
+                )
+                db.add(review)
+                db.commit()
     else:
         _progress(task.id, project_id, "ℹ️ 确定性门禁已关闭，跳过检查，直接进入人工审批", "quality_gate")
         attempt = db.query(QualityGateRun).filter(QualityGateRun.task_id == task.id).count() + 1
