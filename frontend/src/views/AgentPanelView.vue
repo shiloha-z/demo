@@ -4,6 +4,9 @@ import { MessagePlugin, DialogPlugin } from 'tdesign-vue-next'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
 import MemoryExplorer from '../components/MemoryExplorer.vue'
+import DonutChart from '../components/charts/DonutChart.vue'
+import BarChart from '../components/charts/BarChart.vue'
+import VizCard from '../components/charts/VizCard.vue'
 import api, { getErrorMessage } from '../api'
 
 const store = useProjectStore()
@@ -295,6 +298,51 @@ function openAgentMemory(a: any) {
   memoryDialogAgent.value = { id: a.id, name: a.name }
   memoryDialogVisible.value = true
 }
+
+// ── Overview charts (pure front-end aggregation, no backend change) ──
+const showViz = ref(true)
+
+const statusColorsLocal: Record<string, string> = {
+  idle: 'var(--muted-foreground)',
+  working: 'var(--primary)',
+  done: 'var(--success)',
+  error: 'var(--danger)',
+}
+const statusOrder = ['idle', 'working', 'done', 'error']
+
+const agentStatusDist = computed(() => {
+  const m: Record<string, number> = {}
+  for (const a of agents.value) m[a.status] = (m[a.status] || 0) + 1
+  return statusOrder.filter((k) => m[k]).map((k) => ({
+    label: statusLabels[k] || k,
+    value: m[k],
+    color: statusColorsLocal[k] || 'var(--muted-foreground)',
+  }))
+})
+
+const agentRoleDist = computed(() => {
+  const m: Record<string, number> = {}
+  for (const a of agents.value) {
+    const r = a.role || 'unknown'
+    m[r] = (m[r] || 0) + 1
+  }
+  return Object.keys(m).map((k) => ({
+    label: roleLabels[k] || k,
+    value: m[k],
+    color: roleColors[k] || 'var(--muted-foreground)',
+  }))
+})
+
+const topWorkload = computed(() => {
+  return [...agents.value]
+    .sort((a, b) => (b.total_tasks || 0) - (a.total_tasks || 0))
+    .slice(0, 5)
+    .map((a) => ({
+      label: a.name,
+      value: a.total_tasks || 0,
+      color: roleColors[a.role] || 'var(--muted-foreground)',
+    }))
+})
 </script>
 
 <template>
@@ -307,6 +355,7 @@ function openAgentMemory(a: any) {
       <div class="page-header-actions">
         <input ref="importInput" class="import-file-input" type="file" accept="application/json,.json" @change="importAgent" />
         <t-button variant="outline" :loading="importingAgent" @click="openImportPicker">导入 Agent</t-button>
+        <t-button variant="outline" size="small" @click="showViz = !showViz">{{ showViz ? '收起图表' : '展开图表' }}</t-button>
       <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type); fetchSkills()">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -314,6 +363,26 @@ function openAgentMemory(a: any) {
         创建 Agent
       </t-button>
       </div>
+    </div>
+
+    <!-- Overview charts -->
+    <div v-if="showViz" class="viz-band">
+      <VizCard title="Agent 状态分布" hint="按 status 统计当前 Agent 池中 空闲 / 工作中 / 完成 / 错误 的数量。">
+        <div class="donut-wrap">
+          <DonutChart :segments="agentStatusDist" :center-top="String(agents.length)" center-bottom="Agent" />
+          <div class="legend">
+            <span v-for="s in agentStatusDist" :key="s.label" class="legend-item">
+              <i class="legend-dot" :style="{ background: s.color }"></i>{{ s.label }} · {{ s.value }}
+            </span>
+          </div>
+        </div>
+      </VizCard>
+      <VizCard title="角色构成" hint="按 role 统计 代码工程师 / 代码审查员 / 安全审查员 的数量。">
+        <DonutChart :segments="agentRoleDist" center-bottom="角色" />
+      </VizCard>
+      <VizCard title="工作量 Top5" hint="按 total_tasks 取当前 Agent 中执行任务次数最多的前 5 个，柱色对应其角色。">
+        <BarChart :items="topWorkload" :height="130" />
+      </VizCard>
     </div>
 
     <!-- Agents -->
