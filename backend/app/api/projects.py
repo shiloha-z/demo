@@ -313,7 +313,9 @@ def file_tree(
     """List project files from the master branch (approved state only)."""
     workspace = _get_workspace(project_id, user, db)
     try:
-        nodes = git.list_files(workspace, path, ref="master")
+        # Committed snapshots are immutable, so this read does not need to wait
+        # for the mutable workspace lock held by an active agent.
+        nodes = git.list_files_snapshot(workspace, "master", path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return {"files": nodes}
@@ -329,7 +331,9 @@ def read_file(
     """Read a file from the master branch (approved state only)."""
     workspace = _get_workspace(project_id, user, db)
     try:
-        content = git.read_file(workspace, path, ref="master")
+        # Reading an immutable commit snapshot can proceed while agents write
+        # to their isolated worktrees.
+        content = git.read_file_snapshot(workspace, "master", path)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except FileNotFoundError:

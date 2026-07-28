@@ -134,7 +134,7 @@ const icons: Record<string, string> = {
       <option :value="null" disabled>选择项目…</option>
       <option v-for="p in store.switchableProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
     </select>
-    <svg class="picker-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <svg class="picker-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="6 9 12 15 18 9"/>
     </svg>
   </div>
@@ -242,7 +242,6 @@ const icons: Record<string, string> = {
 }
 .project-picker:hover .picker-chevron {
   color: var(--primary);
-  transform: translateY(1px);
 }
 
 /* ── Unread project chips ──────────────────────────────────── */

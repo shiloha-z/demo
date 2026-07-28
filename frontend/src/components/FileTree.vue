@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onActivated, onDeactivated } from 'vue'
+import { ref, shallowRef, triggerRef, watch, onActivated, onDeactivated } from 'vue'
 import api from '../api'
 
 const props = defineProps<{ projectId: number }>()
@@ -19,44 +19,63 @@ interface TreeNode {
   loading?: boolean
 }
 
-const treeData = ref<TreeNode[]>([])
+// The server returns the complete recursive tree. Keeping it shallow avoids
+// creating thousands of Vue proxies for large repositories.
+const treeData = shallowRef<TreeNode[]>([])
 const loading = ref(false)
 const selectedPath = ref<string>('')
 let active = false
 let loadedProjectId: number | null = null
-let loadRequest: Promise<void> | null = null
+let loadRequest: { projectId: number; promise: Promise<void> } | null = null
+let loadVersion = 0
+
+function normalizeNodes(nodes: TreeNode[]): TreeNode[] {
+  return nodes.map((node) => {
+    if (node.type !== 'dir') return { ...node }
+    const hasLoadedChildren = Array.isArray(node.children)
+    return {
+      ...node,
+      children: hasLoadedChildren ? normalizeNodes(node.children!) : undefined,
+      expanded: false,
+      loaded: hasLoadedChildren,
+      loading: false,
+    }
+  })
+}
 
 async function loadFiles() {
-  if (loadRequest) return loadRequest
-  loadRequest = (async () => {
+  const projectId = props.projectId
+  if (loadRequest?.projectId === projectId) return loadRequest.promise
+  const requestVersion = ++loadVersion
+  const promise = (async () => {
     loading.value = true
     try {
-      const { data } = await api.get(`/projects/${props.projectId}/files`)
-      treeData.value = data.files.map((n: TreeNode) => ({ ...n, expanded: n.type === 'dir' ? false : undefined, loaded: n.type === 'dir' ? false : undefined }))
-      // Load root directories concurrently; they are independent.
-      await Promise.all(
-        treeData.value
-          .filter(node => node.type === 'dir')
-          .map(node => expandDir(node)),
-      )
-      loadedProjectId = props.projectId
+      const { data } = await api.get(`/projects/${projectId}/files`)
+      if (requestVersion !== loadVersion || props.projectId !== projectId) return
+      // The endpoint already returns a recursive tree. Normalize it once
+      // instead of issuing one extra request for every root directory.
+      treeData.value = normalizeNodes(data.files || [])
+      loadedProjectId = projectId
     } finally {
-      loading.value = false
+      if (requestVersion === loadVersion) loading.value = false
     }
   })()
+  loadRequest = { projectId, promise }
   try {
-    await loadRequest
+    await promise
   } finally {
-    loadRequest = null
+    if (loadRequest?.promise === promise) loadRequest = null
   }
 }
 
 async function expandDir(node: TreeNode) {
   if (node.loaded) {
     node.expanded = !node.expanded
+    triggerRef(treeData)
     return
   }
   node.loading = true
+  triggerRef(treeData)
   try {
     const { data } = await api.get(`/projects/${props.projectId}/files`, {
       params: { path: node.path }
@@ -68,6 +87,7 @@ async function expandDir(node: TreeNode) {
     node.children = []
   } finally {
     node.loading = false
+    triggerRef(treeData)
   }
 }
 
@@ -77,8 +97,7 @@ function handleClick(node: TreeNode) {
     emit('select', node.path)
   } else {
     selectedPath.value = node.path
-    emit('select', node.path)
-    expandDir(node)
+    void expandDir(node)
   }
 }
 

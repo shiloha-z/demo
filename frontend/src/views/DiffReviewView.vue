@@ -38,6 +38,9 @@ const retryingGate = ref(false)
 const statusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
 }
+const statusColors: Record<string, string> = {
+  pending: 'var(--warning)', approved: 'var(--success)', rejected: 'var(--danger)',
+}
 
 let unsubReview: (() => void) | null = null
 let unsubVote: (() => void) | null = null
@@ -308,7 +311,10 @@ const reviewTrends = computed(() => {
 </script>
 
 <template>
-  <div class="page-root">
+  <div
+    class="page-root"
+    :class="{ 'has-viz': showViz && selectedProjectId && reviews.length > 0 }"
+  >
     <div class="page-header">
       <div>
         <h1 class="page-title">审查记录</h1>
@@ -358,9 +364,11 @@ const reviewTrends = computed(() => {
             @click="selectedReview = r"
           >
             <div class="review-avatar" :class="`status-${r.status}`">
-              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <path d="M9 11l3 3 8-8"/>
-                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
               </svg>
             </div>
             <div class="review-item-body">
@@ -375,7 +383,7 @@ const reviewTrends = computed(() => {
                 <span class="review-item-time">{{ formatDate(r.created_at) }}</span>
               </div>
             </div>
-            <svg class="review-item-arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <svg class="review-item-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </div>
@@ -489,6 +497,16 @@ const reviewTrends = computed(() => {
 .page-root { height: 100%; display: flex; flex-direction: column; max-width: 1400px; }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
 
+.page-root.has-viz {
+  height: auto;
+  min-height: 100%;
+}
+.page-root.has-viz .review-layout {
+  flex: none;
+  height: calc(100vh - 200px);
+  height: max(520px, calc(100dvh - 200px));
+}
+
 .review-layout {
   flex: 1;
   display: flex;
@@ -572,7 +590,7 @@ const reviewTrends = computed(() => {
 .review-avatar.status-approved { color: var(--success); background: var(--success-light); }
 .review-avatar.status-rejected { color: var(--danger); background: var(--danger-light); }
 .review-avatar.status-pending { color: var(--warning); background: var(--warning-light); }
-.review-item:hover .review-avatar { transform: scale(1.06) rotate(-2deg); }
+.review-item:hover .review-avatar { transform: scale(1.04); }
 .review-item-body { flex: 1; min-width: 0; }
 .review-item-header { display: flex; justify-content: space-between; align-items: center; }
 .review-id { font-size: 14px; font-weight: 650; color: var(--foreground); }
@@ -746,6 +764,10 @@ const reviewTrends = computed(() => {
   .review-layout {
     flex: none;
     flex-direction: column;
+  }
+  .page-root.has-viz .review-layout {
+    height: auto;
+    min-height: 0;
   }
   .review-list {
     width: 100%;

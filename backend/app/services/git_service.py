@@ -1108,39 +1108,73 @@ def list_files_snapshot(workspace: str, ref: str, subpath: str = "") -> list[dic
 
 
 def _list_from_git(repo: Repo, base: str, subpath: str) -> list[dict[str, Any]]:
-    """List files using git ls-tree from a specific branch."""
+    """Build a recursive tree from one ``git ls-tree`` invocation.
+
+    The previous implementation started a new Git process for every directory.
+    Large repositories therefore paid process-startup cost dozens or hundreds
+    of times before the file manager could render. ``-r -t`` returns the same
+    recursive information in one call.
+    """
     nodes: list[dict] = []
     prefix = f"{subpath}/" if subpath else ""
 
     try:
         tree_ref = f"{base}:{subpath}" if subpath else base
-        output = repo.git.ls_tree(tree_ref)
+        output = repo.git.ls_tree("-r", "-t", tree_ref)
     except GitCommandError:
         # Branch does not exist / no commits yet. Signal the caller to
         # fall back to the real filesystem instead of returning empty.
         raise
 
+    node_by_path: dict[str, dict[str, Any]] = {}
+    children_by_path: dict[str, list[dict[str, Any]]] = {"": nodes}
+
+    def ensure_directory(relative_path: str) -> dict[str, Any]:
+        existing = node_by_path.get(relative_path)
+        if existing is not None:
+            return existing
+
+        parent_path, _, name = relative_path.rpartition("/")
+        if parent_path:
+            ensure_directory(parent_path)
+        node: dict[str, Any] = {
+            "name": name,
+            "path": f"{prefix}{relative_path}",
+            "type": "dir",
+            "children": [],
+        }
+        node_by_path[relative_path] = node
+        children_by_path.setdefault(parent_path, nodes).append(node)
+        children_by_path[relative_path] = node["children"]
+        return node
+
     for line in output.strip().split("\n"):
         if not line:
             continue
         # Format: "<mode> <type> <hash>\t<name>"
-        parts = line.split()
-        if len(parts) < 4:
+        metadata, separator, relative_path = line.partition("\t")
+        parts = metadata.split()
+        if not separator or len(parts) < 3:
             continue
         entry_type = parts[1]  # "tree" or "blob"
-        name = line.split("\t", 1)[1] if "\t" in line else parts[3]
-        if name in _EXCLUDED:
+        path_parts = relative_path.split("/")
+        if any(part in _EXCLUDED for part in path_parts):
             continue
 
-        path = f"{prefix}{name}"
-        node: dict = {
-            "name": name,
-            "path": path,
-            "type": "dir" if entry_type == "tree" else "file",
-        }
         if entry_type == "tree":
-            node["children"] = _list_from_git(repo, base, path)
-        nodes.append(node)
+            ensure_directory(relative_path)
+            continue
+
+        parent_path, _, name = relative_path.rpartition("/")
+        if parent_path:
+            ensure_directory(parent_path)
+        node = {
+            "name": name,
+            "path": f"{prefix}{relative_path}",
+            "type": "file",
+        }
+        node_by_path[relative_path] = node
+        children_by_path.setdefault(parent_path, nodes).append(node)
 
     return nodes
 

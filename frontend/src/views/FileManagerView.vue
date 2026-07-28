@@ -17,6 +17,10 @@ const selectedProjectId = computed(() => store.currentProject?.id ?? null)
 const selectedFile = ref('')
 const fileContent = ref('')
 const loadingFile = ref(false)
+const fileContentCache = new Map<string, string>()
+const fileRequests = new Map<string, Promise<string>>()
+let fileLoadVersion = 0
+const MAX_CACHED_FILES = 80
 
 const showNewFile = ref(false)
 const showNewFolder = ref(false)
@@ -31,6 +35,26 @@ const folderInput = ref<HTMLInputElement>()
 function triggerUpload() { uploadInput.value?.click() }
 function triggerFolderUpload() { folderInput.value?.click() }
 
+function fileCacheKey(projectId: number, path: string) {
+  return `${projectId}:${path}`
+}
+
+function cacheFileContent(key: string, content: string) {
+  fileContentCache.delete(key)
+  fileContentCache.set(key, content)
+  if (fileContentCache.size > MAX_CACHED_FILES) {
+    const oldestKey = fileContentCache.keys().next().value
+    if (oldestKey) fileContentCache.delete(oldestKey)
+  }
+}
+
+function invalidateProjectFileCache(projectId: number) {
+  const prefix = `${projectId}:`
+  for (const key of fileContentCache.keys()) {
+    if (key.startsWith(prefix)) fileContentCache.delete(key)
+  }
+}
+
 async function handleUpload(e: Event) {
   const input = e.target as HTMLInputElement
   const fileList = input.files
@@ -44,6 +68,7 @@ async function handleUpload(e: Event) {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     MessagePlugin.success(`${fileList.length} 个文件已上传`)
+    invalidateProjectFileCache(selectedProjectId.value)
     fileTreeRef.value?.loadFiles()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '上传失败')) }
   finally { uploading.value = false; input.value = '' }
@@ -72,12 +97,15 @@ async function handleFolderUpload(e: Event) {
       headers: { 'Content-Type': 'multipart/form-data' },
     })
     MessagePlugin.success(`${fileList.length} 个文件已上传`)
+    invalidateProjectFileCache(selectedProjectId.value)
     fileTreeRef.value?.loadFiles()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '上传失败')) }
   finally { folderUploading.value = false; input.value = '' }
 }
 
 watch(() => store.currentProject?.id, () => {
+  fileLoadVersion += 1
+  loadingFile.value = false
   selectedFile.value = ''
   fileContent.value = ''
 }, { immediate: true })
@@ -89,6 +117,7 @@ function subscribeFileChanges() {
   if (unsubFileChange) return
   unsubFileChange = wsStore.on('file_change', (data: any) => {
     if (data?.project_id && data.project_id === selectedProjectId.value) {
+      invalidateProjectFileCache(data.project_id)
       fileTreeRef.value?.loadFiles()
     }
   })
@@ -102,13 +131,42 @@ onDeactivated(unsubscribeFileChanges)
 onUnmounted(unsubscribeFileChanges)
 
 async function handleSelect(path: string) {
-  if (!selectedProjectId.value) return
+  const projectId = selectedProjectId.value
+  if (!projectId) return
+  const cacheKey = fileCacheKey(projectId, path)
+  const requestVersion = ++fileLoadVersion
   selectedFile.value = path
+
+  const cached = fileContentCache.get(cacheKey)
+  if (cached !== undefined) {
+    // Refresh recency for the bounded LRU cache.
+    cacheFileContent(cacheKey, cached)
+    fileContent.value = cached
+    loadingFile.value = false
+    return
+  }
+
   loadingFile.value = true
   try {
-    const { data } = await api.get(`/projects/${selectedProjectId.value}/file`, { params: { path } })
-    fileContent.value = data.content
-  } finally { loadingFile.value = false }
+    let request = fileRequests.get(cacheKey)
+    if (!request) {
+      request = api.get(`/projects/${projectId}/file`, { params: { path } })
+        .then(({ data }) => String(data.content ?? ''))
+      fileRequests.set(cacheKey, request)
+    }
+    const content = await request
+    cacheFileContent(cacheKey, content)
+    if (
+      requestVersion === fileLoadVersion
+      && selectedProjectId.value === projectId
+      && selectedFile.value === path
+    ) {
+      fileContent.value = content
+    }
+  } finally {
+    fileRequests.delete(cacheKey)
+    if (requestVersion === fileLoadVersion) loadingFile.value = false
+  }
 }
 
 function getLanguage() { return selectedFile.value || 'plaintext' }
@@ -119,6 +177,7 @@ async function createFile() {
   try {
     await api.post(`/projects/${selectedProjectId.value}/file`, null, { params: { path: newFileName.value, content: '' } })
     MessagePlugin.success(`文件 ${newFileName.value} 已创建`)
+    invalidateProjectFileCache(selectedProjectId.value)
     showNewFile.value = false; newFileName.value = ''
     fileTreeRef.value?.loadFiles()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '创建失败')) }
@@ -131,6 +190,7 @@ async function createFolder() {
   try {
     await api.post(`/projects/${selectedProjectId.value}/folder`, null, { params: { path: newFolderName.value } })
     MessagePlugin.success(`文件夹 ${newFolderName.value} 已创建`)
+    invalidateProjectFileCache(selectedProjectId.value)
     showNewFolder.value = false; newFolderName.value = ''
     fileTreeRef.value?.loadFiles()
   } catch (e: any) { MessagePlugin.error(getErrorMessage(e, '创建失败')) }
@@ -138,7 +198,8 @@ async function createFolder() {
 }
 
 async function handleTreeDelete(path: string) {
-  if (!selectedProjectId.value) return
+  const projectId = selectedProjectId.value
+  if (!projectId) return
   const name = path.split('/').pop() || path
   const confirmDialog = DialogPlugin.confirm({
     header: '确认删除',
@@ -147,8 +208,9 @@ async function handleTreeDelete(path: string) {
     cancelBtn: '取消',
     onConfirm: async () => {
       try {
-        await api.delete(`/projects/${selectedProjectId.value}/file`, { params: { path } })
+        await api.delete(`/projects/${projectId}/file`, { params: { path } })
         MessagePlugin.success(`已删除 ${name}`)
+        invalidateProjectFileCache(projectId)
         if (selectedFile.value === path) {
           selectedFile.value = ''
           fileContent.value = ''
@@ -161,7 +223,8 @@ async function handleTreeDelete(path: string) {
 }
 
 async function deleteSelected() {
-  if (!selectedProjectId.value || !selectedFile.value) return
+  const projectId = selectedProjectId.value
+  if (!projectId || !selectedFile.value) return
   const path = selectedFile.value
   const name = path.split('/').pop() || path
   const confirmDialog = DialogPlugin.confirm({
@@ -171,8 +234,9 @@ async function deleteSelected() {
     cancelBtn: '取消',
     onConfirm: async () => {
       try {
-        await api.delete(`/projects/${selectedProjectId.value}/file`, { params: { path } })
+        await api.delete(`/projects/${projectId}/file`, { params: { path } })
         MessagePlugin.success(`已删除 ${name}`)
+        invalidateProjectFileCache(projectId)
         selectedFile.value = ''
         fileContent.value = ''
         fileTreeRef.value?.loadFiles()
