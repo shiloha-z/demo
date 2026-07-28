@@ -91,6 +91,39 @@
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
+/* Spring easing for card hover lift */
+:where(.project-card, .agent-card, .stat-card, .audit-card, .msg-card,
+  .timeline-card, .skill-card, .tree-card, .viz-card):hover {
+  transition: transform 0.22s var(--motion-ease-spring) !important;
+}
+
+/* Unified button press feedback */
+:where(button, .t-button, a.btn, .topbar-icon-btn, .nav-item, .t-tag):active:not(:disabled) {
+  transform: scale(0.96) !important;
+  transition: transform 0.08s var(--motion-ease-exit) !important;
+}
+
+/* ── Skeleton shimmer ──────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--surface-hover) 30%,
+    var(--surface-border) 50%,
+    var(--surface-hover) 70%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+.skeleton--text { height: 13px; width: 100%; }
+.skeleton--title { height: 18px; width: 60%; }
+.skeleton--avatar { width: 42px; height: 42px; border-radius: var(--radius-md); }
+.skeleton--card { height: 80px; width: 100%; border-radius: var(--radius-lg); }
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 .agent-card.agent-working {
   background: var(--glass-surface-strong) !important;
   border-color: var(--primary) !important;
@@ -676,27 +709,13 @@
 /* TDesign renders dialogs via Teleport outside the app tree, so these
    overrides must live in a global (non-scoped) stylesheet. */
 .t-dialog__mask {
-  background:
-    radial-gradient(
-      ellipse at 50% 42%,
-      transparent 0 24%,
-      rgb(15 23 42 / 0.08) 100%
-    ),
-    rgb(15 23 42 / 0.14) !important;
-  -webkit-backdrop-filter: blur(10px) saturate(0.92);
-  backdrop-filter: blur(10px) saturate(0.92);
+  background: transparent !important;
+  backdrop-filter: blur(8px) saturate(0.92) !important;
   will-change: opacity;
 }
 .dark .t-dialog__mask {
-  background:
-    radial-gradient(
-      ellipse at 50% 42%,
-      rgb(99 102 241 / 0.035) 0 20%,
-      rgb(2 6 23 / 0.12) 100%
-    ),
-    rgb(2 6 23 / 0.38) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(0.86);
-  backdrop-filter: blur(12px) saturate(0.86);
+  background: transparent !important;
+  backdrop-filter: blur(8px) saturate(0.92) !important;
 }
 
 /* Replace the library's abrupt 1%-to-100% zoom with a restrained lift, and
@@ -737,14 +756,12 @@
   animation-duration: 210ms;
   animation-timing-function: var(--motion-ease-exit);
 }
-/* The dialog panel itself — keep it readable while letting the mask blur show */
+/* The dialog panel itself */
 .t-dialog {
   background: var(--glass-surface-strong) !important;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-xl) !important;
   box-shadow: var(--shadow-floating), var(--glass-highlight) !important;
-  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
 }
 .dark .t-dialog {
   background: var(--glass-surface-strong) !important;
@@ -814,19 +831,13 @@
 
 /* ── TDesign drawer ────────────────────────────────────────────────── */
 .t-drawer__mask {
-  background:
-    linear-gradient(90deg, rgb(15 23 42 / 0.08), transparent 68%),
-    rgb(15 23 42 / 0.12) !important;
-  -webkit-backdrop-filter: blur(9px) saturate(0.92);
-  backdrop-filter: blur(9px) saturate(0.92);
+  background: transparent !important;
+  backdrop-filter: blur(6px) saturate(0.92) !important;
   will-change: opacity;
 }
 .dark .t-drawer__mask {
-  background:
-    linear-gradient(90deg, rgb(2 6 23 / 0.16), transparent 72%),
-    rgb(2 6 23 / 0.34) !important;
-  -webkit-backdrop-filter: blur(11px) saturate(0.86);
-  backdrop-filter: blur(11px) saturate(0.86);
+  background: transparent !important;
+  backdrop-filter: blur(6px) saturate(0.92) !important;
 }
 /* Drawer content wrapper */
 .t-drawer__content-wrapper {
@@ -983,19 +994,23 @@ html.theme-anim * {
 @media (max-width: 900px) { .viz-band { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .viz-band { grid-template-columns: 1fr; } }
 
-.donut-wrap { display: flex; align-items: center; gap: 14px; width: 100%; }
-.legend { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.donut-wrap { display: flex; align-items: center; gap: 18px; width: 100%; }
+.legend { display: flex; flex-direction: column; gap: 7px; flex: 1; min-width: 0; }
 .legend-item {
   font-size: 12px;
   color: var(--muted-foreground);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  padding: 3px 0;
+  transition: color var(--transition-fast);
 }
+.legend-item:hover { color: var(--foreground); }
 .legend-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
   display: inline-block;
   flex-shrink: 0;
+  box-shadow: 0 0 0 2px color-mix(in oklch, currentColor 18%, transparent);
 }

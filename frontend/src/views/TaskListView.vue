@@ -15,6 +15,45 @@ import type { StageState } from '../components/PipelineStepper.vue'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
 
+// ── Review summary quick-jump ────────────────────────────────────
+interface ReviewNavSection { id: string; label: string; severity: string }
+const summaryBoxRef = ref<HTMLElement | null>(null)
+
+const reviewNavSections = computed<ReviewNavSection[]>(() => {
+  const text = taskDetail.value?.review?.agent_review_summary
+  if (!text) return []
+  const sections: ReviewNavSection[] = []
+  // Match markdown headings like ### 严重问题 or ## 一般问题
+  const headingRe = /^#{1,4}\s+(.+)$/gm
+  let m: RegExpExecArray | null
+  while ((m = headingRe.exec(text)) !== null) {
+    const title = m[1].trim()
+    const id = 'rev-' + title.replace(/[^\w一-鿿]+/g, '-').replace(/-+$/, '')
+    let severity = ''
+    if (/严重|紧急|高危|致命|critical|urgent/i.test(title)) severity = 'danger'
+    else if (/一般|中等|medium|普通|moderate/i.test(title)) severity = 'warning'
+    else if (/建议|改进|优化|推荐|suggest|improve|minor/i.test(title)) severity = 'info'
+    sections.push({ id, label: title, severity })
+  }
+  return sections
+})
+
+function renderReviewSummary(md: string): string {
+  // Add id anchors to headings for quick-jump, then render markdown
+  const anchored = md.replace(/^(#{1,4}\s+(.+))$/gm, (_full, _heading, title) => {
+    const id = 'rev-' + title.trim().replace(/[^\w一-鿿]+/g, '-').replace(/-+$/, '')
+    return `<span id="${id}" class="review-anchor"></span>\n${_full}`
+  })
+  return renderMarkdown(anchored)
+}
+
+function scrollToReviewSection(id: string) {
+  const el = summaryBoxRef.value?.querySelector(`[id="${id}"]`)
+  if (el) {
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+}
+
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
 const router = useRouter()
@@ -78,8 +117,6 @@ const pipelineStages = ref<StageState[]>([
   { key: 'security',   label: '安全审查员', icon: 'shield', status: 'waiting', startedAt: null, doneAt: null },
   { key: 'summarizer', label: '审查汇总员', icon: 'file',   status: 'waiting', startedAt: null, doneAt: null },
 ])
-
-const showReviewDiff = ref(false)
 
 const statusLabels: Record<string, string> = {
   pending: '等待中', running: '执行中', paused: '已暂停', reviewing: '待审核',
@@ -477,7 +514,6 @@ const filteredTasks = computed(() => {
 async function selectTask(task: any, silent = false) {
   if (selectedTask.value?.id !== task.id) {
     taskProgress.value = wsStore.getTaskProgress(task.id)
-    showReviewDiff.value = false
     showWorkspace.value = false
     taskFiles.value = []
     selectedTaskFile.value = null
@@ -837,12 +873,6 @@ async function resumeTask(task: any, event: Event) {
         <p class="page-desc">查看 Agent 任务的执行状态与详细结果</p>
       </div>
       <div class="header-right">
-        <t-button theme="primary" size="small" @click="openCreateTaskDialog">
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          </template>
-          创建任务
-        </t-button>
         <t-select v-model="statusFilter" size="small" style="width: 100px" placeholder="全部状态">
           <t-option value="all" label="全部状态" />
           <t-option value="pending" label="等待中" />
@@ -864,21 +894,27 @@ async function resumeTask(task: any, event: Event) {
         <t-button v-if="sortBy === 'order'" size="small" :variant="autoSequence ? 'base' : 'outline'" :theme="autoSequence ? 'primary' : 'default'" @click="toggleAutoSequence" :title="autoSequence ? '点击关闭自动顺序执行' : '点击开启自动顺序执行'">
           {{ autoSequence ? '🔗 自动执行中' : '🔓 手动执行' }}
         </t-button>
-        <t-button shape="square" variant="text" @click="loadTasks()" title="刷新">
-          <template #icon>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-          </template>
-        </t-button>
         <t-button size="small" variant="outline" @click="timelineDrawerVisible = true" title="任务时间线">
           <template #icon>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           </template>
           时间线
         </t-button>
+        <t-button size="small" shape="square" variant="text" @click="loadTasks()" title="刷新">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+          </template>
+        </t-button>
         <div class="view-seg">
           <button class="seg-btn" :class="{ active: viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
           <button class="seg-btn" :class="{ active: viewMode === 'tree' }" @click="viewMode = 'tree'">树形</button>
         </div>
+        <t-button theme="primary" size="small" @click="openCreateTaskDialog">
+          <template #icon>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          </template>
+          创建任务
+        </t-button>
       </div>
     </div>
 
@@ -1013,6 +1049,13 @@ async function resumeTask(task: any, event: Event) {
             <div class="task-item-top">
               <span class="task-id">#{{ t.id }}</span>
               <div class="task-item-actions">
+                <!-- Reorder arrows (only when sorted by custom order) — positioned first -->
+                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="上移" @click="moveTask(t, 'up', $event)" :disabled="tasks.indexOf(t) === 0">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
+                </button>
+                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="下移" @click="moveTask(t, 'down', $event)" :disabled="tasks.indexOf(t) === tasks.length - 1">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
                 <button
                   v-if="isParentState(t) || hasChildren(t)"
                   class="tree-toggle"
@@ -1068,13 +1111,6 @@ async function resumeTask(task: any, event: Event) {
                   @click="archiveTask(t, $event)"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                </button>
-                <!-- Reorder arrows (only when sorted by custom order) -->
-                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="上移" @click="moveTask(t, 'up', $event)" :disabled="tasks.indexOf(t) === 0">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
-                </button>
-                <button v-if="sortBy === 'order' && !t.archived" class="order-btn" title="下移" @click="moveTask(t, 'down', $event)" :disabled="tasks.indexOf(t) === tasks.length - 1">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                 </button>
                 <!-- Delete (only archived tasks) -->
                 <button v-if="t.archived" class="delete-btn" title="永久删除" @click="deleteTask(t, $event)">
@@ -1306,19 +1342,25 @@ async function resumeTask(task: any, event: Event) {
                 <span class="review-status-badge" :style="{ color: reviewStatusColors[taskDetail.review.status] }">
                   {{ reviewStatusLabels[taskDetail.review.status] || taskDetail.review.status }}
                 </span>
+              </div>
+
+              <!-- Quick-jump nav for review sections -->
+              <div v-if="reviewNavSections.length > 0" class="review-quick-nav">
+                <span class="quick-nav-label">快速定位：</span>
                 <button
-                  v-if="taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'"
-                  class="diff-toggle"
-                  @click="showReviewDiff = !showReviewDiff"
-                >{{ showReviewDiff ? '收起代码' : '展开代码' }}</button>
+                  v-for="s in reviewNavSections"
+                  :key="s.id"
+                  class="quick-nav-chip"
+                  :class="s.severity"
+                  @click="scrollToReviewSection(s.id)"
+                >{{ s.label }}</button>
               </div>
-
-              <div class="diff-container" v-if="showReviewDiff && taskDetail.review.diff_content && taskDetail.review.diff_content !== '# No code changes detected'">
-                <DiffViewer :diff="taskDetail.review.diff_content" />
-              </div>
-              <div v-if="!taskDetail.review.diff_content || taskDetail.review.diff_content === '# No code changes detected'" class="no-diff">无代码变更</div>
-
-              <div class="summary-box" v-if="taskDetail.review.agent_review_summary" v-html="renderMarkdown(taskDetail.review.agent_review_summary)" />
+              <div
+                class="summary-box"
+                v-if="taskDetail.review.agent_review_summary"
+                ref="summaryBoxRef"
+                v-html="renderReviewSummary(taskDetail.review.agent_review_summary)"
+              />
 
               <div v-if="taskDetail.review.human_feedback" class="feedback-box">
                 <h4>人工反馈</h4>
@@ -1542,11 +1584,12 @@ async function resumeTask(task: any, event: Event) {
 .task-tree { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
 .tree-branch { display: flex; flex-direction: column; }
 .tree-card {
-  position: relative; background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 10px 12px; cursor: pointer;
+  position: relative; background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 10px 12px; cursor: pointer;
+  box-shadow: var(--card-shadow);
   transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
-.tree-card:hover { border-color: var(--primary); }
+.tree-card:hover { border-color: var(--card-hover-border); }
 .tree-card.active { border-color: var(--primary); background: var(--primary-lighter); box-shadow: 0 0 0 2px var(--ring); }
 .tree-card.root-card { border-left: 3px solid var(--primary); padding-right: 46px; }
 .tree-card.child-card { border-left: 3px solid #8957e5; }
@@ -1556,7 +1599,7 @@ async function resumeTask(task: any, event: Event) {
 .tree-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; }
 .tree-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-foreground); flex-wrap: wrap; }
 .tree-card-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
-.tree-toggle-spacer { width: 22px; height: 22px; flex-shrink: 0; }
+.tree-toggle-spacer { width: 24px; height: 24px; flex-shrink: 0; }
 
 /* 连接线 */
 .tree-children { position: relative; margin: 8px 0 4px 22px; padding-left: 16px; display: flex; flex-direction: column; gap: 8px; }
@@ -1577,22 +1620,27 @@ async function resumeTask(task: any, event: Event) {
 .ring-text { font-size: 9px; font-weight: 700; fill: var(--foreground); text-anchor: middle; font-family: var(--font-sans); }
 
 .task-item {
-  margin: 3px 8px;
-  padding: 10px 10px; border: 1px solid transparent;
+  margin: 4px 10px;
+  padding: 11px 14px; border: 1px solid transparent;
   border-radius: var(--radius-md);
   cursor: pointer;
   transition:
     background-color var(--transition-fast),
     border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
     transform var(--motion-fast) var(--motion-ease-spring);
 }
-.task-item:hover { background: var(--surface-hover); transform: translateX(2px); }
+.task-item:hover {
+  background: var(--surface-hover);
+  border-color: var(--surface-border);
+  transform: translateX(2px);
+}
 .task-item.active {
   background: var(--glass-surface-strong);
   border-color: color-mix(in oklch, var(--primary) 26%, var(--glass-border));
   box-shadow: inset 3px 0 0 var(--primary), var(--glass-highlight);
 }
-.task-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.task-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
 .task-item-actions { display: flex; align-items: center; gap: 4px; }
 .task-id { font-size: 12px; font-weight: 700; color: var(--muted-foreground); font-family: var(--font-mono); }
 .task-status { font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 4px; }
@@ -1630,11 +1678,11 @@ async function resumeTask(task: any, event: Event) {
 
 .resume-btn {
   width: 24px; height: 24px; border-radius: var(--radius-sm);
-  border: none; background: oklch(0.55 0.2 260 / 0.12); color: #8b5cf6;
+  border: none; background: var(--primary-light); color: var(--primary);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all var(--transition-fast);
 }
-.resume-btn:hover { background: #8b5cf6; color: #fff; }
+.resume-btn:hover { background: var(--primary); color: #fff; }
 
 .order-btn {
   width: 24px; height: 24px; border-radius: var(--radius-sm);
@@ -1699,9 +1747,9 @@ async function resumeTask(task: any, event: Event) {
 .del-btn:hover { background: var(--danger-light); color: var(--danger); }
 
 /* ── Detail panel ──────────────────────────────────── */
-.task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--workspace-canvas); }
-.detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-.detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
+.task-detail { flex: 1; overflow-y: auto; padding: 22px 28px; background: var(--workspace-canvas); }
+.detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
+.detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; line-height: 1.3; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .detail-header-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .detail-time { font-size: 12px; color: var(--muted-foreground); flex-shrink: 0; }
@@ -1849,20 +1897,38 @@ async function resumeTask(task: any, event: Event) {
 .detail-label { font-size: 12px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 .detail-label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
 .detail-label-row .detail-label { margin: 0; }
-.diff-toggle {
-  border: 1px solid var(--surface-border); border-radius: 999px;
-  padding: 3px 9px; background: var(--surface); color: var(--muted-foreground);
-  font-size: 11px; line-height: 1.2; cursor: pointer;
-}
-.diff-toggle:hover { color: var(--foreground); background: var(--surface-hover); }
 .review-status-badge { font-size: 12px; font-weight: 700; }
+
+/* ── Review quick-jump nav ───────────────────────────────────── */
+.review-quick-nav {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 10px;
+  background: var(--glass-surface-soft);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+}
+.quick-nav-label {
+  font-size: 11px; font-weight: 600; color: var(--muted-foreground);
+  margin-right: 2px;
+}
+.quick-nav-chip {
+  padding: 3px 10px; border-radius: 999px; border: 1px solid var(--surface-border);
+  background: var(--surface); color: var(--muted-foreground);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.quick-nav-chip:hover { color: var(--foreground); border-color: var(--ring); }
+.quick-nav-chip.danger { color: var(--danger); background: var(--danger-light); border-color: transparent; }
+.quick-nav-chip.warning { color: var(--warning); background: var(--warning-light); border-color: transparent; }
+.quick-nav-chip.info { color: var(--info); background: var(--info-light); border-color: transparent; }
+.review-anchor { display: block; position: relative; top: -20px; visibility: hidden; }
 
 .review-actions { display: flex; gap: 6px; margin-left: auto; }
 
 /* Nested-agent task tree */
 .tree-toggle {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 6px; border: none; cursor: pointer;
+  width: 24px; height: 24px; border-radius: var(--radius-sm); border: none; cursor: pointer;
   background: transparent; color: var(--muted-foreground);
   transition: transform var(--transition-fast), color var(--transition-fast);
 }
@@ -1870,14 +1936,14 @@ async function resumeTask(task: any, event: Event) {
 .tree-toggle.rotated { transform: rotate(90deg); }
 .plan-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; border-radius: 6px; border: none; cursor: pointer;
-  color: #fff; background: linear-gradient(90deg, var(--primary), #8957e5);
-  transition: filter var(--transition-fast), transform var(--transition-fast);
+  width: 24px; height: 24px; border-radius: var(--radius-sm); border: none; cursor: pointer;
+  color: var(--primary); background: var(--primary-light);
+  transition: all var(--transition-fast);
 }
-.plan-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.plan-btn:hover { background: var(--primary); color: #fff; }
 .plan-spinner {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px;
+  width: 24px; height: 24px;
 }
 .plan-spinner .spinner {
   width: 14px; height: 14px;
@@ -1909,20 +1975,14 @@ async function resumeTask(task: any, event: Event) {
 .feedback-hint { font-size: 13px; color: var(--muted-foreground); margin: 0; line-height: 1.5; }
 
 .desc-box {
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 12px 14px;
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 12px 14px;
   font-size: 13.5px; line-height: 1.6; color: var(--foreground); white-space: pre-wrap;
 }
 
-.diff-container {
-  border: 1px solid var(--surface-border); border-radius: var(--radius-md);
-  overflow: hidden; min-height: 150px; max-height: 400px; margin-bottom: 12px;
-}
-.no-diff { font-size: 13px; color: var(--muted-foreground); padding: 16px; text-align: center; background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-md); margin-bottom: 12px; }
-
 .summary-box {
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 14px 16px;
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 14px 16px;
   font-size: 13.5px; line-height: 1.7;
 }
 .summary-box :deep(h1) { font-size: 16px; font-weight: 700; margin: 0 0 8px; border-bottom: 1px solid var(--surface-border); padding-bottom: 6px; }
@@ -1978,8 +2038,8 @@ async function resumeTask(task: any, event: Event) {
 .execution-log-state { font-size: 11px; font-weight: 500; color: var(--success); }
 .execution-log-state.waiting { color: var(--primary); }
 .progress-log {
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 10px 14px;
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 10px 14px;
   margin-bottom: 12px; max-height: 360px; overflow-y: auto;
 }
 .progress-log.empty { min-height: 48px; display: flex; align-items: center; }
@@ -2015,9 +2075,20 @@ async function resumeTask(task: any, event: Event) {
 
 .loading-box { display: flex; align-items: center; gap: 10px; padding: 32px; color: var(--muted-foreground); font-size: 14px; }
 
-.empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
-.empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }
-.empty-detail p { font-size: 13px; color: var(--muted-foreground); }
+.empty-detail {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; background: var(--workspace-canvas);
+}
+.empty-detail-icon {
+  width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-2xl);
+  color: var(--primary);
+  background: linear-gradient(145deg, var(--primary-light), var(--glass-surface-soft));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
+  margin-bottom: 4px;
+}
+.empty-detail p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
 
 /* ── Create task dialog ─────────────────────────────── */
 .dialog-form { display: flex; flex-direction: column; gap: 8px; }

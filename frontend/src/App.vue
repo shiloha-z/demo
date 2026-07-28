@@ -3,10 +3,11 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useWebSocketStore } from './stores/websocket'
-import { useThemeStore } from './stores/theme'
+import { useThemeStore, COLOR_THEME_OPTIONS } from './stores/theme'
 import { useProjectStore } from './stores/project'
 import { useNotificationStore } from './stores/notification'
 import { useMessageStore } from './stores/message'
+import { playSystemDing } from './utils/notificationSound'
 import ProjectSidebar from './components/ProjectSidebar.vue'
 import ChatSidebar from './components/ChatSidebar.vue'
 import GlobalLoadingBar from './components/GlobalLoadingBar.vue'
@@ -31,6 +32,7 @@ const appMainRef = ref<HTMLElement | null>(null)
 const pageScrollPositions = new Map<string, number>()
 let pollNotifTimer: ReturnType<typeof setInterval> | null = null
 const showUserMenu = ref(false)
+const showColorMenu = ref(false)
 
 function toggleUserMenu() {
   showUserMenu.value = !showUserMenu.value
@@ -38,6 +40,19 @@ function toggleUserMenu() {
 
 function closeUserMenu() {
   showUserMenu.value = false
+}
+
+function toggleColorMenu() {
+  showColorMenu.value = !showColorMenu.value
+}
+
+function closeColorMenu() {
+  showColorMenu.value = false
+}
+
+function selectColorTheme(key: string) {
+  theme.setColorTheme(key as any)
+  closeColorMenu()
 }
 
 const pageTitles: Record<string, string> = {
@@ -80,9 +95,21 @@ function joinCurrentProject() {
   }
 }
 
+const selectedProjectId = computed<number | null>({
+  get: () => projectStore.currentProject?.id ?? null,
+  set: (id: number | null) => {
+    const p = projectStore.switchableProjects.find(p => p.id === id) || null
+    projectStore.setCurrentProject(p)
+  },
+})
+
 function toggleChat() {
   chatVisible.value = !chatVisible.value
 }
+
+const currentColorTheme = computed(() =>
+  COLOR_THEME_OPTIONS.find(t => t.key === theme.colorTheme) ?? COLOR_THEME_OPTIONS[0],
+)
 
 onMounted(() => {
   if (!isLoginPage.value) ws.connect()
@@ -90,6 +117,7 @@ onMounted(() => {
   unsubMessage = ws.on('message_new', (message) => {
     msgStore.receive(message)
     void msgStore.refresh()
+    playSystemDing()
   })
   // Initial notification count + periodic polling fallback
   msgStore.refresh()
@@ -222,29 +250,29 @@ function handleLogout() {
           <svg class="user-menu-arrow" :class="{ open: showUserMenu }" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
         </div>
 
-        <!-- Dropdown menu -->
+        <!-- Dropdown menu — teleported to body so it escapes the sidebar stacking context -->
         <Teleport to="body">
           <Transition name="overlay-fade">
             <div v-if="showUserMenu" class="user-menu-backdrop" @click="closeUserMenu" />
           </Transition>
+          <Transition name="menu-pop">
+            <div v-if="showUserMenu" class="user-dropdown">
+              <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/profile')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span>个人资料设置</span>
+              </button>
+              <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/settings')">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
+                <span>系统设置</span>
+              </button>
+              <div class="user-dropdown-divider"></div>
+              <button class="user-dropdown-item danger" @click="handleLogout">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                <span>退出登录</span>
+              </button>
+            </div>
+          </Transition>
         </Teleport>
-        <Transition name="menu-pop">
-          <div v-if="showUserMenu" class="user-dropdown">
-            <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/profile')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-              <span>个人资料设置</span>
-            </button>
-            <button class="user-dropdown-item" @click="closeUserMenu(); router.push('/settings')">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09A1.65 1.65 0 0 0 19.4 15z"/></svg>
-              <span>系统设置</span>
-            </button>
-            <div class="user-dropdown-divider"></div>
-            <button class="user-dropdown-item danger" @click="handleLogout">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-              <span>退出登录</span>
-            </button>
-          </div>
-        </Transition>
       </div>
     </aside>
 
@@ -260,31 +288,76 @@ function handleLogout() {
             <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
           </button>
           <h2 class="topbar-title">{{ currentPageTitle }}</h2>
-          <div v-if="projectStore.currentProject" class="topbar-project">
-            <span class="project-status-dot"></span>
-            <span>{{ projectStore.currentProject.name }}</span>
-          </div>
+        </div>
+        <div class="topbar-center">
+          <t-select
+            v-model="selectedProjectId"
+            class="topbar-project-select"
+            placeholder="选择项目…"
+            borderless
+            filterable
+            :popup-props="{ overlayClassName: 'project-select-popup' }"
+          >
+            <t-option
+              v-for="p in projectStore.switchableProjects"
+              :key="p.id"
+              :value="p.id"
+              :label="p.name"
+            />
+          </t-select>
         </div>
         <div class="topbar-right">
           <button
-            class="topbar-icon-btn notif-toggle-btn"
+            class="topbar-icon-btn"
+            :class="{ 'is-active': showColorMenu }"
+            :title="`主题色：${currentColorTheme.label}`"
+            @click="toggleColorMenu"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 1 0 20"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+            <span class="indicator-dot" :style="{ background: `linear-gradient(135deg, ${currentColorTheme.colors[0]}, ${currentColorTheme.colors[1]})` }"></span>
+          </button>
+          <Teleport to="body">
+            <Transition name="overlay-fade">
+              <div v-if="showColorMenu" class="color-menu-backdrop" @click="closeColorMenu" />
+            </Transition>
+            <Transition name="menu-pop">
+              <div v-if="showColorMenu" class="color-menu">
+                <div class="color-menu-header">主题色</div>
+                <button
+                  v-for="opt in COLOR_THEME_OPTIONS"
+                  :key="opt.key"
+                  class="color-menu-item"
+                  :class="{ active: theme.colorTheme === opt.key }"
+                  @click="selectColorTheme(opt.key)"
+                >
+                  <span class="color-swatch" :style="{ background: `linear-gradient(135deg, ${opt.colors[0]}, ${opt.colors[1]})` }"></span>
+                  <span class="color-label">{{ opt.label }}</span>
+                  <svg v-if="theme.colorTheme === opt.key" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </button>
+              </div>
+            </Transition>
+          </Teleport>
+          <button class="topbar-icon-btn" :title="theme.isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="theme.toggleDark()">
+            <svg v-if="theme.isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+            <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          </button>
+          <button
+            class="topbar-icon-btn"
+            :class="{ 'is-active': notifDropdownVisible }"
             :title="`通知 (${msgStore.unreadCount})`"
             @click="notifDropdownVisible = !notifDropdownVisible"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-            <span class="notif-badge" v-if="msgStore.unreadCount > 0">{{ msgStore.unreadCount > 99 ? '99+' : msgStore.unreadCount }}</span>
+            <span class="badge-dot" v-if="msgStore.unreadCount > 0">{{ msgStore.unreadCount > 99 ? '99+' : msgStore.unreadCount }}</span>
           </button>
           <button
-            class="topbar-icon-btn chat-toggle-btn"
+            class="topbar-icon-btn"
+            :class="{ 'is-active': chatVisible }"
             :title="chatVisible ? '关闭聊天' : `打开聊天 (${notifStore.chatUnread})`"
             @click="toggleChat"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            <span class="notif-badge" v-if="notifStore.chatUnread > 0">{{ notifStore.chatUnread > 99 ? '99+' : notifStore.chatUnread }}</span>
-          </button>
-          <button class="topbar-icon-btn" :title="theme.isDark ? '切换到亮色模式' : '切换到暗色模式'" @click="theme.toggleDark()">
-            <svg v-if="theme.isDark" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-            <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <span class="badge-dot" v-if="notifStore.chatUnread > 0">{{ notifStore.chatUnread > 99 ? '99+' : notifStore.chatUnread }}</span>
           </button>
         </div>
       </header>
@@ -500,7 +573,6 @@ function handleLogout() {
 .sidebar-footer {
   margin-top: auto;
   border-top: 1px solid var(--surface-border);
-  position: relative;
   flex-shrink: 0;
   min-width: 0;
 }
@@ -610,17 +682,17 @@ function handleLogout() {
 }
 
 .user-dropdown {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 10px;
-  right: 10px;
+  position: fixed;
+  bottom: 80px;
+  left: 16px;
+  width: 220px;
   background: var(--glass-surface-strong);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-menu), var(--glass-highlight);
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  z-index: 100;
+  z-index: 9999;
   padding: 6px;
   display: flex;
   flex-direction: column;
@@ -681,6 +753,7 @@ function handleLogout() {
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
+  position: relative;
   background: var(--glass-surface);
   -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
   backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
@@ -703,43 +776,30 @@ function handleLogout() {
   min-width: 0;
 }
 
-.topbar-project {
-  display: inline-flex;
+.topbar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
   align-items: center;
-  gap: 7px;
-  min-width: 0;
-  max-width: 240px;
-  padding: 5px 10px;
-  border: 1px solid var(--surface-border);
-  border-radius: 999px;
-  background: var(--glass-surface-soft);
-  color: var(--muted-foreground);
-  font-size: 12px;
-  box-shadow: var(--glass-highlight);
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
-  backdrop-filter: blur(var(--glass-blur-sm));
 }
-
-.topbar-project span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.topbar-project-select {
+  max-width: 180px; min-width: 120px;
 }
-
-.project-status-dot {
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  background: var(--success);
-  box-shadow: 0 0 0 3px var(--success-light);
-  animation: project-online-pulse 2.6s var(--motion-ease-standard) infinite;
+.topbar-project-select :deep(.t-input) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  font-size: 13px; font-weight: 600;
+  color: var(--primary);
+  height: auto; min-height: 0;
 }
-
-@keyframes project-online-pulse {
-  0%, 100% { box-shadow: 0 0 0 3px var(--success-light); }
-  50% { box-shadow: 0 0 0 6px transparent; }
+.topbar-project-select :deep(.t-input__inner) {
+  font-size: 13px; font-weight: 600;
+  color: var(--primary);
 }
+.topbar-project-select :deep(.t-input__suffix) { opacity: 0.6; }
 
 .topbar-right {
   display: flex;
@@ -747,9 +807,10 @@ function handleLogout() {
   gap: 6px;
 }
 
+/* ── Unified topbar icon buttons ──────────────────────────────────── */
 .topbar-icon-btn {
-  width: 34px;
-  height: 34px;
+  position: relative;
+  width: 34px; height: 34px;
   border-radius: var(--radius-md);
   border: none;
   background: transparent;
@@ -761,61 +822,88 @@ function handleLogout() {
   transition:
     background-color var(--transition-fast),
     color var(--transition-fast),
-    transform var(--transition-fast);
+    transform 0.22s var(--motion-ease-spring);
 }
-
 .topbar-icon-btn svg {
-  transition: transform var(--motion-base) var(--motion-ease-spring);
+  transition: transform 0.22s var(--motion-ease-spring);
 }
-
 .topbar-icon-btn:hover {
   background: var(--surface-hover);
   color: var(--foreground);
 }
-
 .topbar-icon-btn:hover svg {
-  transform: scale(1.08);
+  transform: scale(1.12);
 }
-
-.topbar-icon-btn:last-child:hover svg {
-  transform: rotate(14deg) scale(1.08);
+/* Active / toggled-on highlight */
+.topbar-icon-btn.is-active {
+  color: var(--primary) !important;
+  background: var(--primary-light) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 16%, transparent);
 }
-
-.topbar-icon-btn:active {
-  transform: scale(0.94);
-}
-
-.chat-toggle-btn {
-  position: relative;
-}
-.app-body.chat-open .chat-toggle-btn {
-  color: var(--primary);
-  background: var(--primary-light);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 12%, transparent);
-}
-.notif-toggle-btn {
-  position: relative;
-}
-.notif-badge {
+/* Shared badge — notification + chat count */
+.topbar-icon-btn .badge-dot {
   position: absolute;
-  top: 2px; right: 2px;
+  top: 1px; right: 1px;
   min-width: 16px; height: 16px;
   padding: 0 4px;
   border-radius: 8px;
   background: var(--danger);
   color: #fff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
+  font-size: 10px; font-weight: 700;
+  line-height: 16px; text-align: center;
   pointer-events: none;
   transform-origin: center;
   animation: badge-pop 320ms var(--motion-ease-spring) both;
 }
+/* Shared indicator dot — color-theme swatch */
+.topbar-icon-btn .indicator-dot {
+  position: absolute;
+  bottom: 4px; right: 4px;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--surface);
+  pointer-events: none;
+}
+.color-menu-backdrop {
+  position: fixed; inset: 0; z-index: 9998;
+}
+.color-menu {
+  position: fixed;
+  top: 56px; right: 62px;
+  width: 170px;
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-floating), var(--glass-highlight);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  z-index: 9999;
+  padding: 6px;
+  display: flex; flex-direction: column;
+}
+.color-menu-header {
+  font-size: 10.5px; font-weight: 700; color: var(--muted-foreground);
+  text-transform: uppercase; letter-spacing: 0.6px;
+  padding: 5px 10px 7px;
+}
+.color-menu-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--foreground);
+  font-size: 13px; font-family: var(--font-sans); cursor: pointer;
+  text-align: left; width: 100%;
+  transition: background var(--transition-fast);
+}
+.color-menu-item:hover { background: var(--surface-hover); }
+.color-menu-item.active { color: var(--primary); font-weight: 600; }
+.color-menu-item svg { margin-left: auto; color: var(--primary); flex-shrink: 0; }
+.color-swatch {
+  width: 20px; height: 20px; border-radius: 6px; flex-shrink: 0;
+  box-shadow: 0 0 0 1px var(--surface-border), inset 0 1px 0 rgba(255,255,255,0.2);
+}
+.color-label { flex: 1; }
 
 @keyframes badge-pop {
   from { opacity: 0; transform: scale(0.45); }
-  65% { opacity: 1; transform: scale(1.12); }
   to { opacity: 1; transform: scale(1); }
 }
 
@@ -891,10 +979,6 @@ function handleLogout() {
   .app-topbar {
     height: 56px;
     padding: 0 18px;
-  }
-
-  .topbar-project {
-    display: none;
   }
 
   .app-main {

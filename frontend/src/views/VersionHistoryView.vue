@@ -247,11 +247,11 @@ function formatDate(d: string) {
 .timeline-card {
   flex: 1; display: flex; justify-content: space-between; align-items: center; gap: 12px;
   padding: 12px 16px; margin-bottom: 4px;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); box-shadow: var(--shadow-surface);
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); box-shadow: var(--card-shadow);
   transition: border-color var(--transition-base), box-shadow var(--transition-base);
 }
-.timeline-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); }
+.timeline-card:hover { border-color: var(--card-hover-border); box-shadow: var(--card-hover-shadow); }
 .timeline-item.focused .timeline-card {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--primary-light), var(--shadow-card-hover);

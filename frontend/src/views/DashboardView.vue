@@ -543,9 +543,9 @@ async function handleJoinProject(p: any, event: Event) {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 19px 20px;
-  box-shadow: var(--shadow-surface);
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 19px 20px;
+  box-shadow: var(--card-shadow);
   position: relative;
   overflow: hidden;
   transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
@@ -560,7 +560,7 @@ async function handleJoinProject(p: any, event: Event) {
   border-radius: 50%;
   background: var(--primary-light);
 }
-.stat-card:hover { border-color: color-mix(in oklch, var(--primary) 35%, var(--surface-border)); box-shadow: var(--shadow-card-hover); transform: translateY(-2px); }
+.stat-card:hover { border-color: var(--card-hover-border); box-shadow: var(--card-hover-shadow); transform: var(--card-hover-transform); }
 
 .stat-icon {
   width: 42px; height: 42px; border-radius: var(--radius-md);
@@ -636,15 +636,15 @@ async function handleJoinProject(p: any, event: Event) {
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 14px; }
 .project-card {
   display: flex; align-items: center; gap: 14px;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 17px 18px;
-  box-shadow: var(--shadow-surface); cursor: pointer;
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: var(--card-padding);
+  box-shadow: var(--card-shadow); cursor: pointer;
   transition: all var(--transition-base);
 }
 .project-card:hover {
-  border-color: color-mix(in oklch, var(--primary) 40%, var(--surface-border));
-  box-shadow: var(--shadow-card-hover);
-  transform: translateY(-1px);
+  border-color: var(--card-hover-border);
+  box-shadow: var(--card-hover-shadow);
+  transform: var(--card-hover-transform);
 }
 .project-card-icon {
   width: 42px; height: 42px; border-radius: 11px;

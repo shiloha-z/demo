@@ -308,16 +308,16 @@ onActivated(load)
 /* ── Empty ──────────────────────────────────────────────────────────── */
 .empty-card {
   padding: 48px; text-align: center; color: var(--muted-foreground);
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius);
 }
 
 /* ── Message list ───────────────────────────────────────────────────── */
 .msg-list { display: flex; flex-direction: column; gap: 10px; }
 .load-more-row { display: flex; justify-content: center; padding: 18px 0 4px; }
 .msg-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
+  background: var(--card-bg);
+  border: var(--card-border);
   border-radius: var(--radius-lg);
   padding: 14px 16px;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);

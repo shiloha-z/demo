@@ -7,6 +7,7 @@ import { useNotificationStore } from '../stores/notification'
 import { MessagePlugin } from 'tdesign-vue-next'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
+import { playChatPop } from '../utils/notificationSound'
 
 const props = defineProps<{
   visible: boolean
@@ -488,6 +489,7 @@ function setupWS() {
     if (!isCurrentProject) {
       if (data.user_id !== auth.userId) {
         emit('unreadCount', conversationKeyForMessage(data))
+        playChatPop()
       }
       return
     }
@@ -495,6 +497,7 @@ function setupWS() {
     if (!belongsToActiveConversation) {
       if (data.user_id !== auth.userId) {
         emit('unreadCount', conversationKeyForMessage(data))
+        playChatPop()
       }
       return
     }
@@ -507,7 +510,10 @@ function setupWS() {
         if (props.visible) markActiveConversationViewed()
       } else {
         if (props.visible) newMessagesBelow.value += 1
-        if (!isOwnMessage) emit('unreadCount', conversationKeyForMessage(data))
+        if (!isOwnMessage) {
+          emit('unreadCount', conversationKeyForMessage(data))
+          playChatPop()
+        }
       }
     }
   })
@@ -1462,7 +1468,11 @@ watch(() => props.focusMessageId, () => {
 .chat-date-sep span { font-size: 11px; font-weight: 600; color: var(--muted-foreground); background: var(--surface); padding: 2px 12px; border-radius: 999px; border: 1px solid var(--surface-border); }
 
 /* ── Message rows ───────────────────── */
-.chat-msg { display: flex; align-items: flex-start; gap: 8px; padding: 2px 16px; }
+.chat-msg { display: flex; align-items: flex-start; gap: 8px; padding: 2px 16px; animation: msgEnter 0.32s var(--motion-ease-enter) both; }
+@keyframes msgEnter {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .chat-msg.focused {
   background: var(--primary-light);
   animation: focused-message-pulse 1.2s ease-out 2;

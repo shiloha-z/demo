@@ -267,52 +267,54 @@ async function deleteSelected() {
     <div v-else class="file-panels">
       <div class="file-tree-panel">
         <div class="tree-toolbar">
-          <span class="tree-title">文件列表</span>
+          <span class="tree-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            文件列表
+          </span>
           <div class="tree-actions">
-            <t-button shape="square" variant="text" size="small" title="新建文件" @click="showNewFile = true">
-              <template #icon>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
-              </template>
-            </t-button>
-            <t-button shape="square" variant="text" size="small" title="新建文件夹" @click="showNewFolder = true">
-              <template #icon>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
-              </template>
-            </t-button>
-            <t-button shape="square" variant="text" size="small" :disabled="uploading" title="上传文件" @click="triggerUpload">
-              <template #icon>
-                <svg v-if="!uploading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                <span v-else class="mini-spinner"></span>
-              </template>
-            </t-button>
-            <t-button shape="square" variant="text" size="small" :disabled="folderUploading" title="上传文件夹" @click="triggerFolderUpload">
-              <template #icon>
-                <svg v-if="!folderUploading" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 8 12 16"/><polyline points="9 11 12 8 15 11"/></svg>
-                <span v-else class="mini-spinner"></span>
-              </template>
-            </t-button>
+            <button class="tree-act-btn" title="新建文件" @click="showNewFile = true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            </button>
+            <button class="tree-act-btn" title="新建文件夹" @click="showNewFolder = true">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+            </button>
+            <button class="tree-act-btn" :disabled="uploading" title="上传文件" @click="triggerUpload">
+              <svg v-if="!uploading" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              <span v-else class="mini-spinner"></span>
+            </button>
+            <button class="tree-act-btn" :disabled="folderUploading" title="上传文件夹" @click="triggerFolderUpload">
+              <svg v-if="!folderUploading" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><polyline points="12 8 12 16"/><polyline points="9 11 12 8 15 11"/></svg>
+              <span v-else class="mini-spinner"></span>
+            </button>
             <input ref="uploadInput" type="file" multiple style="display:none" @change="handleUpload" />
             <input ref="folderInput" type="file" webkitdirectory style="display:none" @change="handleFolderUpload" />
           </div>
         </div>
         <FileTree ref="fileTreeRef" :project-id="selectedProjectId" @select="handleSelect" @delete-node="handleTreeDelete" />
       </div>
-      <div class="file-view-panel" v-loading="loadingFile">
+      <div class="file-view-panel">
         <template v-if="selectedFile">
           <div class="file-path-bar">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            {{ selectedFile }}
-            <button class="file-delete-btn" title="删除" @click="deleteSelected">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            <div class="file-path-left">
+              <span class="file-ext-badge">{{ selectedFile.split('.').pop()?.toUpperCase() || 'FILE' }}</span>
+              <span class="file-path-text">{{ selectedFile }}</span>
+            </div>
+            <span class="file-line-count" v-if="fileContent">{{ fileContent.split('\n').length }} 行</span>
+            <button class="file-delete-btn" title="删除文件" @click="deleteSelected">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
             </button>
           </div>
-          <MonacoEditor :content="fileContent" :language="getLanguage()" />
+          <div v-if="loadingFile" class="editor-loading">
+            <span class="mini-spinner"></span> 加载中…
+          </div>
+          <MonacoEditor v-else :content="fileContent" :language="getLanguage()" />
         </template>
         <div v-else class="empty-view">
           <div class="empty-view-icon">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 11l3 3 8-8"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </div>
-          <p>点击左侧文件查看内容</p>
+          <p class="empty-view-title">选择文件开始编辑</p>
+          <p class="empty-view-hint">点击左侧文件树中的文件查看内容</p>
         </div>
       </div>
     </div>
@@ -357,42 +359,77 @@ async function deleteSelected() {
 
 .tree-toolbar {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 12px; border-bottom: 1px solid var(--surface-border);
+  padding: 10px 14px; border-bottom: 1px solid var(--surface-border);
   flex-shrink: 0;
 }
-
-.tree-title { font-size: 12.5px; font-weight: 700; color: var(--foreground); }
-.tree-actions { display: flex; gap: 2px; }
-
-.file-tree-panel :deep(.file-tree) { flex: 1; overflow-y: auto; }
-
-.file-view-panel {
-  flex: 1; display: flex; flex-direction: column; background: color-mix(in oklch, var(--workspace-canvas) 72%, transparent);
+.tree-title {
+  font-size: 12.5px; font-weight: 700; color: var(--foreground);
+  display: flex; align-items: center; gap: 7px;
 }
-.file-path-bar {
-  display: flex; align-items: center; gap: 6px;
-  padding: 9px 14px; background: var(--glass-surface-soft); border-bottom: 1px solid var(--glass-border);
-  font-size: 12px; font-family: var(--font-mono); color: var(--muted-foreground);
-  flex-shrink: 0;
-}
-.file-delete-btn {
-  margin-left: auto; width: 26px; height: 26px; border-radius: var(--radius-sm);
+.tree-title svg { opacity: 0.5; }
+.tree-actions { display: flex; gap: 1px; }
+.tree-act-btn {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--muted-foreground);
   cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: all var(--transition-fast);
 }
-.file-delete-btn:hover { background: var(--danger-light); color: var(--danger); }
-.file-view-panel :deep(.monaco-container) { flex: 1; }
+.tree-act-btn:hover { background: var(--surface-hover); color: var(--foreground); }
+.tree-act-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-.empty-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+.file-tree-panel :deep(.file-tree) { flex: 1; overflow-y: auto; }
+
+.file-view-panel {
+  flex: 1; display: flex; flex-direction: column;
+  background: color-mix(in oklch, var(--workspace-canvas) 72%, transparent);
+}
+.file-path-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; background: var(--glass-surface-soft);
+  border-bottom: 1px solid var(--glass-border);
+  flex-shrink: 0;
+}
+.file-path-left { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.file-ext-badge {
+  padding: 2px 6px; border-radius: 4px;
+  font-size: 10px; font-weight: 700; font-family: var(--font-mono);
+  color: var(--primary); background: var(--primary-light);
+  flex-shrink: 0;
+}
+.file-path-text {
+  font-size: 12px; font-family: var(--font-mono); color: var(--muted-foreground);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-line-count {
+  font-size: 11px; color: var(--muted-foreground); font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.file-delete-btn {
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
+  border: none; background: transparent; color: var(--muted-foreground);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: all var(--transition-fast); flex-shrink: 0;
+}
+.file-delete-btn:hover { background: var(--danger-light); color: var(--danger); }
+
+.editor-loading {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  height: 200px; color: var(--muted-foreground); font-size: 13px;
+}
+
+.empty-view {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+}
 .empty-view-icon {
-  width: 68px; height: 68px;
+  width: 72px; height: 72px;
   display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-2xl);
   color: var(--primary);
   background: linear-gradient(145deg, var(--primary-light), var(--glass-surface-soft));
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-highlight);
+  margin-bottom: 4px;
 }
-.empty-view p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
+.empty-view-title { font-size: 14px; font-weight: 600; color: var(--foreground); margin: 0; }
+.empty-view-hint { font-size: 12px; color: var(--muted-foreground); margin: 0; }
 </style>

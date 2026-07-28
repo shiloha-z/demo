@@ -170,9 +170,9 @@ function onBackdropClick(e: MouseEvent) {
 /* ── Backdrop ──────────────────────────────────────────────────── */
 .notif-dropdown-backdrop {
   position: fixed; inset: 0; z-index: 200;
-  background: rgba(15, 23, 42, 0.035);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  background: rgba(15, 23, 42, 0.05);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
 }
 .notif-dropdown {
   position: fixed;

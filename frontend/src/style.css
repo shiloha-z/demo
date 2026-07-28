@@ -51,10 +51,10 @@ body {
   min-height: 100vh;
 }
 
-/* Scrollbar — thin + translucent */
+/* Scrollbar — glass-style, thin */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
 }
 
 ::-webkit-scrollbar-track {
@@ -62,10 +62,25 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: oklch(0 0 0 / 0.12);
-  border-radius: 3px;
+  background: oklch(0 0 0 / 0.1);
+  border-radius: 99px;
+  border: 1.5px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: oklch(0 0 0 / 0.22);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: oklch(1 0 0 / 0.12);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: oklch(1 0 0 / 0.22);
 }

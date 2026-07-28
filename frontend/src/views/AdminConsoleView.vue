@@ -240,10 +240,11 @@ onMounted(() => {
 }
 
 .stat-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
   padding: 18px 20px;
+  box-shadow: var(--card-shadow);
 }
 
 .stat-value {
@@ -261,11 +262,12 @@ onMounted(() => {
 
 .promote-card,
 .users-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
   padding: 20px;
   margin-bottom: 20px;
+  box-shadow: var(--card-shadow);
 }
 
 .card-title {

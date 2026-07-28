@@ -355,7 +355,7 @@ const topWorkload = computed(() => {
       <div class="page-header-actions">
         <input ref="importInput" class="import-file-input" type="file" accept="application/json,.json" @change="importAgent" />
         <t-button variant="outline" :loading="importingAgent" @click="openImportPicker">导入 Agent</t-button>
-        <t-button variant="outline" size="small" @click="showViz = !showViz">{{ showViz ? '收起图表' : '展开图表' }}</t-button>
+        <t-button variant="outline" @click="showViz = !showViz">{{ showViz ? '收起图表' : '展开图表' }}</t-button>
       <t-button theme="primary" @click="showCreateAgent = true; loadModels(newAgent.runner_type); checkRunnerAvailability(newAgent.runner_type); fetchSkills()">
         <template #icon>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -411,50 +411,59 @@ const topWorkload = computed(() => {
         <div class="agent-body">
           <div class="agent-name-row">
             <span class="agent-name">{{ a.name }}</span>
+            <span v-if="a.enable_planning" class="planning-badge">规划</span>
             <span class="status-dot" :class="statusDisplay[a.status]?.cls || 'dot-idle'" :title="statusLabels[a.status] || a.status" />
           </div>
           <div class="agent-meta">
             <span class="role-badge" :style="{ background: (roleColors[a.role] || 'var(--muted-foreground)') + '18', color: roleColors[a.role] }">
               {{ roleLabels[a.role] || a.role }}
             </span>
-            <span class="model-tag">{{ a.model }}</span>
             <span class="runner-badge" :style="{ background: (runnerColors[a.runner_type] || 'var(--muted-foreground)') + '14', color: runnerColors[a.runner_type] || 'var(--muted-foreground)' }">
               {{ runnerLabels[a.runner_type] || a.runner_type || 'CrewAI' }}
             </span>
-            <span v-if="a.enable_planning" class="planning-badge">自主规划</span>
-            <span v-if="a.creator_name" class="creator-tag">{{ a.is_creator ? '我创建的' : `创建者：${a.creator_name}` }}</span>
+            <span class="model-tag">{{ a.model }}</span>
+            <span v-if="a.creator_name && !a.is_creator" class="creator-tag">@{{ a.creator_name }}</span>
           </div>
 
           <!-- Working state: show current task -->
           <div v-if="a.status === 'working' && a.current_task_title" class="agent-current-task">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span class="current-task-dot"></span>
             <span class="current-task-title">{{ a.current_task_title }}</span>
           </div>
 
           <!-- Idle/done state: show stats -->
           <div v-else class="agent-stats">
-            <span v-if="a.total_tasks > 0" class="stat-item">
-              执行 <strong>{{ a.total_tasks }}</strong> 次
-            </span>
-            <span v-if="a.approval_rate" class="stat-item stat-approval" :class="{ 'rate-high': (a.approved_tasks / a.total_tasks) >= 0.5 }">
-              通过率 <strong>{{ a.approval_rate }}</strong>
-            </span>
-            <span v-if="a.last_task_status" class="stat-item stat-last">
-              {{ lastResultLabel(a.last_task_status) }}
-            </span>
+            <div class="stat-row">
+              <span v-if="a.total_tasks > 0" class="stat-item">
+                执行 <strong>{{ a.total_tasks }}</strong> 次
+              </span>
+              <span v-if="a.last_task_status" class="stat-item stat-last">
+                {{ lastResultLabel(a.last_task_status) }}
+              </span>
+            </div>
+            <div v-if="a.approval_rate" class="approval-bar-wrap">
+              <span class="approval-label">通过率 {{ a.approval_rate }}</span>
+              <div class="approval-bar-track">
+                <div class="approval-bar-fill" :style="{ width: a.approval_rate }"></div>
+              </div>
+            </div>
           </div>
         </div>
 
         <!-- Actions -->
         <div class="agent-actions">
-          <t-button v-if="a.is_creator" size="small" variant="text" @click="exportAgent(a)">导出</t-button>
-          <t-button size="small" variant="text" @click="openTaskDialog(a)">指派任务</t-button>
+          <t-button size="small" variant="text" @click="openTaskDialog(a)" title="指派任务">
+            <template #icon>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </template>
+          </t-button>
           <t-button size="small" variant="text" @click="openAgentMemory(a)" title="Agent 记忆">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           </t-button>
+          <t-button v-if="a.is_creator" size="small" variant="text" @click="exportAgent(a)" title="导出">导出</t-button>
           <t-button v-if="a.is_creator" size="small" variant="text" theme="danger" @click="deleteAgent(a.id, a.name)" title="删除">
             <template #icon>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
             </template>
           </t-button>
         </div>
@@ -576,14 +585,17 @@ const topWorkload = computed(() => {
 .agent-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 10px; }
 .agent-card {
   display: flex; align-items: flex-start; gap: 14px;
-  padding: 16px 18px; background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-surface);
+  padding: var(--card-padding);
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
 }
 .agent-filter { display: flex; gap: 4px; margin-bottom: 16px; }
-.agent-filter button { border: 1px solid var(--surface-border); background: var(--surface); color: var(--muted-foreground); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; }
+.agent-filter button { border: var(--card-border); background: var(--card-bg); color: var(--muted-foreground); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 12px; cursor: pointer; }
 .agent-filter button:hover, .agent-filter button.active { color: var(--primary); border-color: var(--primary); background: var(--primary-lighter); }
-.agent-card:hover { border-color: var(--primary); box-shadow: var(--shadow-card-hover); transform: translateY(-1px); }
+.agent-card:hover { border-color: var(--card-hover-border); box-shadow: var(--card-hover-shadow); transform: var(--card-hover-transform); }
 .agent-card.agent-working {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px oklch(0.55 0.2 260 / 0.1);
@@ -601,16 +613,17 @@ const topWorkload = computed(() => {
 .model-tag { padding: 1px 6px; border-radius: 99px; font-size: 10px; color: var(--muted-foreground); background: var(--surface-hover); font-family: var(--font-mono); }
 .creator-tag { font-size: 11px; color: var(--muted-foreground); }
 .planning-badge {
-  padding: 1px 7px; border-radius: 99px; font-size: 11px; font-weight: 600;
-  color: #fff; background: linear-gradient(90deg, var(--primary), var(--accent, #8957e5));
+  padding: 1px 5px; border-radius: 99px; font-size: 9px; font-weight: 700;
+  color: var(--primary); background: var(--primary-light);
+  letter-spacing: 0.3px;
 }
 .switch-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .field-hint { margin: 4px 0 6px; font-size: 12px; color: var(--muted-foreground); line-height: 1.5; }
-.agent-actions { display: flex; gap: 2px; flex-shrink: 0; margin-top: 2px; }
+.agent-actions { display: flex; gap: 0; flex-shrink: 0; margin-top: 2px; align-items: flex-start; }
 
 /* Current task indicator */
 .agent-current-task {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 7px;
   margin-top: 8px; padding: 6px 10px;
   background:
     linear-gradient(90deg, var(--primary-light), transparent),
@@ -621,22 +634,44 @@ const topWorkload = computed(() => {
   font-size: 12px; color: var(--primary);
   overflow: hidden;
 }
+.current-task-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--primary); flex-shrink: 0;
+  animation: taskDotPulse 1.4s ease-in-out infinite;
+}
+@keyframes taskDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 .current-task-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.current-task-elapsed { font-family: var(--font-mono); font-size: 11px; opacity: 0.8; flex-shrink: 0; }
 
 /* Stats */
 .agent-stats {
-  display: flex; align-items: center; gap: 8px;
-  margin-top: 8px; font-size: 11.5px; color: var(--muted-foreground);
-  flex-wrap: wrap;
+  margin-top: 6px; font-size: 11.5px; color: var(--muted-foreground);
+}
+.stat-row {
+  display: flex; align-items: center; gap: 10px;
 }
 .stat-item strong { color: var(--foreground); font-weight: 700; }
-.stat-approval.rate-high { color: var(--success); }
 .stat-last {
   padding: 1px 6px; border-radius: 99px;
   font-size: 10px; font-weight: 600;
-  background: var(--glass-surface-soft);
-  border: 1px solid var(--glass-border);
+  background: var(--surface-hover);
+}
+.approval-bar-wrap {
+  display: flex; align-items: center; gap: 8px; margin-top: 5px;
+}
+.approval-label {
+  font-size: 10px; color: var(--muted-foreground); white-space: nowrap;
+}
+.approval-bar-track {
+  flex: 1; height: 4px; border-radius: 2px;
+  background: var(--surface-hover); overflow: hidden;
+}
+.approval-bar-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--success);
+  transition: width 0.5s var(--motion-ease-enter);
 }
 
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }

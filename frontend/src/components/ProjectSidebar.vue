@@ -60,14 +60,6 @@ watch(() => wsStore.connected, (ok) => {
 
 onUnmounted(() => { unsubReview?.() })
 
-const selectedProjectId = computed({
-  get: () => store.currentProject?.id ?? null,
-  set: (id: number | null) => {
-    const p = store.switchableProjects.find(p => p.id === id) || null
-    store.setCurrentProject(p)
-  },
-})
-
 const sections = [
   {
     label: '工作区',
@@ -123,22 +115,6 @@ const icons: Record<string, string> = {
 </script>
 
 <template>
-  <!-- Global project selector -->
-  <div class="project-picker" :class="{ collapsed: collapsed }">
-    <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-    <select
-      v-model="selectedProjectId"
-      class="project-select"
-      :title="store.currentProject?.name || '选择项目'"
-    >
-      <option :value="null" disabled>选择项目…</option>
-      <option v-for="p in store.switchableProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
-    </select>
-    <svg class="picker-chevron" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="6 9 12 15 18 9"/>
-    </svg>
-  </div>
-
   <!-- Unread chat indicators for other projects -->
   <TransitionGroup name="list" tag="div" class="unread-projects" :class="{ collapsed: collapsed }">
     <button
@@ -184,66 +160,6 @@ const icons: Record<string, string> = {
   transition: opacity var(--motion-base) var(--motion-ease-standard);
 }
 
-/* ── Global project picker ─────────────────────────────────────── */
-.project-picker {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px; margin: 4px 10px 0;
-  background: var(--glass-surface-soft); border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--glass-highlight);
-  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
-  backdrop-filter: blur(var(--glass-blur-sm));
-  overflow: hidden;
-  transition:
-    border-color var(--transition-fast),
-    background-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    padding var(--motion-slow) var(--motion-ease-standard),
-    margin var(--motion-slow) var(--motion-ease-standard);
-}
-
-.project-picker.collapsed {
-  padding: 8px 6px;
-  margin: 4px 6px 0;
-  justify-content: center;
-  gap: 0;
-  position: relative;
-}
-
-.project-picker.collapsed .picker-icon {
-  opacity: 0.7;
-}
-
-.project-picker.collapsed .picker-chevron {
-  display: none;
-}
-
-.project-picker.collapsed .project-select {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
-.project-picker:hover {
-  border-color: color-mix(in oklch, var(--primary) 36%, var(--glass-border));
-  background: var(--glass-surface-strong);
-  box-shadow: var(--shadow-surface), var(--glass-highlight);
-}
-.picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
-.picker-chevron {
-  flex-shrink: 0;
-  color: var(--muted-foreground);
-  pointer-events: none;
-  opacity: 0.72;
-  transition:
-    color var(--transition-fast),
-    transform var(--motion-base) var(--motion-ease-spring);
-}
-.project-picker:hover .picker-chevron {
-  color: var(--primary);
-}
-
 /* ── Unread project chips ──────────────────────────────────── */
 .unread-projects {
   display: flex; flex-direction: column; gap: 3px;
@@ -276,19 +192,6 @@ const icons: Record<string, string> = {
 @keyframes sidebarDotPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
-}
-
-.project-select {
-  flex: 1; width: 100%; min-width: 0; padding: 4px 0;
-  border: none; background: transparent; color: var(--foreground);
-  font-size: 13px; font-weight: 500; font-family: var(--font-sans);
-  outline: none; cursor: pointer;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  -webkit-appearance: none; appearance: none;
-}
-.project-select option {
-  color: var(--foreground);
-  background: var(--surface);
 }
 
 .sidebar-nav {
@@ -491,5 +394,30 @@ const icons: Record<string, string> = {
 @keyframes dotPulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; transform: scale(1.3); }
+}
+</style>
+
+<style>
+/* TDesign teleports popups to body, so this must be unscoped. */
+.project-select-popup .t-popup__content {
+  background: var(--glass-surface-strong) !important;
+  border: 1px solid var(--glass-border) !important;
+  border-radius: var(--radius-md) !important;
+  box-shadow: var(--shadow-floating), var(--glass-highlight) !important;
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  padding: 4px !important;
+}
+.project-select-popup .t-select-option {
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  padding: 7px 10px;
+  transition: background var(--transition-fast);
+}
+.project-select-popup .t-select-option:hover {
+  background: var(--surface-hover) !important;
+}
+.project-select-popup .t-is-selected {
+  color: var(--primary) !important;
+  background: var(--primary-light) !important;
 }
 </style>

@@ -94,6 +94,6 @@ function close() { emit('update:visible', false) }
 
 .empty-card {
   padding: 48px; text-align: center; color: var(--muted-foreground);
-  background: var(--surface); border: 1px solid var(--surface-border); border-radius: var(--radius-lg);
+  background: var(--card-bg); border: var(--card-border); border-radius: var(--card-radius);
 }
 </style>

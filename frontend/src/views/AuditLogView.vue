@@ -259,12 +259,13 @@ const dailyEvents = computed(() => {
 /* ── List ────────────────────────────────────────────────────────── */
 .audit-list { display: flex; flex-direction: column; gap: 8px; }
 .audit-card {
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); padding: 12px 14px; cursor: pointer;
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius); padding: 12px 14px; cursor: pointer;
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  box-shadow: var(--card-shadow);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
-.audit-card:hover { border-color: var(--ring); box-shadow: var(--shadow-surface); }
+.audit-card:hover { border-color: var(--card-hover-border); box-shadow: var(--card-hover-shadow); }
 .audit-actor { font-size: 13px; font-weight: 600; color: var(--foreground); }
 .audit-task { font-size: 12px; color: var(--primary); font-weight: 600; }
 .audit-time { margin-left: auto; font-size: 12px; color: var(--muted-foreground); }
@@ -321,8 +322,8 @@ const dailyEvents = computed(() => {
 
 .empty-card {
   padding: 48px; text-align: center; color: var(--muted-foreground);
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
+  background: var(--card-bg); border: var(--card-border);
+  border-radius: var(--card-radius);
 }
 
 /* Audit-specific overview: stack donut above a centered legend so the

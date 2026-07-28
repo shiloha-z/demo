@@ -141,6 +141,16 @@ function remoteUrl(skill: any): string {
   return String(skill?.url || skill?.source_url || skill?.github_url || '')
 }
 
+const expandedSkills = ref<Set<string | number>>(new Set())
+
+function toggleSkillExpand(id: string | number) {
+  if (expandedSkills.value.has(id)) {
+    expandedSkills.value.delete(id)
+  } else {
+    expandedSkills.value.add(id)
+  }
+}
+
 async function openSkillHubDialog() {
   showSkillHubDialog.value = true
   try {
@@ -384,7 +394,8 @@ function fmtTime(iso: string | null): string {
       </article>
     </div>
 
-    <t-dialog v-model:visible="showSkillHubDialog" header="从 Agent Skills Hub 导入技能" width="760px" :footer="false">
+    <t-dialog v-model:visible="showSkillHubDialog" header="从 Agent Skills Hub 导入技能" width="760px" :footer="false" class="skill-hub-dialog">
+      <div class="remote-dialog-body">
       <div class="remote-search-row">
         <t-input v-model="remoteQuery" placeholder="搜索技能，例如：PDF processing" @enter="searchSkillHub" />
         <t-button theme="primary" :loading="remoteLoading" @click="searchSkillHub">搜索</t-button>
@@ -393,12 +404,24 @@ function fmtTime(iso: string | null): string {
       <div v-else-if="remoteSkills.length === 0" class="remote-empty">未找到可导入的技能。</div>
       <div v-else class="remote-skill-list">
         <article v-for="skill in remoteSkills" :key="remoteId(skill)" class="remote-skill-item">
-          <div>
+          <div class="remote-skill-body">
             <h4>{{ remoteName(skill) }}</h4>
-            <p>{{ truncate(remoteDescription(skill), 220) || '暂无简介。' }}</p>
+            <p v-if="!expandedSkills.has(remoteId(skill))">{{ truncate(remoteDescription(skill), 220) || '暂无简介。' }}</p>
+            <p v-else>{{ remoteDescription(skill) || '暂无简介。' }}</p>
+            <button
+              v-if="(remoteDescription(skill) || '').length > 220"
+              class="expand-toggle"
+              @click="toggleSkillExpand(remoteId(skill))"
+            >
+              {{ expandedSkills.has(remoteId(skill)) ? '收起' : '展开全部' }}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"
+                :style="{ transform: expandedSkills.has(remoteId(skill)) ? 'rotate(180deg)' : '' }"
+              ><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
           </div>
           <t-button size="small" variant="outline" @click="previewRemoteSkill(skill)">预览并导入</t-button>
         </article>
+      </div>
       </div>
     </t-dialog>
 
@@ -497,8 +520,13 @@ function fmtTime(iso: string | null): string {
 }
 .external-source-card strong { font-size: 14px; }
 .external-source-card p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
-.remote-search-row { display: flex; gap: 8px; margin-bottom: 14px; }
-.remote-skill-list { display: flex; flex-direction: column; gap: 8px; max-height: 420px; overflow: auto; }
+.remote-dialog-body {
+  display: flex; flex-direction: column;
+  max-height: 60vh;
+  overflow: hidden;
+}
+.remote-search-row { display: flex; gap: 8px; margin-bottom: 14px; flex-shrink: 0; }
+.remote-skill-list { display: flex; flex-direction: column; gap: 8px; flex: 1; overflow-y: auto; padding-right: 4px; min-height: 0; }
 .remote-skill-item {
   display: flex;
   align-items: center;
@@ -508,8 +536,35 @@ function fmtTime(iso: string | null): string {
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
 }
-.remote-skill-item h4 { margin: 0; font-size: 14px; }
-.remote-skill-item p { margin: 5px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5; }
+.remote-skill-body {
+  flex: 1; min-width: 0;
+  overflow: hidden;
+}
+.remote-skill-item h4 {
+  margin: 0; font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.remote-skill-item p {
+  margin: 5px 0 0; color: var(--muted-foreground); font-size: 12px; line-height: 1.5;
+}
+/* Collapsed state: single-line ellipsis */
+.remote-skill-body p:first-of-type {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* When expanded, allow wrapping */
+.remote-skill-body p:first-of-type:not(:only-child) {
+  white-space: pre-wrap;
+}
+.expand-toggle {
+  display: inline-flex; align-items: center; gap: 3px;
+  margin-top: 3px; padding: 1px 0;
+  border: none; background: transparent;
+  color: var(--primary); font-size: 11px; cursor: pointer;
+  transition: opacity var(--transition-fast);
+}
+.expand-toggle:hover { opacity: 0.75; }
+.expand-toggle svg { transition: transform var(--transition-fast); }
+.remote-skill-item :deep(.t-button) { flex-shrink: 0; }
 .remote-empty { padding: 24px; text-align: center; color: var(--muted-foreground); }
 .remote-preview-meta { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .remote-preview-meta a { color: var(--primary); font-size: 13px; }
