@@ -41,11 +41,115 @@
 
 /* ── Card base ─────────────────────────────────────────────────── */
 .card-base {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-surface);
+  box-shadow: var(--shadow-glass), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   transition: border-color var(--transition-base), box-shadow var(--transition-base), transform var(--transition-base);
+}
+
+/*
+ * Unified application surfaces.
+ * Most views use scoped styles, therefore the visual tokens are applied with
+ * !important here so every top-level panel follows the same light/dark recipe.
+ * Semantic selected/planned states are deliberately excluded.
+ */
+:where(
+  .empty-card,
+  .stat-card:not(.stat-card--planned),
+  .project-card,
+  .agent-card:not(.agent-working),
+  .audit-card,
+  .msg-card:not(.unread),
+  .profile-card,
+  .settings-card,
+  .skill-card,
+  .external-source-card,
+  .timeline-card,
+  .promote-card,
+  .users-card,
+  .vote-panel,
+  .quality-gate-panel,
+  .file-tree-panel,
+  .file-view-panel,
+  .workspace-panel,
+  .timeline-slide-panel,
+  .tree-card:not(.active)
+) {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--shadow-glass), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.agent-card.agent-working {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--primary-light), var(--shadow-glass), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.msg-card.unread {
+  background: color-mix(in oklch, var(--glass-surface-strong) 88%, var(--primary-light)) !important;
+  border-color: color-mix(in oklch, var(--primary) 35%, var(--glass-border)) !important;
+  box-shadow: var(--shadow-glass), inset 3px 0 0 var(--primary), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.tree-card.active {
+  background: color-mix(in oklch, var(--glass-surface-strong) 86%, var(--primary-light)) !important;
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 2px var(--ring), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+}
+
+:where(
+  .project-toolbar,
+  .tree-toolbar,
+  .memory-toolbar,
+  .workspace-panel-header,
+  .file-tree-header,
+  .file-view-header
+) {
+  background: var(--glass-surface-soft) !important;
+  border-color: var(--glass-border) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+}
+
+:where(
+  .project-card,
+  .agent-card:not(.agent-working),
+  .audit-card,
+  .msg-card.clickable:not(.unread),
+  .skill-card,
+  .timeline-card,
+  .tree-card:not(.active)
+) {
+  transition:
+    transform var(--motion-base) var(--motion-ease-spring),
+    border-color var(--motion-base) var(--motion-ease-standard),
+    box-shadow var(--motion-base) var(--motion-ease-standard),
+    background-color var(--motion-base) var(--motion-ease-standard) !important;
+}
+
+:where(
+  .project-card,
+  .agent-card:not(.agent-working),
+  .audit-card,
+  .msg-card.clickable:not(.unread),
+  .skill-card,
+  .timeline-card,
+  .tree-card:not(.active)
+):hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glass-hover), var(--glass-highlight) !important;
 }
 
 /* Keyboard focus is visible across native controls without changing mouse UI. */
@@ -58,10 +162,12 @@
 .empty-card {
   text-align: center;
   padding: 64px 32px;
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-surface);
+  box-shadow: var(--shadow-glass), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 .empty-card--full {
   flex: 1;
@@ -123,17 +229,56 @@
   font-size: 13px;
   font-family: var(--font-sans);
   color: var(--foreground);
-  background: var(--surface);
+  background: var(--glass-surface-soft);
   outline: none;
   box-sizing: border-box;
   resize: vertical;
   min-height: 44px;
   line-height: 1.4;
-  transition: border-color var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
 }
 .field-textarea:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px var(--ring);
+  background: var(--glass-surface-strong);
+}
+
+/* Native and TDesign controls share the same shape and focus movement. */
+:where(.t-button, .field-textarea, .field-input, .field-native-input) {
+  border-radius: var(--radius-md);
+}
+
+.t-button {
+  transition:
+    transform var(--motion-fast) var(--motion-ease-spring),
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast) !important;
+}
+
+.t-button:not(.t-is-disabled):hover {
+  transform: translateY(-1px);
+}
+
+.t-button:not(.t-is-disabled):active {
+  transform: translateY(0) scale(0.985);
+}
+
+:where(.t-input, .t-textarea__inner, .t-select-input, .t-input-adornment) {
+  background: var(--glass-surface-soft) !important;
+  border-color: var(--glass-border) !important;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast) !important;
+}
+
+:where(.t-input, .t-textarea__inner, .t-select-input):focus-within {
+  background: var(--glass-surface-strong) !important;
 }
 
 /* ── Status indicators ─────────────────────────────────────────── */
@@ -208,21 +353,73 @@
 /* ── Route transition ──────────────────────────────────────────── */
 .fade-slide-enter-active {
   transition:
-    opacity var(--motion-base) var(--motion-ease-enter),
-    transform var(--motion-base) var(--motion-ease-enter);
+    opacity var(--motion-page) var(--motion-ease-enter),
+    transform var(--motion-page) var(--motion-ease-spring),
+    filter var(--motion-page) var(--motion-ease-enter);
 }
 .fade-slide-leave-active {
   transition:
     opacity 90ms var(--motion-ease-exit),
-    transform 90ms var(--motion-ease-exit);
+    transform 90ms var(--motion-ease-exit),
+    filter 90ms var(--motion-ease-exit);
 }
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateY(5px) scale(0.997);
+  transform: translateY(10px) scale(0.995);
+  filter: blur(5px);
 }
 .fade-slide-leave-to {
   opacity: 0;
   transform: translateY(-2px);
+  filter: blur(2px);
+}
+
+@keyframes ui-surface-enter {
+  from {
+    opacity: 0;
+    transform: translateY(9px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A short, consistent reveal keeps dense pages from appearing abruptly. */
+.page-root > .page-header {
+  animation: ui-surface-enter var(--motion-page) var(--motion-ease-enter) both;
+}
+
+.page-root > :where(
+  .stat-grid,
+  .project-toolbar,
+  .project-grid,
+  .settings-card,
+  .profile-card,
+  .audit-list,
+  .message-list,
+  .skill-grid,
+  .timeline-list,
+  .content-layout
+) {
+  animation: ui-surface-enter 420ms var(--motion-ease-enter) 45ms both;
+}
+
+:where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > * {
+  animation: ui-surface-enter 420ms var(--motion-ease-enter) backwards;
+}
+
+:where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(2) {
+  animation-delay: 35ms;
+}
+:where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(3) {
+  animation-delay: 70ms;
+}
+:where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(4) {
+  animation-delay: 105ms;
+}
+:where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(n + 5) {
+  animation-delay: 140ms;
 }
 
 .overlay-fade-enter-active,
@@ -299,6 +496,108 @@
   .stat-grid { grid-template-columns: repeat(2, 1fr) !important; }
   .project-grid { grid-template-columns: 1fr !important; }
   .agent-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ── TDesign dialog glass effect ──────────────────────────────────── */
+/* TDesign renders dialogs via Teleport outside the app tree, so these
+   overrides must live in a global (non-scoped) stylesheet. */
+.t-dialog__mask {
+  -webkit-backdrop-filter: blur(12px) saturate(1.05);
+  backdrop-filter: blur(12px) saturate(1.05);
+  background: rgba(15, 23, 42, 0.18) !important;
+}
+.dark .t-dialog__mask {
+  background: rgba(15, 23, 42, 0.45) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.05);
+  backdrop-filter: blur(14px) saturate(1.05);
+}
+/* The dialog panel itself — keep it readable while letting the mask blur show */
+.t-dialog {
+  background: var(--glass-surface-strong) !important;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl) !important;
+  box-shadow: var(--shadow-floating), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+}
+.dark .t-dialog {
+  background: var(--glass-surface-strong) !important;
+}
+
+/* ── TDesign drawer ────────────────────────────────────────────────── */
+.t-drawer__mask {
+  -webkit-backdrop-filter: blur(10px) saturate(1.05);
+  backdrop-filter: blur(10px) saturate(1.05);
+  background: rgba(15, 23, 42, 0.14) !important;
+}
+.dark .t-drawer__mask {
+  background: rgba(15, 23, 42, 0.4) !important;
+  -webkit-backdrop-filter: blur(12px) saturate(1.05);
+  backdrop-filter: blur(12px) saturate(1.05);
+}
+/* Drawer content wrapper */
+.t-drawer__content-wrapper {
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+}
+.t-drawer {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+}
+
+/* ── TDesign popup / dropdown ──────────────────────────────────────── */
+.t-popup__content {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--shadow-menu), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+.dark .t-popup__content {
+  background: var(--glass-surface-strong) !important;
+}
+
+:where(.t-message, .t-notification) {
+  background: var(--glass-surface-strong) !important;
+  border-color: var(--glass-border) !important;
+  box-shadow: var(--shadow-floating), var(--glass-highlight) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+@supports not ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  :where(
+    .card-base,
+    .empty-card,
+    .stat-card,
+    .project-card,
+    .agent-card,
+    .audit-card,
+    .msg-card,
+    .profile-card,
+    .settings-card,
+    .skill-card,
+    .external-source-card,
+    .timeline-card,
+    .promote-card,
+    .users-card,
+    .vote-panel,
+    .quality-gate-panel,
+    .file-tree-panel,
+    .file-view-panel,
+    .workspace-panel,
+    .timeline-slide-panel,
+    .tree-card,
+    .t-dialog,
+    .t-drawer,
+    .t-popup__content,
+    .t-message,
+    .t-notification
+  ) {
+    background: var(--surface-raised) !important;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -170,16 +170,20 @@ function onBackdropClick(e: MouseEvent) {
 /* ── Backdrop ──────────────────────────────────────────────────── */
 .notif-dropdown-backdrop {
   position: fixed; inset: 0; z-index: 200;
-  background: transparent;
+  background: rgba(15, 23, 42, 0.035);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
 }
 .notif-dropdown {
   position: fixed;
   top: 52px; right: 80px;
   width: 400px; max-height: 520px;
-  background: var(--page-canvas);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-floating), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
   display: flex; flex-direction: column;
   transform-origin: right top;
   z-index: 201;
@@ -212,7 +216,7 @@ function onBackdropClick(e: MouseEvent) {
 .nd-header-actions { margin-left: auto; display: flex; gap: 8px; }
 .nd-btn {
   font-size: 12px; border: 1px solid var(--surface-border);
-  background: var(--page-canvas); color: var(--muted-foreground);
+  background: var(--glass-surface-soft); color: var(--muted-foreground);
   padding: 3px 10px; border-radius: var(--radius-md); cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -240,12 +244,14 @@ function onBackdropClick(e: MouseEvent) {
 .nd-list { display: flex; flex-direction: column; }
 .nd-item {
   padding: 10px 16px; border-bottom: 1px solid var(--surface-border);
-  transition: background var(--transition-fast);
+  transition:
+    background-color var(--transition-fast),
+    transform var(--transition-fast);
 }
 .nd-item.unread { background: var(--primary-lighter); }
 .nd-item.resolved { opacity: 0.6; }
 .nd-item.clickable { cursor: pointer; }
-.nd-item.clickable:hover { background: var(--surface-hover); }
+.nd-item.clickable:hover { background: var(--surface-hover); transform: translateX(2px); }
 
 .nd-item-top { display: flex; align-items: center; gap: 6px; }
 .nd-item-title { font-size: 13px; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

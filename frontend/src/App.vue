@@ -324,6 +324,59 @@ function handleLogout() {
   background: var(--app-shell);
   font-family: var(--font-sans);
   color: var(--foreground);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Decorative gradient orbs — sit behind glass panels so backdrop-filter
+   has something to blur.  Subtle enough to stay out of the way. */
+.app-root::before {
+  content: '';
+  position: fixed;
+  inset: -5%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, oklch(0.55 0.22 264 / 0.07), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 85% 75%, oklch(0.62 0.18 200 / 0.06), transparent 55%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, oklch(0.58 0.1 320 / 0.04), transparent 50%);
+  animation: ambient-drift 18s var(--motion-ease-standard) infinite alternate;
+  will-change: transform;
+}
+.dark .app-root::before {
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, oklch(0.62 0.2 264 / 0.12), transparent 60%),
+    radial-gradient(ellipse 60% 70% at 85% 75%, oklch(0.68 0.16 200 / 0.10), transparent 55%),
+    radial-gradient(ellipse 50% 50% at 50% 50%, oklch(0.6 0.08 320 / 0.06), transparent 50%);
+}
+
+.app-root::after {
+  content: '';
+  position: fixed;
+  inset: -8%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle 180px at 9% 15%, var(--ambient-spot-primary) 0 12%, transparent 72%),
+    radial-gradient(circle 150px at 43% 8%, var(--ambient-spot-cyan) 0 10%, transparent 72%),
+    radial-gradient(circle 210px at 76% 34%, var(--ambient-spot-violet) 0 13%, transparent 74%),
+    radial-gradient(circle 170px at 91% 78%, var(--ambient-spot-warm) 0 11%, transparent 72%),
+    radial-gradient(circle 130px at 32% 86%, var(--ambient-spot-primary) 0 9%, transparent 74%);
+  filter: blur(7px) saturate(1.2);
+  opacity: 0.9;
+  animation: ambient-spots 22s var(--motion-ease-standard) infinite alternate;
+  will-change: transform, opacity;
+}
+
+@keyframes ambient-drift {
+  from { transform: translate3d(-1.2%, -0.8%, 0) scale(1); }
+  to { transform: translate3d(1.2%, 0.8%, 0) scale(1.025); }
+}
+
+@keyframes ambient-spots {
+  0% { transform: translate3d(-1.5%, 0, 0) scale(0.99); opacity: 0.76; }
+  55% { opacity: 0.94; }
+  100% { transform: translate3d(1.5%, 1%, 0) scale(1.035); opacity: 0.84; }
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────── */
@@ -334,9 +387,11 @@ function handleLogout() {
   z-index: 100;
   display: flex;
   flex-direction: column;
-  background: var(--sidebar-bg);
-  backdrop-filter: blur(18px);
-  border-right: 1px solid var(--surface-border);
+  background: color-mix(in oklch, var(--sidebar-bg) 74%, transparent);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border-right: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
   user-select: none;
   transition: width var(--motion-slow) var(--motion-ease-standard);
   will-change: width;
@@ -542,6 +597,9 @@ function handleLogout() {
   position: fixed;
   inset: 0;
   z-index: 99;
+  background: rgba(15, 23, 42, 0.08);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
 }
 
 .user-dropdown {
@@ -549,10 +607,12 @@ function handleLogout() {
   bottom: calc(100% + 6px);
   left: 10px;
   right: 10px;
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0,0,0,0.14);
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-menu), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   z-index: 100;
   padding: 6px;
   display: flex;
@@ -603,6 +663,8 @@ function handleLogout() {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+  z-index: 1;
 }
 
 .app-topbar {
@@ -612,9 +674,11 @@ function handleLogout() {
   align-items: center;
   justify-content: space-between;
   padding: 0 32px;
-  background: color-mix(in oklch, var(--surface) 88%, transparent);
-  backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--surface-border);
+  background: var(--glass-surface);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
 }
 
 .topbar-title {
@@ -713,7 +777,9 @@ function handleLogout() {
 .app-main {
   flex: 1;
   overflow-y: auto;
-  background: var(--page-canvas);
+  /* The light spots live on app-root only. Keeping this layer translucent
+     makes the main area and chat panel sample the same fixed backdrop. */
+  background: var(--workspace-canvas);
   padding: 30px 32px 48px;
 }
 
@@ -767,7 +833,8 @@ function handleLogout() {
     padding: 0;
     border: 0;
     background: rgb(15 23 42 / 0.42);
-    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
   }
 
   .mobile-menu-btn {
@@ -804,6 +871,14 @@ function handleLogout() {
 
   .app-main {
     padding-inline: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-root::before,
+  .app-root::after {
+    animation: none;
+    transform: none;
   }
 }
 </style>

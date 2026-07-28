@@ -1304,14 +1304,18 @@ watch(() => props.focusMessageId, () => {
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border-left: 1px solid var(--surface-border);
+  background: var(--glass-surface-strong);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  border-left: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
   transition:
     width var(--motion-slow) var(--motion-ease-standard),
     opacity var(--motion-base) var(--motion-ease-standard),
     visibility 0s linear;
   overflow: hidden;
   position: relative;
+  z-index: 1;
   will-change: width, opacity;
 }
 .chat-panel:not(.open) {
@@ -1494,17 +1498,20 @@ watch(() => props.focusMessageId, () => {
   display: flex; align-items: center; justify-content: center;
   padding: 20px;
   background: rgba(15, 23, 42, 0.46);
-  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
 }
 .member-profile-card {
   position: relative;
   width: min(380px, calc(100vw - 32px));
   overflow: hidden;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  background: var(--glass-surface-strong);
   color: var(--foreground);
-  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.3);
+  box-shadow: var(--shadow-floating), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
 }
 .member-profile-close {
   position: absolute; top: 12px; right: 12px; z-index: 1;
@@ -1608,6 +1615,8 @@ watch(() => props.focusMessageId, () => {
 .lightbox-backdrop {
   position: fixed; inset: 0; z-index: 9999;
   background: rgba(0,0,0,0.85);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center;
   cursor: zoom-out;
 }
@@ -1773,8 +1782,10 @@ watch(() => props.focusMessageId, () => {
 .mention-dropdown {
   position: absolute; bottom: calc(100% + 4px); left: 16px; right: 16px;
   max-height: 200px; overflow-y: auto;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); box-shadow: 0 -8px 24px rgba(0,0,0,0.14);
+  background: var(--glass-surface-strong); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-menu), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   z-index: 20;
 }
 .mention-dropdown-header {

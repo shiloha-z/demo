@@ -119,7 +119,12 @@ async function submit() {
 .login-page {
   display: flex;
   height: 100vh;
-  background: var(--page-canvas);
+  background:
+    radial-gradient(circle 240px at 78% 16%, var(--ambient-spot-primary), transparent 74%),
+    radial-gradient(circle 190px at 94% 76%, var(--ambient-spot-cyan), transparent 72%),
+    radial-gradient(circle 170px at 62% 92%, var(--ambient-spot-violet), transparent 74%),
+    var(--app-shell);
+  overflow: hidden;
 }
 
 /* ── Brand panel ────────────────────────────────────────────────── */
@@ -173,6 +178,21 @@ async function submit() {
   gap: 12px;
   font-size: 14px;
   color: rgba(255, 255, 255, 0.9);
+  padding: 10px 12px;
+  margin-inline: -12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.055);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  backdrop-filter: blur(var(--glass-blur-sm));
+  transition:
+    transform var(--motion-base) var(--motion-ease-spring),
+    background-color var(--transition-fast);
+}
+
+.feature-item:hover {
+  transform: translateX(4px);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .feature-item svg {
@@ -191,6 +211,7 @@ async function submit() {
   position: absolute;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.06);
+  animation: login-orbit 12s var(--motion-ease-standard) infinite alternate;
 }
 
 .deco-circle-1 {
@@ -205,6 +226,13 @@ async function submit() {
   height: 300px;
   bottom: -80px;
   left: -80px;
+  animation-delay: -4s;
+  animation-direction: alternate-reverse;
+}
+
+@keyframes login-orbit {
+  from { transform: translate3d(-8px, -5px, 0) scale(1); }
+  to { transform: translate3d(12px, 10px, 0) scale(1.06); }
 }
 
 .deco-grid {
@@ -225,7 +253,11 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--surface);
+  background: var(--glass-surface);
+  border-left: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-floating), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-lg)) saturate(var(--glass-saturate));
 }
 
 .login-card {
@@ -290,7 +322,7 @@ async function submit() {
   border-radius: var(--radius-md);
   font-size: 14px;
   font-family: var(--font-sans);
-  background: var(--surface);
+  background: var(--glass-surface-soft);
   color: var(--foreground);
   outline: none;
   box-sizing: border-box;
@@ -320,15 +352,22 @@ async function submit() {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: background var(--transition-fast);
+  box-shadow: 0 8px 20px var(--primary-glow);
+  transition:
+    background-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring),
+    box-shadow var(--transition-fast);
 }
 
 .btn-submit:hover:not(:disabled) {
   background: var(--primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 11px 26px var(--primary-glow);
 }
 
 .btn-submit:active:not(:disabled) {
   background: var(--primary-active);
+  transform: translateY(0) scale(0.99);
 }
 
 .btn-submit:disabled {

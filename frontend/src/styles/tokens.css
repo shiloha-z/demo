@@ -7,6 +7,7 @@
   /* ── Surface system ────────────────────────────────────────────── */
   --app-shell: oklch(0.972 0.007 264);
   --page-canvas: oklch(0.985 0.004 264);
+  --workspace-canvas: oklch(0.985 0.004 264 / 0.52);
   --surface: oklch(1 0 0);
   --surface-raised: oklch(1 0 0);
   --surface-subtle: oklch(0.975 0.006 264);
@@ -14,6 +15,21 @@
   --surface-selected: oklch(0.944 0.016 264);
   --surface-border: oklch(0.91 0.009 264);
   --sidebar-bg: oklch(0.978 0.01 264 / 0.96);
+
+  /* Translucent surfaces: one shared recipe for cards, menus and overlays. */
+  --glass-surface: oklch(1 0 0 / 0.58);
+  --glass-surface-strong: oklch(1 0 0 / 0.72);
+  --glass-surface-soft: oklch(0.985 0.006 264 / 0.54);
+  --glass-border: oklch(0.86 0.02 264 / 0.76);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  --glass-blur-sm: 10px;
+  --glass-blur: 18px;
+  --glass-blur-lg: 28px;
+  --glass-saturate: 1.14;
+  --ambient-spot-primary: oklch(0.67 0.2 258 / 0.38);
+  --ambient-spot-cyan: oklch(0.75 0.15 205 / 0.32);
+  --ambient-spot-violet: oklch(0.69 0.18 305 / 0.29);
+  --ambient-spot-warm: oklch(0.82 0.15 78 / 0.23);
 
   /* ── Foreground ────────────────────────────────────────────────── */
   --foreground: oklch(0.165 0.005 280);
@@ -52,6 +68,8 @@
   --shadow-floating: 0 12px 32px rgba(15, 23, 42, 0.10), 0 2px 8px rgba(15, 23, 42, 0.06);
   --shadow-menu: 0 8px 24px rgba(15, 23, 42, 0.08), 0 2px 6px rgba(15, 23, 42, 0.05);
   --shadow-card-hover: 0 14px 32px rgba(67, 79, 180, 0.11), 0 3px 10px rgba(15, 23, 42, 0.05);
+  --shadow-glass: 0 10px 30px rgba(30, 41, 59, 0.055), 0 2px 7px rgba(30, 41, 59, 0.04);
+  --shadow-glass-hover: 0 18px 42px rgba(67, 79, 180, 0.13), 0 4px 12px rgba(15, 23, 42, 0.06);
 
   /* ── Radius ────────────────────────────────────────────────────── */
   --radius-sm: 6px;
@@ -64,9 +82,11 @@
   --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --motion-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-fast: 120ms;
   --motion-base: 180ms;
   --motion-slow: 260ms;
+  --motion-page: 340ms;
   --transition-base: var(--motion-base) var(--motion-ease-standard);
   --transition-fast: var(--motion-fast) var(--motion-ease-standard);
 
@@ -104,6 +124,7 @@
   color-scheme: dark;
   --app-shell: oklch(0.16 0.005 280);
   --page-canvas: oklch(0.185 0.004 280);
+  --workspace-canvas: oklch(0.185 0.004 280 / 0.72);
   --surface: oklch(0.21 0.005 280);
   --surface-raised: oklch(0.24 0.006 280);
   --surface-subtle: oklch(0.225 0.008 264);
@@ -111,6 +132,15 @@
   --surface-selected: oklch(0.27 0.008 280);
   --surface-border: oklch(0.29 0.006 280);
   --sidebar-bg: oklch(0.17 0.012 264 / 0.97);
+  --glass-surface: oklch(0.205 0.009 280 / 0.72);
+  --glass-surface-strong: oklch(0.215 0.008 280 / 0.86);
+  --glass-surface-soft: oklch(0.23 0.01 270 / 0.64);
+  --glass-border: oklch(0.36 0.014 270 / 0.62);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  --ambient-spot-primary: oklch(0.62 0.2 258 / 0.3);
+  --ambient-spot-cyan: oklch(0.7 0.16 205 / 0.25);
+  --ambient-spot-violet: oklch(0.65 0.18 305 / 0.24);
+  --ambient-spot-warm: oklch(0.76 0.15 78 / 0.17);
 
   --foreground: oklch(0.935 0.003 280);
   --muted-foreground: oklch(0.66 0.01 280);
@@ -137,6 +167,8 @@
   --shadow-floating: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
   --shadow-card-hover: 0 8px 24px rgba(84, 110, 255, 0.2), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-glass: 0 12px 34px rgba(0, 0, 0, 0.24), 0 2px 7px rgba(0, 0, 0, 0.18);
+  --shadow-glass-hover: 0 18px 44px rgba(38, 55, 150, 0.28), 0 4px 12px rgba(0, 0, 0, 0.24);
 
   /* TDesign dark overrides */
   --td-bg-color-page: var(--page-canvas);
