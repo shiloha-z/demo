@@ -35,9 +35,6 @@ const retryingGate = ref(false)
 const statusLabels: Record<string, string> = {
   pending: '待审查', approved: '已通过', rejected: '已驳回',
 }
-const statusColors: Record<string, string> = {
-  pending: 'var(--warning)', approved: 'var(--success)', rejected: 'var(--danger)',
-}
 
 let unsubReview: (() => void) | null = null
 let unsubVote: (() => void) | null = null
@@ -290,13 +287,27 @@ function formatDate(d: string) {
             :class="{ active: selectedReview?.id === r.id }"
             @click="selectedReview = r"
           >
-            <div class="review-item-header">
-              <span class="review-id">#{{ r.id }}</span>
-              <span class="review-status" :style="{ color: statusColors[r.status] }">
-                {{ statusLabels[r.status] || r.status }}
-              </span>
+            <div class="review-avatar" :class="`status-${r.status}`">
+              <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M9 11l3 3 8-8"/>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+              </svg>
             </div>
-            <div class="review-item-time">{{ formatDate(r.created_at) }}</div>
+            <div class="review-item-body">
+              <div class="review-item-header">
+                <span class="review-id">审查 #{{ r.id }}</span>
+                <span class="review-status" :class="r.status">
+                  {{ statusLabels[r.status] || r.status }}
+                </span>
+              </div>
+              <div class="review-item-meta">
+                <span v-if="r.task_id">任务 #{{ r.task_id }}</span>
+                <span class="review-item-time">{{ formatDate(r.created_at) }}</span>
+              </div>
+            </div>
+            <svg class="review-item-arrow" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
           </div>
         </div>
 
@@ -408,31 +419,158 @@ function formatDate(d: string) {
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
 
 .review-layout {
-  flex: 1; display: flex; gap: 0;
-  border: 1px solid var(--surface-border); border-radius: var(--radius-lg);
-  overflow: hidden; min-height: 0;
-  box-shadow: var(--shadow-surface);
+  flex: 1;
+  display: flex;
+  gap: 14px;
+  min-height: 0;
 }
 
 .review-list {
-  width: 260px; border-right: 1px solid var(--surface-border);
-  background: var(--app-shell); overflow-y: auto; flex-shrink: 0;
+  width: 340px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 2px 4px 10px 2px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .review-item {
-  padding: 12px 14px; border-bottom: 1px solid var(--surface-border);
-  cursor: pointer; transition: background var(--transition-fast);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  padding: 15px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-soft);
+  box-shadow: var(--shadow-surface), var(--glass-highlight);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    border-color var(--transition-base),
+    background-color var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--motion-base) var(--motion-ease-spring);
 }
-.review-item:hover { background: var(--surface-hover); }
-.review-item.active { background: var(--primary-lighter); border-left: 3px solid var(--primary); padding-left: 11px; }
+.review-item::before {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--primary-gradient);
+  opacity: 0;
+  transform: scaleY(0.45);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.review-item:hover {
+  border-color: color-mix(in oklch, var(--primary) 48%, var(--glass-border));
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-card-hover), var(--glass-highlight);
+  transform: translateY(-2px);
+}
+.review-item.active {
+  border-color: color-mix(in oklch, var(--primary) 58%, var(--glass-border));
+  background:
+    linear-gradient(115deg, var(--primary-light), transparent 62%),
+    var(--glass-surface);
+  box-shadow: 0 10px 28px var(--primary-glow), var(--glass-highlight);
+}
+.review-item.active::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+.review-avatar {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 15%, transparent);
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.review-avatar.status-approved { color: var(--success); background: var(--success-light); }
+.review-avatar.status-rejected { color: var(--danger); background: var(--danger-light); }
+.review-avatar.status-pending { color: var(--warning); background: var(--warning-light); }
+.review-item:hover .review-avatar { transform: scale(1.06) rotate(-2deg); }
+.review-item-body { flex: 1; min-width: 0; }
 .review-item-header { display: flex; justify-content: space-between; align-items: center; }
-.review-id { font-size: 13px; font-weight: 600; color: var(--foreground); }
-.review-status { font-size: 11px; font-weight: 600; }
-.review-item-time { font-size: 11px; color: var(--muted-foreground); margin-top: 4px; }
+.review-id { font-size: 14px; font-weight: 650; color: var(--foreground); }
+.review-status {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--muted-foreground);
+  background: var(--glass-surface-soft);
+  border: 1px solid var(--glass-border);
+}
+.review-status.pending { color: var(--warning); background: var(--warning-light); border-color: transparent; }
+.review-status.approved { color: var(--success); background: var(--success-light); border-color: transparent; }
+.review-status.rejected { color: var(--danger); background: var(--danger-light); border-color: transparent; }
+.review-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 9px;
+  margin-top: 7px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.review-item-time {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.review-item-arrow {
+  align-self: center;
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  opacity: 0.55;
+  transition:
+    color var(--transition-fast),
+    opacity var(--transition-fast),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.review-item:hover .review-item-arrow,
+.review-item.active .review-item-arrow {
+  color: var(--primary);
+  opacity: 1;
+  transform: translateX(2px);
+}
 
-.review-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--page-canvas); }
-.detail-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+.review-detail {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface);
+  box-shadow: var(--shadow-surface), var(--glass-highlight);
+  overscroll-behavior: contain;
+}
+.detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--surface-border);
+}
 .detail-header h3 { font-size: 16px; font-weight: 700; margin: 0; }
-.detail-actions { display: flex; gap: 8px; }
+.detail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .merge-queue-hint {
   display: inline-flex; align-items: center;
   padding: 0 8px; border-radius: var(--radius-sm);
@@ -443,13 +581,21 @@ function formatDate(d: string) {
 .detail-section { margin-bottom: 20px; }
 .detail-label { font-size: 13px; font-weight: 700; color: var(--muted-foreground); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-.diff-container { border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; max-height: 500px; overflow-y: auto; }
+.diff-container {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  max-height: 500px;
+  overflow-y: auto;
+  background: var(--glass-surface-soft);
+}
 .no-diff { font-size: 13px; color: var(--muted-foreground); padding: 20px; text-align: center; }
 
 .vote-panel {
   margin: 0 0 16px; padding: 12px;
-  border: 1px solid var(--surface-border); border-radius: var(--radius-md);
-  background: var(--surface);
+  border: 1px solid var(--glass-border); border-radius: var(--radius-md);
+  background: var(--glass-surface-soft);
+  box-shadow: var(--glass-highlight);
 }
 .vote-panel-header { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .vote-panel-header strong { margin-right: auto; }
@@ -465,8 +611,9 @@ function formatDate(d: string) {
 .vote-hint { margin: 10px 0 0; color: var(--muted-foreground); font-size: 12px; }
 
 .review-summary {
-  background: var(--surface); border: 1px solid var(--surface-border);
+  background: var(--glass-surface-soft); border: 1px solid var(--glass-border);
   border-radius: var(--radius-md); padding: 16px 18px;
+  box-shadow: var(--glass-highlight);
   font-size: 13.5px; line-height: 1.7;
 }
 .review-summary :deep(h1) { font-size: 16px; font-weight: 700; margin: 0 0 8px; border-bottom: 1px solid var(--surface-border); padding-bottom: 6px; }
@@ -502,10 +649,64 @@ function formatDate(d: string) {
 .review-summary :deep(a) { color: var(--primary); }
 .review-summary :deep(del) { text-decoration: line-through; opacity: 0.7; }
 
-.empty-detail { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--page-canvas); }
+.empty-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-soft);
+  box-shadow: var(--shadow-surface), var(--glass-highlight);
+}
 .empty-detail-icon { color: var(--muted-foreground); opacity: 0.5; }
 .empty-detail p { font-size: 13px; color: var(--muted-foreground); }
 
 .feedback-dialog-body { display: flex; flex-direction: column; gap: 10px; }
 .feedback-hint { font-size: 13px; color: var(--muted-foreground); margin: 0; line-height: 1.5; }
+
+@media (max-width: 900px) {
+  .page-root {
+    height: auto;
+    min-height: 100%;
+  }
+  .review-layout {
+    flex: none;
+    flex-direction: column;
+  }
+  .review-list {
+    width: 100%;
+    max-height: none;
+    padding-right: 2px;
+    overflow: visible;
+  }
+  .review-detail {
+    overflow: visible;
+  }
+  .empty-detail {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 640px) {
+  .review-item {
+    padding: 13px 12px;
+  }
+  .review-avatar {
+    width: 38px;
+    height: 38px;
+  }
+  .review-detail {
+    padding: 16px;
+  }
+  .detail-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .detail-actions {
+    justify-content: flex-start;
+  }
+}
 </style>

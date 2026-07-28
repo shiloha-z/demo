@@ -21,16 +21,22 @@
 
 .page-title {
   font-size: 22px;
-  font-weight: 700;
+  font-weight: 760;
   margin: 0;
-  letter-spacing: -0.4px;
+  letter-spacing: -0.55px;
   color: var(--foreground);
+  line-height: 1.25;
+  background: linear-gradient(112deg, var(--foreground) 18%, color-mix(in oklch, var(--primary) 72%, var(--foreground)) 115%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .page-desc {
   font-size: 13.5px;
   color: var(--muted-foreground);
   margin: 4px 0 0;
+  line-height: 1.6;
 }
 
 .header-actions {
@@ -189,6 +195,7 @@
   color: var(--primary);
   margin-left: auto;
   margin-right: auto;
+  animation: ui-gentle-float 4.2s var(--motion-ease-standard) infinite;
 }
 .empty-card h3 {
   font-size: 16px;
@@ -281,6 +288,93 @@
   background: var(--glass-surface-strong) !important;
 }
 
+:where(.t-input, .t-textarea__inner, .t-select-input):hover {
+  border-color: color-mix(in oklch, var(--primary) 32%, var(--glass-border)) !important;
+}
+
+/* Tables and pagination use the same translucent hierarchy as cards. */
+:where(.t-table, .t-table__content, .t-table__body) {
+  background: transparent !important;
+}
+
+:where(.t-table__header th, .t-table th) {
+  background: var(--glass-surface-soft) !important;
+  color: var(--muted-foreground) !important;
+  border-color: var(--glass-border) !important;
+  font-weight: 650 !important;
+}
+
+:where(.t-table__body tr, .t-table tbody tr) {
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+:where(.t-table__body tr:hover td, .t-table tbody tr:hover td) {
+  background: color-mix(in oklch, var(--surface-hover) 78%, transparent) !important;
+}
+
+:where(.t-table td, .t-table th) {
+  border-color: var(--glass-border) !important;
+}
+
+:where(.t-pagination, .t-pagination__select) {
+  color: var(--muted-foreground);
+}
+
+:where(.t-pagination__number, .t-pagination__btn) {
+  border-radius: var(--radius-md) !important;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-spring),
+    background-color var(--transition-fast),
+    color var(--transition-fast) !important;
+}
+
+:where(.t-pagination__number, .t-pagination__btn):hover {
+  transform: translateY(-1px);
+}
+
+/* Native tables are used by the administration and Markdown views. */
+.data-table {
+  border-collapse: separate !important;
+  border-spacing: 0 !important;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+
+.data-table :where(th, td) {
+  border-color: var(--glass-border) !important;
+}
+
+.data-table th {
+  background: var(--glass-surface-soft) !important;
+  color: var(--muted-foreground);
+  font-weight: 650 !important;
+}
+
+.data-table tbody tr {
+  transition:
+    background-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-standard);
+}
+
+.data-table tbody tr:hover {
+  background: color-mix(in oklch, var(--surface-hover) 74%, transparent) !important;
+}
+
+/* Section headers remain visible without introducing another opaque layer. */
+:where(.settings-card, .profile-card, .users-card, .promote-card) > .card-header {
+  background: var(--glass-surface-soft) !important;
+  border-color: var(--glass-border) !important;
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
+}
+
+:where(.card-title, .panel-title, .section-title) {
+  letter-spacing: -0.15px;
+}
+
 /* ── Status indicators ─────────────────────────────────────────── */
 .status-dot {
   width: 6px;
@@ -291,14 +385,22 @@
   flex-shrink: 0;
 }
 .status-dot.idle { background: var(--muted-foreground); }
-.status-dot.working { background: var(--primary); animation: pulse 1.5s infinite; }
+.status-dot.working { background: var(--primary); animation: status-breathe 1.8s var(--motion-ease-standard) infinite; }
 .status-dot.done, .status-dot.completed { background: var(--success); }
 .status-dot.error, .status-dot.failed { background: var(--danger); }
-.status-dot.running { background: var(--primary); animation: pulse 1.5s infinite; }
+.status-dot.running { background: var(--primary); animation: status-breathe 1.8s var(--motion-ease-standard) infinite; }
 .status-dot.pending { background: var(--warning); }
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.3; }
+}
+@keyframes status-breathe {
+  0%, 100% { opacity: 0.72; box-shadow: 0 0 0 0 var(--primary-light); }
+  50% { opacity: 1; box-shadow: 0 0 0 5px transparent; }
+}
+@keyframes ui-gentle-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -4px, 0); }
 }
 
 /* ── Spinner ───────────────────────────────────────────────────── */
@@ -340,6 +442,13 @@
   border-radius: 99px;
   font-size: 11px;
   font-weight: 600;
+  transition:
+    transform var(--motion-fast) var(--motion-ease-spring),
+    filter var(--transition-fast);
+}
+.tag:hover {
+  transform: translateY(-1px) scale(1.025);
+  filter: saturate(1.12);
 }
 .tag-neutral {
   color: var(--muted-foreground);
@@ -354,72 +463,136 @@
 .fade-slide-enter-active {
   transition:
     opacity var(--motion-page) var(--motion-ease-enter),
-    transform var(--motion-page) var(--motion-ease-spring),
-    filter var(--motion-page) var(--motion-ease-enter);
+    transform var(--motion-page) var(--motion-ease-spring);
+  will-change: opacity, transform;
+}
+
+/* Shared icon micro-interactions keep cards responsive without moving layout. */
+:where(.project-card-icon, .stat-icon, .agent-avatar, .skill-icon, .empty-icon) {
+  transform-origin: center;
+  transition:
+    transform var(--motion-base) var(--motion-ease-spring),
+    box-shadow var(--transition-base),
+    filter var(--transition-base);
+}
+
+:where(.project-card, .stat-card, .agent-card, .skill-card):hover
+  :where(.project-card-icon, .stat-icon, .agent-avatar, .skill-icon) {
+  transform: translate3d(0, -2px, 0) scale(1.055);
+  filter: saturate(1.12);
+}
+
+/* Colored accents make metric groups scannable without adding more text. */
+.stat-grid .stat-card {
+  --stat-accent: var(--primary);
+  position: relative;
+  overflow: hidden;
+}
+.stat-grid .stat-card:nth-child(4n + 2) { --stat-accent: var(--success); }
+.stat-grid .stat-card:nth-child(4n + 3) { --stat-accent: var(--warning); }
+.stat-grid .stat-card:nth-child(4n + 4) { --stat-accent: var(--info); }
+.stat-grid .stat-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 18% auto;
+  height: 2px;
+  border-radius: 0 0 999px 999px;
+  background: linear-gradient(90deg, transparent, var(--stat-accent), transparent);
+  opacity: 0.72;
+  transform: scaleX(0.72);
+  transition:
+    opacity var(--transition-base),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.stat-grid .stat-card:hover::before {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+/* A quiet specular wash gives interactive cards depth over moving light spots. */
+:where(.project-card, .agent-card, .skill-card) {
+  position: relative;
+  overflow: hidden;
+}
+:where(.project-card, .agent-card, .skill-card)::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(118deg, transparent 18%, var(--primary-lighter) 48%, transparent 76%);
+  opacity: 0;
+  transform: translate3d(-16%, 0, 0);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-slow) var(--motion-ease-spring);
+}
+:where(.project-card, .agent-card, .skill-card):hover::before {
+  opacity: 0.72;
+  transform: translate3d(0, 0, 0);
+}
+
+.audit-card {
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--info) 54%, transparent), var(--shadow-glass), var(--glass-highlight) !important;
+}
+.timeline-card {
+  box-shadow: inset 3px 0 0 color-mix(in oklch, var(--primary) 42%, transparent), var(--shadow-glass), var(--glass-highlight) !important;
+}
+.audit-card:hover {
+  box-shadow: inset 3px 0 0 var(--info), var(--shadow-glass-hover), var(--glass-highlight) !important;
+}
+.timeline-card:hover {
+  box-shadow: inset 3px 0 0 var(--primary), var(--shadow-glass-hover), var(--glass-highlight) !important;
+}
+
+.eyebrow-dot {
+  animation: ui-dot-beacon 2.4s var(--motion-ease-standard) infinite;
+}
+
+@keyframes ui-dot-beacon {
+  0%, 100% { box-shadow: 0 0 0 3px var(--primary-light); }
+  50% { box-shadow: 0 0 0 7px transparent; }
 }
 .fade-slide-leave-active {
   transition:
-    opacity 90ms var(--motion-ease-exit),
-    transform 90ms var(--motion-ease-exit),
-    filter 90ms var(--motion-ease-exit);
+    opacity var(--motion-fast) var(--motion-ease-exit),
+    transform var(--motion-fast) var(--motion-ease-exit);
+  will-change: opacity, transform;
 }
 .fade-slide-enter-from {
   opacity: 0;
-  transform: translateY(10px) scale(0.995);
-  filter: blur(5px);
+  transform: translate3d(0, 8px, 0) scale(0.998);
 }
 .fade-slide-leave-to {
   opacity: 0;
-  transform: translateY(-2px);
-  filter: blur(2px);
+  transform: translate3d(0, -3px, 0) scale(0.998);
 }
 
 @keyframes ui-surface-enter {
   from {
     opacity: 0;
-    transform: translateY(9px);
+    transform: translate3d(0, 6px, 0) scale(0.997);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
-/* A short, consistent reveal keeps dense pages from appearing abruptly. */
-.page-root > .page-header {
-  animation: ui-surface-enter var(--motion-page) var(--motion-ease-enter) both;
-}
-
-.page-root > :where(
-  .stat-grid,
-  .project-toolbar,
-  .project-grid,
-  .settings-card,
-  .profile-card,
-  .audit-list,
-  .message-list,
-  .skill-grid,
-  .timeline-list,
-  .content-layout
-) {
-  animation: ui-surface-enter 420ms var(--motion-ease-enter) 45ms both;
-}
-
 :where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > * {
-  animation: ui-surface-enter 420ms var(--motion-ease-enter) backwards;
+  animation: ui-surface-enter 300ms var(--motion-ease-enter) 55ms backwards;
 }
 
 :where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(2) {
-  animation-delay: 35ms;
+  animation-delay: 75ms;
 }
 :where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(3) {
-  animation-delay: 70ms;
+  animation-delay: 95ms;
 }
 :where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(4) {
-  animation-delay: 105ms;
+  animation-delay: 115ms;
 }
 :where(.stat-grid, .project-grid, .agent-grid, .skill-grid) > :nth-child(n + 5) {
-  animation-delay: 140ms;
+  animation-delay: 135ms;
 }
 
 .overlay-fade-enter-active,
@@ -435,6 +608,7 @@
   transition:
     opacity var(--motion-base) var(--motion-ease-enter),
     transform var(--motion-base) var(--motion-ease-enter);
+  will-change: opacity, transform;
 }
 .menu-pop-leave-active {
   transition:
@@ -444,7 +618,7 @@
 .menu-pop-enter-from,
 .menu-pop-leave-to {
   opacity: 0;
-  transform: translateY(6px) scale(0.98);
+  transform: translate3d(0, 5px, 0) scale(0.975);
 }
 
 .inline-rise-enter-active,
@@ -478,8 +652,8 @@
 }
 .drawer-slide-enter-from > :last-child,
 .drawer-slide-leave-to > :last-child {
-  opacity: 0.7;
-  transform: translateX(32px);
+  opacity: 0.82;
+  transform: translate3d(24px, 0, 0);
 }
 
 /* ── Responsive ────────────────────────────────────────────────── */
@@ -522,6 +696,68 @@
 }
 .dark .t-dialog {
   background: var(--glass-surface-strong) !important;
+}
+
+/* Memory viewers use one scroll owner: the list. Keeping the dialog body fixed
+   prevents nested scrollbars and avoids wheel/touch events jumping layers. */
+.t-dialog__ctx:has(.memory-explorer) .t-dialog__wrap {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+.t-dialog__ctx:has(.memory-explorer) .t-dialog__position {
+  min-height: 0;
+  height: 100%;
+  padding: 16px !important;
+  align-items: center;
+  overflow: hidden;
+}
+.t-dialog:has(.memory-explorer) {
+  width: min(880px, calc(100vw - 32px)) !important;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.t-dialog:has(.memory-explorer.is-full-height) {
+  height: calc(100vh - 32px);
+  height: calc(100dvh - 32px);
+}
+.t-dialog:has(.memory-explorer) .t-dialog__header {
+  flex-shrink: 0;
+}
+.t-dialog:has(.memory-explorer) .t-dialog__body {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.t-dialog:has(.memory-explorer) .memory-explorer {
+  max-height: none;
+}
+.t-dialog:has(.memory-explorer) .memory-content {
+  min-height: 0;
+}
+.t-dialog:has(.memory-explorer) .memory-list {
+  max-height: none !important;
+  overflow: visible;
+}
+.t-dialog:has(.memory-explorer) .memory-explorer.is-full-height {
+  width: 100%;
+  height: auto;
+  max-height: none;
+}
+.t-dialog:has(.memory-explorer) .memory-explorer.is-full-height .memory-content {
+  min-height: 0;
+}
+.t-dialog:has(.memory-explorer) .memory-explorer.is-full-height .memory-list {
+  min-height: 0;
+  max-height: none !important;
+  overflow: visible;
 }
 
 /* ── TDesign drawer ────────────────────────────────────────────────── */
@@ -606,8 +842,10 @@
   *::after {
     scroll-behavior: auto !important;
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
 }
 

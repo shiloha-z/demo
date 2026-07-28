@@ -36,11 +36,28 @@ const query = ref('')
 const memoryType = ref('')
 const errorMessage = ref('')
 const expanded = ref(new Set<string>())
+const panelCollapsed = ref(false)
+const fullHeight = ref(false)
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let requestVersion = 0
 
 const typeOptions = computed(() => Object.entries(typeCounts.value))
+const panelTitle = computed(() => props.title || {
+  global: '全局记忆',
+  project: '项目记忆',
+  agent: 'Agent 记忆',
+}[props.scope])
+const expandableMemoryIds = computed(() => (
+  memories.value
+    .filter(memory => memory.document.length > 220)
+    .map(memory => memory.id)
+))
+const allDocumentsExpanded = computed(() => (
+  expandableMemoryIds.value.length > 0
+  && expandableMemoryIds.value.every(id => expanded.value.has(id))
+))
+const listMaxHeight = computed(() => (fullHeight.value ? 'none' : props.maxHeight))
 
 const typeLabels: Record<string, string> = {
   review_result: '执行结果',
@@ -102,6 +119,16 @@ function toggleExpanded(id: string) {
   if (next.has(id)) next.delete(id)
   else next.add(id)
   expanded.value = next
+}
+
+function toggleAllDocuments() {
+  expanded.value = allDocumentsExpanded.value
+    ? new Set()
+    : new Set(expandableMemoryIds.value)
+}
+
+function togglePanel() {
+  panelCollapsed.value = !panelCollapsed.value
 }
 
 async function loadMemories() {
@@ -194,6 +221,8 @@ watch(
     query.value = ''
     memoryType.value = ''
     expanded.value = new Set()
+    panelCollapsed.value = false
+    fullHeight.value = false
     loadMemories()
   },
   { immediate: true },
@@ -209,17 +238,28 @@ defineExpose({ refresh: loadMemories })
 </script>
 
 <template>
-  <section class="memory-explorer">
-    <header v-if="title" class="memory-header">
+  <section class="memory-explorer" :class="{ 'is-collapsed': panelCollapsed, 'is-full-height': fullHeight }">
+    <header class="memory-header">
       <div>
-        <h3>{{ title }}</h3>
+        <h3>{{ panelTitle }}</h3>
         <p>{{ scopeTotal }} 条有效记忆<span v-if="memoryType || query"> · 当前显示 {{ total }} 条</span></p>
       </div>
       <button class="memory-refresh" :class="{ spinning: loading }" title="刷新记忆" @click="loadMemories">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>
+      <button
+        class="memory-collapse-toggle"
+        :title="panelCollapsed ? '展开记忆栏' : '折叠记忆栏'"
+        :aria-label="panelCollapsed ? '展开记忆栏' : '折叠记忆栏'"
+        :aria-expanded="!panelCollapsed"
+        @click="togglePanel"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
     </header>
 
+    <Transition name="memory-fold">
+    <div v-show="!panelCollapsed" class="memory-content">
     <div class="memory-toolbar">
       <label class="memory-search">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -235,6 +275,18 @@ defineExpose({ refresh: loadMemories })
       <button v-if="!title" class="memory-refresh" :class="{ spinning: loading }" title="刷新记忆" @click="loadMemories">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>
+      <div v-if="memories.length > 0" class="memory-view-actions">
+        <button
+          v-if="expandableMemoryIds.length > 0"
+          class="memory-tool-btn"
+          @click="toggleAllDocuments"
+        >
+          {{ allDocumentsExpanded ? '全部收起' : '展开全文' }}
+        </button>
+        <button class="memory-tool-btn" :class="{ active: fullHeight }" @click="fullHeight = !fullHeight">
+          {{ fullHeight ? '紧凑高度' : '展开列表' }}
+        </button>
+      </div>
     </div>
 
     <div v-if="!available" class="memory-state memory-state--warning">
@@ -253,12 +305,17 @@ defineExpose({ refresh: loadMemories })
       <strong>{{ query || memoryType ? '没有匹配的记忆' : '暂无记忆' }}</strong>
       <span>{{ query || memoryType ? '尝试更换关键词或清除筛选条件。' : emptyHint }}</span>
     </div>
-    <div v-else class="memory-list" :style="{ maxHeight }" :aria-busy="loading">
+    <div v-else class="memory-list" :style="{ maxHeight: listMaxHeight }" :aria-busy="loading">
       <div v-if="errorMessage" class="memory-inline-error">
         <span>刷新失败，正在保留上次结果</span>
         <button @click="loadMemories">重试</button>
       </div>
-      <article v-for="memory in memories" :key="memory.id" class="memory-item">
+      <article
+        v-for="memory in memories"
+        :key="memory.id"
+        class="memory-item"
+        :class="{ 'is-expanded': expanded.has(memory.id) }"
+      >
         <div
           class="memory-document"
           :class="{ collapsed: memory.document.length > 220 && !expanded.has(memory.id) }"
@@ -288,6 +345,8 @@ defineExpose({ refresh: loadMemories })
       </article>
       <div v-if="loading" class="memory-updating">正在更新结果…</div>
     </div>
+    </div>
+    </Transition>
   </section>
 </template>
 
@@ -302,7 +361,60 @@ defineExpose({ refresh: loadMemories })
   gap: 16px;
   padding: 14px 18px;
   border-bottom: 1px solid var(--surface-border);
-  background: var(--surface-hover);
+  background:
+    linear-gradient(115deg, var(--primary-light), transparent 52%),
+    var(--glass-surface-soft);
+}
+.memory-header > div:first-child { min-width: 0; margin-right: auto; }
+.memory-collapse-toggle {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface-soft);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
+}
+.memory-collapse-toggle:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-light);
+}
+.memory-collapse-toggle:active { transform: scale(0.94); }
+.memory-collapse-toggle svg {
+  transition: transform var(--motion-base) var(--motion-ease-spring);
+}
+.memory-explorer.is-collapsed .memory-collapse-toggle svg {
+  transform: rotate(-90deg);
+}
+.memory-content { min-width: 0; }
+.memory-fold-enter-active,
+.memory-fold-leave-active {
+  overflow: hidden;
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    max-height var(--motion-slow) var(--motion-ease-standard),
+    transform var(--motion-slow) var(--motion-ease-spring);
+}
+.memory-fold-enter-from,
+.memory-fold-leave-to {
+  max-height: 0;
+  opacity: 0;
+  transform: translate3d(0, -4px, 0);
+}
+.memory-fold-enter-to,
+.memory-fold-leave-from {
+  max-height: 1200px;
+  opacity: 1;
 }
 .memory-header h3 {
   margin: 0;
@@ -317,10 +429,41 @@ defineExpose({ refresh: loadMemories })
 }
 .memory-toolbar {
   display: flex;
+  align-items: center;
   gap: 8px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--surface-border);
 }
+.memory-toolbar > .memory-refresh { display: none; }
+.memory-view-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.memory-tool-btn {
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface-soft);
+  color: var(--muted-foreground);
+  font: 600 11px var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
+}
+.memory-tool-btn:hover,
+.memory-tool-btn.active {
+  color: var(--primary);
+  border-color: color-mix(in oklch, var(--primary) 38%, var(--glass-border));
+  background: var(--primary-light);
+}
+.memory-tool-btn:active { transform: scale(0.96); }
 .memory-search {
   min-width: 0;
   flex: 1;
@@ -331,13 +474,14 @@ defineExpose({ refresh: loadMemories })
   padding: 0 10px;
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
-  background: var(--page-canvas);
+  background: var(--glass-surface-soft);
   color: var(--muted-foreground);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .memory-search:focus-within {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-light);
+  background: var(--glass-surface-strong);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 .memory-search input {
   min-width: 0;
@@ -364,7 +508,7 @@ defineExpose({ refresh: loadMemories })
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
   outline: 0;
-  background: var(--page-canvas);
+  background: var(--glass-surface-soft);
   color: var(--foreground);
   font: inherit;
   font-size: 12px;
@@ -378,7 +522,7 @@ defineExpose({ refresh: loadMemories })
   justify-content: center;
   border: 1px solid var(--surface-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--glass-surface-soft);
   color: var(--muted-foreground);
   cursor: pointer;
 }
@@ -413,16 +557,47 @@ defineExpose({ refresh: loadMemories })
   overflow-y: auto;
   padding: 12px 14px 14px;
 }
+.memory-explorer.is-full-height .memory-list {
+  overflow-y: visible;
+}
 .memory-item {
+  position: relative;
+  overflow: hidden;
   padding: 11px 12px;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
-  background: var(--page-canvas);
-  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-soft);
+  box-shadow: var(--glass-highlight);
+  transition:
+    border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-base),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.memory-item::before {
+  content: '';
+  position: absolute;
+  inset: 8px auto 8px 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--primary-gradient);
+  opacity: 0.42;
+  transition: opacity var(--transition-fast), transform var(--motion-base) var(--motion-ease-spring);
 }
 .memory-item:hover {
   border-color: color-mix(in oklch, var(--primary) 28%, var(--surface-border));
-  background: var(--surface);
+  background: var(--glass-surface-strong);
+  box-shadow: var(--shadow-glass);
+  transform: translateY(-1px);
+}
+.memory-item:hover::before {
+  opacity: 1;
+  transform: scaleY(1.08);
+}
+.memory-item.is-expanded {
+  border-color: color-mix(in oklch, var(--primary) 30%, var(--glass-border));
+  background: var(--glass-surface-strong);
+  box-shadow: inset 0 0 0 1px var(--primary-lighter), var(--glass-highlight);
 }
 .memory-document {
   color: var(--foreground);
@@ -444,13 +619,24 @@ defineExpose({ refresh: loadMemories })
   color: inherit;
 }
 .memory-expand {
-  margin-top: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
+  margin-top: 7px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, var(--glass-border));
+  border-radius: 999px;
+  background: var(--primary-lighter);
   color: var(--primary);
   cursor: pointer;
   font-size: 11px;
+  font-weight: 600;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
+}
+.memory-expand:hover {
+  background: var(--primary-light);
+  border-color: color-mix(in oklch, var(--primary) 38%, var(--glass-border));
+  transform: translateY(-1px);
 }
 .memory-meta {
   display: flex;
@@ -470,6 +656,7 @@ defineExpose({ refresh: loadMemories })
   color: var(--primary);
   font-size: 10px;
   font-weight: 600;
+  border: 1px solid color-mix(in oklch, currentColor 14%, transparent);
 }
 .memory-relevance {
   background: var(--success-light);
@@ -539,5 +726,10 @@ defineExpose({ refresh: loadMemories })
   .memory-toolbar { flex-wrap: wrap; }
   .memory-search { flex-basis: calc(100% - 42px); }
   .memory-type-filter { flex: 1; }
+  .memory-view-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .memory-header { padding-inline: 14px; }
 }
 </style>

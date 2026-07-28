@@ -134,7 +134,7 @@ async function submit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, oklch(0.546 0.215 264) 0%, oklch(0.45 0.2 280) 100%);
+  background: var(--primary-gradient);
   overflow: hidden;
 }
 
@@ -145,7 +145,7 @@ async function submit() {
   padding: 60px;
   max-width: 460px;
   color: #fff;
-  animation: fadeUp 0.6s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: fadeUp 480ms var(--motion-ease-enter) both;
 }
 
 .brand-logo {
@@ -264,12 +264,12 @@ async function submit() {
   width: 100%;
   max-width: 340px;
   padding: 40px;
-  animation: fadeUp 0.5s cubic-bezier(0.4, 0, 0.2, 1) both;
+  animation: fadeUp 420ms var(--motion-ease-enter) 40ms both;
 }
 
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(16px); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translate3d(0, 12px, 0) scale(0.995); }
+  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
 }
 
 .login-header {

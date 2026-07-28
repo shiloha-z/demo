@@ -192,9 +192,10 @@ function handleAvatarLoadError() {
 }
 
 .profile-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
+  background: var(--glass-surface-strong);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-glass), var(--glass-highlight);
   overflow: hidden;
 }
 
@@ -204,18 +205,31 @@ function handleAvatarLoadError() {
   align-items: center;
   gap: 20px;
   padding: 32px 28px;
-  background: var(--surface-hover);
-  border-bottom: 1px solid var(--surface-border);
+  background:
+    radial-gradient(circle at 12% 20%, var(--ambient-spot-primary), transparent 46%),
+    linear-gradient(120deg, var(--primary-light), transparent 62%),
+    var(--glass-surface-soft);
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .profile-avatar-wrap {
   position: relative;
   width: 72px;
   height: 72px;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xl);
   flex-shrink: 0;
   cursor: pointer;
   overflow: hidden;
+  border: 3px solid color-mix(in oklch, var(--surface) 72%, transparent);
+  box-shadow: 0 10px 26px var(--primary-glow);
+  transition:
+    transform var(--motion-base) var(--motion-ease-spring),
+    box-shadow var(--transition-base);
+}
+
+.profile-avatar-wrap:hover {
+  transform: translateY(-2px) scale(1.025);
+  box-shadow: 0 14px 32px var(--primary-glow);
 }
 
 .profile-avatar-img {
@@ -262,7 +276,7 @@ function handleAvatarLoadError() {
 
 .profile-name {
   font-size: 20px;
-  font-weight: 700;
+  font-weight: 760;
   color: var(--foreground);
   margin: 0 0 4px;
 }
@@ -312,14 +326,17 @@ function handleAvatarLoadError() {
 .profile-input,
 .profile-textarea {
   padding: 9px 12px;
-  border: 1px solid var(--surface-border);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   font-size: 14px;
   font-family: var(--font-sans);
-  background: var(--page-canvas);
+  background: var(--glass-surface-soft);
   color: var(--foreground);
   outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
 .profile-textarea {
@@ -330,7 +347,8 @@ function handleAvatarLoadError() {
 .profile-input:focus,
 .profile-textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px oklch(0.55 0.2 260 / 0.12);
+  background: var(--glass-surface-strong);
+  box-shadow: 0 0 0 3px var(--ring);
 }
 
 .profile-save-btn {
@@ -344,12 +362,19 @@ function handleAvatarLoadError() {
   font-weight: 600;
   font-family: var(--font-sans);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  box-shadow: 0 8px 20px var(--primary-glow);
+  transition:
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
 }
 
 .profile-save-btn:hover {
   background: var(--primary-hover);
+  box-shadow: 0 11px 26px var(--primary-glow);
+  transform: translateY(-1px);
 }
+.profile-save-btn:active { transform: scale(0.98); }
 
 .profile-save-btn:disabled {
   opacity: 0.5;

@@ -282,6 +282,8 @@ const kpiCards = computed<KpiCard[]>(() => {
   font-size: 11px;
   font-weight: 600;
   line-height: 1.6;
+  border: 1px solid color-mix(in oklch, currentColor 14%, transparent);
+  box-shadow: var(--glass-highlight);
 }
 .risk-high { background: var(--danger-light);  color: var(--danger); }
 .risk-med  { background: var(--warning-light); color: var(--warning); }

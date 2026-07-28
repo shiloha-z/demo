@@ -337,7 +337,7 @@ function handleLogout() {
   z-index: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse 80% 60% at 15% 20%, oklch(0.55 0.22 264 / 0.07), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 15% 20%, var(--primary-light), transparent 60%),
     radial-gradient(ellipse 60% 70% at 85% 75%, oklch(0.62 0.18 200 / 0.06), transparent 55%),
     radial-gradient(ellipse 50% 50% at 50% 50%, oklch(0.58 0.1 320 / 0.04), transparent 50%);
   animation: ambient-drift 18s var(--motion-ease-standard) infinite alternate;
@@ -345,7 +345,7 @@ function handleLogout() {
 }
 .dark .app-root::before {
   background:
-    radial-gradient(ellipse 80% 60% at 15% 20%, oklch(0.62 0.2 264 / 0.12), transparent 60%),
+    radial-gradient(ellipse 80% 60% at 15% 20%, var(--primary-light), transparent 60%),
     radial-gradient(ellipse 60% 70% at 85% 75%, oklch(0.68 0.16 200 / 0.10), transparent 55%),
     radial-gradient(ellipse 50% 50% at 50% 50%, oklch(0.6 0.08 320 / 0.06), transparent 50%);
 }
@@ -363,9 +363,9 @@ function handleLogout() {
     radial-gradient(circle 170px at 91% 78%, var(--ambient-spot-warm) 0 11%, transparent 72%),
     radial-gradient(circle 130px at 32% 86%, var(--ambient-spot-primary) 0 9%, transparent 74%);
   filter: blur(7px) saturate(1.2);
-  opacity: 0.9;
+  opacity: 0.86;
   animation: ambient-spots 22s var(--motion-ease-standard) infinite alternate;
-  will-change: transform, opacity;
+  will-change: transform;
 }
 
 @keyframes ambient-drift {
@@ -374,9 +374,8 @@ function handleLogout() {
 }
 
 @keyframes ambient-spots {
-  0% { transform: translate3d(-1.5%, 0, 0) scale(0.99); opacity: 0.76; }
-  55% { opacity: 0.94; }
-  100% { transform: translate3d(1.5%, 1%, 0) scale(1.035); opacity: 0.84; }
+  from { transform: translate3d(-1.5%, 0, 0) scale(0.99); }
+  to { transform: translate3d(1.5%, 1%, 0) scale(1.035); }
 }
 
 /* ── Sidebar ────────────────────────────────────────────────────── */
@@ -420,10 +419,18 @@ function handleLogout() {
   width: 32px;
   height: 32px;
   flex-shrink: 0;
-  transition: opacity var(--motion-base) var(--motion-ease-standard);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-base) var(--motion-ease-spring),
+    box-shadow var(--transition-base);
   border-radius: 10px;
   background: var(--primary-gradient);
   box-shadow: 0 7px 18px var(--primary-glow);
+}
+
+.sidebar-header:hover .sidebar-logo {
+  transform: rotate(-4deg) scale(1.06);
+  box-shadow: 0 10px 24px var(--primary-glow);
 }
 
 .sidebar-title {
@@ -683,9 +690,10 @@ function handleLogout() {
 
 .topbar-title {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 680;
   margin: 0;
   color: var(--foreground);
+  letter-spacing: -0.2px;
 }
 
 .topbar-left {
@@ -704,9 +712,12 @@ function handleLogout() {
   padding: 5px 10px;
   border: 1px solid var(--surface-border);
   border-radius: 999px;
-  background: var(--surface-subtle);
+  background: var(--glass-surface-soft);
   color: var(--muted-foreground);
   font-size: 12px;
+  box-shadow: var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  backdrop-filter: blur(var(--glass-blur-sm));
 }
 
 .topbar-project span:last-child {
@@ -722,6 +733,12 @@ function handleLogout() {
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 3px var(--success-light);
+  animation: project-online-pulse 2.6s var(--motion-ease-standard) infinite;
+}
+
+@keyframes project-online-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--success-light); }
+  50% { box-shadow: 0 0 0 6px transparent; }
 }
 
 .topbar-right {
@@ -747,13 +764,34 @@ function handleLogout() {
     transform var(--transition-fast);
 }
 
+.topbar-icon-btn svg {
+  transition: transform var(--motion-base) var(--motion-ease-spring);
+}
+
 .topbar-icon-btn:hover {
   background: var(--surface-hover);
   color: var(--foreground);
 }
 
+.topbar-icon-btn:hover svg {
+  transform: scale(1.08);
+}
+
+.topbar-icon-btn:last-child:hover svg {
+  transform: rotate(14deg) scale(1.08);
+}
+
+.topbar-icon-btn:active {
+  transform: scale(0.94);
+}
+
 .chat-toggle-btn {
   position: relative;
+}
+.app-body.chat-open .chat-toggle-btn {
+  color: var(--primary);
+  background: var(--primary-light);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 12%, transparent);
 }
 .notif-toggle-btn {
   position: relative;
@@ -771,6 +809,14 @@ function handleLogout() {
   line-height: 16px;
   text-align: center;
   pointer-events: none;
+  transform-origin: center;
+  animation: badge-pop 320ms var(--motion-ease-spring) both;
+}
+
+@keyframes badge-pop {
+  from { opacity: 0; transform: scale(0.45); }
+  65% { opacity: 1; transform: scale(1.12); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 /* ── Main content ───────────────────────────────────────────────── */

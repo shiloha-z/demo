@@ -3,6 +3,10 @@
 
 :root {
   color-scheme: light;
+  --theme-hue: 264;
+  --theme-hue-start: 258;
+  --theme-hue-end: 275;
+  --theme-chroma: 0.215;
 
   /* ── Surface system ────────────────────────────────────────────── */
   --app-shell: oklch(0.972 0.007 264);
@@ -26,9 +30,9 @@
   --glass-blur: 18px;
   --glass-blur-lg: 28px;
   --glass-saturate: 1.14;
-  --ambient-spot-primary: oklch(0.67 0.2 258 / 0.38);
-  --ambient-spot-cyan: oklch(0.75 0.15 205 / 0.32);
-  --ambient-spot-violet: oklch(0.69 0.18 305 / 0.29);
+  --ambient-spot-primary: oklch(0.67 var(--theme-chroma) var(--theme-hue-start) / 0.38);
+  --ambient-spot-cyan: oklch(0.75 0.15 var(--theme-hue-end) / 0.32);
+  --ambient-spot-violet: oklch(0.69 0.18 var(--theme-hue) / 0.29);
   --ambient-spot-warm: oklch(0.82 0.15 78 / 0.23);
 
   /* ── Foreground ────────────────────────────────────────────────── */
@@ -37,14 +41,18 @@
   --secondary-foreground: oklch(0.235 0.006 280);
 
   /* ── Brand / Primary — vibrant indigo-blue ─────────────────────── */
-  --primary: oklch(0.546 0.215 264);
-  --primary-hover: oklch(0.496 0.215 264);
-  --primary-active: oklch(0.456 0.215 264);
-  --primary-light: oklch(0.546 0.215 264 / 0.08);
-  --primary-lighter: oklch(0.546 0.215 264 / 0.04);
+  --primary: oklch(0.546 var(--theme-chroma) var(--theme-hue));
+  --primary-hover: oklch(0.496 var(--theme-chroma) var(--theme-hue));
+  --primary-active: oklch(0.456 var(--theme-chroma) var(--theme-hue));
+  --primary-light: oklch(0.546 var(--theme-chroma) var(--theme-hue) / 0.08);
+  --primary-lighter: oklch(0.546 var(--theme-chroma) var(--theme-hue) / 0.04);
   --primary-foreground: oklch(0.985 0 0);
-  --primary-gradient: linear-gradient(135deg, oklch(0.59 0.22 258), oklch(0.51 0.23 275));
-  --primary-glow: oklch(0.61 0.2 264 / 0.18);
+  --primary-gradient: linear-gradient(
+    135deg,
+    oklch(0.59 var(--theme-chroma) var(--theme-hue-start)),
+    oklch(0.51 var(--theme-chroma) var(--theme-hue-end))
+  );
+  --primary-glow: oklch(0.61 var(--theme-chroma) var(--theme-hue) / 0.18);
 
   /* ── Semantic colors ───────────────────────────────────────────── */
   --success: oklch(0.627 0.170 150);
@@ -55,13 +63,13 @@
   --danger-light: oklch(0.586 0.225 27 / 0.10);
   --info: oklch(0.62 0.14 250);
   --info-light: oklch(0.62 0.14 250 / 0.10);
-  --brand: oklch(0.546 0.215 264);
+  --brand: var(--primary);
   --brand-foreground: oklch(1 0 0);
 
   /* ── Borders & inputs ──────────────────────────────────────────── */
   --border: oklch(0.918 0.003 280);
   --input: oklch(0.918 0.003 280);
-  --ring: oklch(0.546 0.215 264 / 0.4);
+  --ring: oklch(0.546 var(--theme-chroma) var(--theme-hue) / 0.4);
 
   /* ── Shadows ───────────────────────────────────────────────────── */
   --shadow-surface: 0 1px 2px rgba(30, 41, 59, 0.04), 0 5px 16px rgba(30, 41, 59, 0.035);
@@ -79,14 +87,14 @@
   --radius-2xl: 20px;
 
   /* ── Transitions ───────────────────────────────────────────────── */
-  --motion-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-ease-standard: cubic-bezier(0.22, 0.61, 0.36, 1);
   --motion-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
   --motion-ease-exit: cubic-bezier(0.4, 0, 1, 1);
   --motion-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
-  --motion-fast: 120ms;
-  --motion-base: 180ms;
-  --motion-slow: 260ms;
-  --motion-page: 340ms;
+  --motion-fast: 140ms;
+  --motion-base: 210ms;
+  --motion-slow: 300ms;
+  --motion-page: 320ms;
   --transition-base: var(--motion-base) var(--motion-ease-standard);
   --transition-fast: var(--motion-fast) var(--motion-ease-standard);
 
@@ -100,7 +108,7 @@
   --td-brand-color-hover: var(--primary-hover);
   --td-brand-color-active: var(--primary-active);
   --td-brand-color-focus: var(--primary);
-  --td-brand-color-disabled: oklch(0.546 0.215 264 / 0.4);
+  --td-brand-color-disabled: color-mix(in oklch, var(--primary) 40%, transparent);
   --td-brand-color-light: var(--primary-light);
   --td-text-color-primary: var(--foreground);
   --td-text-color-secondary: var(--muted-foreground);
@@ -137,23 +145,27 @@
   --glass-surface-soft: oklch(0.23 0.01 270 / 0.64);
   --glass-border: oklch(0.36 0.014 270 / 0.62);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  --ambient-spot-primary: oklch(0.62 0.2 258 / 0.3);
-  --ambient-spot-cyan: oklch(0.7 0.16 205 / 0.25);
-  --ambient-spot-violet: oklch(0.65 0.18 305 / 0.24);
+  --ambient-spot-primary: oklch(0.62 var(--theme-chroma) var(--theme-hue-start) / 0.3);
+  --ambient-spot-cyan: oklch(0.7 0.16 var(--theme-hue-end) / 0.25);
+  --ambient-spot-violet: oklch(0.65 0.18 var(--theme-hue) / 0.24);
   --ambient-spot-warm: oklch(0.76 0.15 78 / 0.17);
 
   --foreground: oklch(0.935 0.003 280);
   --muted-foreground: oklch(0.66 0.01 280);
   --secondary-foreground: oklch(0.86 0.005 280);
 
-  --primary: oklch(0.62 0.2 264);
-  --primary-hover: oklch(0.66 0.2 264);
-  --primary-active: oklch(0.58 0.2 264);
-  --primary-light: oklch(0.62 0.2 264 / 0.15);
-  --primary-lighter: oklch(0.62 0.2 264 / 0.08);
+  --primary: oklch(0.62 var(--theme-chroma) var(--theme-hue));
+  --primary-hover: oklch(0.66 var(--theme-chroma) var(--theme-hue));
+  --primary-active: oklch(0.58 var(--theme-chroma) var(--theme-hue));
+  --primary-light: oklch(0.62 var(--theme-chroma) var(--theme-hue) / 0.15);
+  --primary-lighter: oklch(0.62 var(--theme-chroma) var(--theme-hue) / 0.08);
   --primary-foreground: oklch(0.12 0.005 280);
-  --primary-gradient: linear-gradient(135deg, oklch(0.66 0.2 258), oklch(0.58 0.21 275));
-  --primary-glow: oklch(0.62 0.2 264 / 0.24);
+  --primary-gradient: linear-gradient(
+    135deg,
+    oklch(0.66 var(--theme-chroma) var(--theme-hue-start)),
+    oklch(0.58 var(--theme-chroma) var(--theme-hue-end))
+  );
+  --primary-glow: oklch(0.62 var(--theme-chroma) var(--theme-hue) / 0.24);
 
   --success: oklch(0.695 0.16 150);
   --warning: oklch(0.765 0.15 75);
@@ -161,7 +173,7 @@
 
   --border: oklch(0.29 0.006 280);
   --input: oklch(0.29 0.006 280);
-  --ring: oklch(0.62 0.2 264 / 0.45);
+  --ring: oklch(0.62 var(--theme-chroma) var(--theme-hue) / 0.45);
 
   --shadow-surface: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
   --shadow-floating: 0 12px 32px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -177,4 +189,41 @@
   --td-bg-color-container-hover: var(--surface-hover);
   --td-component-stroke: var(--surface-border);
   --td-component-border: var(--surface-border);
+}
+
+/* Brand palettes. Every component consumes the semantic primary variables,
+   so changing these four values recolors the full application consistently. */
+:root[data-color-theme="ocean"] {
+  --theme-hue: 230;
+  --theme-hue-start: 235;
+  --theme-hue-end: 190;
+  --theme-chroma: 0.17;
+}
+
+:root[data-color-theme="violet"] {
+  --theme-hue: 300;
+  --theme-hue-start: 285;
+  --theme-hue-end: 325;
+  --theme-chroma: 0.2;
+}
+
+:root[data-color-theme="rose"] {
+  --theme-hue: 355;
+  --theme-hue-start: 345;
+  --theme-hue-end: 25;
+  --theme-chroma: 0.18;
+}
+
+:root[data-color-theme="emerald"] {
+  --theme-hue: 155;
+  --theme-hue-start: 145;
+  --theme-hue-end: 185;
+  --theme-chroma: 0.16;
+}
+
+:root[data-color-theme="amber"] {
+  --theme-hue: 75;
+  --theme-hue-start: 82;
+  --theme-hue-end: 45;
+  --theme-chroma: 0.16;
 }

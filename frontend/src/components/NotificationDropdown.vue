@@ -188,10 +188,19 @@ function onBackdropClick(e: MouseEvent) {
   transform-origin: right top;
   z-index: 201;
 }
+.notification-pop-enter-active,
+.notification-pop-leave-active {
+  transition: opacity var(--motion-base) var(--motion-ease-standard);
+}
+.notification-pop-enter-from,
+.notification-pop-leave-to {
+  opacity: 0;
+}
 .notification-pop-enter-active .notif-dropdown {
   transition:
     opacity var(--motion-base) var(--motion-ease-enter),
     transform var(--motion-base) var(--motion-ease-enter);
+  will-change: opacity, transform;
 }
 .notification-pop-leave-active .notif-dropdown {
   transition:
@@ -201,7 +210,7 @@ function onBackdropClick(e: MouseEvent) {
 .notification-pop-enter-from .notif-dropdown,
 .notification-pop-leave-to .notif-dropdown {
   opacity: 0;
-  transform: translateY(-6px) scale(0.98);
+  transform: translate3d(0, -5px, 0) scale(0.975);
 }
 
 /* ── Header ────────────────────────────────────────────────────── */
@@ -232,10 +241,21 @@ function onBackdropClick(e: MouseEvent) {
 .nd-tab {
   padding: 7px 12px; font-size: 12.5px; border: none; cursor: pointer;
   background: transparent; color: var(--muted-foreground); font-weight: 500;
-  border-bottom: 2px solid transparent; transition: all var(--transition-fast);
+  position: relative;
+  border-bottom: 2px solid transparent;
+  transition: color var(--transition-fast), transform var(--motion-fast) var(--motion-ease-spring);
+}
+.nd-tab::after {
+  content: '';
+  position: absolute; left: 10px; right: 10px; bottom: -2px; height: 2px;
+  border-radius: 999px; background: var(--primary);
+  transform: scaleX(0);
+  transition: transform var(--motion-base) var(--motion-ease-spring);
 }
 .nd-tab:hover { color: var(--foreground); }
-.nd-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.nd-tab:active { transform: scale(0.96); }
+.nd-tab.active { color: var(--primary); font-weight: 600; }
+.nd-tab.active::after { transform: scaleX(1); }
 
 /* ── Body ──────────────────────────────────────────────────────── */
 .nd-body { flex: 1; overflow-y: auto; min-height: 0; }
@@ -255,7 +275,11 @@ function onBackdropClick(e: MouseEvent) {
 
 .nd-item-top { display: flex; align-items: center; gap: 6px; }
 .nd-item-title { font-size: 13px; font-weight: 600; color: var(--foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nd-unread-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex-shrink: 0; margin-left: auto; }
+.nd-unread-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--primary); flex-shrink: 0; margin-left: auto;
+  animation: unread-beacon 720ms var(--motion-ease-standard) 2;
+}
 .nd-resolved-tag {
   font-size: 10px; font-weight: 600; color: var(--muted-foreground);
   background: var(--surface-hover); padding: 1px 6px; border-radius: 6px;
@@ -292,4 +316,9 @@ function onBackdropClick(e: MouseEvent) {
 .lv-success { background: #22c55e; }
 .lv-warning { background: #f59e0b; }
 .lv-error { background: var(--danger); }
+
+@keyframes unread-beacon {
+  0%, 100% { box-shadow: 0 0 0 0 var(--primary-light); }
+  50% { box-shadow: 0 0 0 5px transparent; }
+}
 </style>

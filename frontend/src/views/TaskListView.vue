@@ -1502,17 +1502,38 @@ async function resumeTask(task: any, event: Event) {
 
 .task-list {
   width: 300px; border-right: 1px solid var(--surface-border);
-  background: var(--app-shell); overflow-y: auto; flex-shrink: 0;
+  background:
+    linear-gradient(160deg, var(--primary-lighter), transparent 42%),
+    var(--glass-surface-soft);
+  overflow-y: auto; flex-shrink: 0;
   display: flex; flex-direction: column;
 }
 .task-list.tree-mode { width: 380px; }
 
 /* ── 列表/树形 切换 ───────────────────────────── */
-.view-seg { display: inline-flex; border: 1px solid var(--surface-border); border-radius: var(--radius-md); overflow: hidden; }
-.seg-btn { border: none; background: var(--surface); color: var(--muted-foreground); font-size: 12px; font-family: var(--font-sans); padding: 4px 11px; cursor: pointer; transition: all var(--transition-fast); }
-.seg-btn + .seg-btn { border-left: 1px solid var(--surface-border); }
+.view-seg {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border: 1px solid var(--glass-border); border-radius: var(--radius-lg);
+  overflow: hidden; background: var(--glass-surface-soft); box-shadow: var(--glass-highlight);
+}
+.seg-btn {
+  border: none; border-radius: var(--radius-md); background: transparent;
+  color: var(--muted-foreground); font-size: 12px; font-family: var(--font-sans);
+  padding: 4px 11px; cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
+}
+.seg-btn + .seg-btn { border-left: none; }
 .seg-btn:hover { color: var(--foreground); }
-.seg-btn.active { background: var(--primary); color: #fff; }
+.seg-btn:active { transform: scale(0.96); }
+.seg-btn.active {
+  background: var(--glass-surface-strong);
+  color: var(--primary);
+  box-shadow: var(--shadow-surface), inset 0 0 0 1px var(--primary-light);
+}
 
 /* ── 树形视图 ─────────────────────────────────── */
 .tree-toolbar { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--surface-border); flex-shrink: 0; }
@@ -1522,7 +1543,7 @@ async function resumeTask(task: any, event: Event) {
 .tree-branch { display: flex; flex-direction: column; }
 .tree-card {
   position: relative; background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); padding: 10px 12px; cursor: pointer;
+  border-radius: var(--radius-lg); padding: 10px 12px; cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tree-card:hover { border-color: var(--primary); }
@@ -1556,11 +1577,21 @@ async function resumeTask(task: any, event: Event) {
 .ring-text { font-size: 9px; font-weight: 700; fill: var(--foreground); text-anchor: middle; font-family: var(--font-sans); }
 
 .task-item {
-  padding: 12px 14px; border-bottom: 1px solid var(--surface-border);
-  cursor: pointer; transition: background var(--transition-fast);
+  margin: 3px 8px;
+  padding: 10px 10px; border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
 }
-.task-item:hover { background: var(--surface-hover); }
-.task-item.active { background: var(--primary-lighter); border-left: 3px solid var(--primary); padding-left: 11px; }
+.task-item:hover { background: var(--surface-hover); transform: translateX(2px); }
+.task-item.active {
+  background: var(--glass-surface-strong);
+  border-color: color-mix(in oklch, var(--primary) 26%, var(--glass-border));
+  box-shadow: inset 3px 0 0 var(--primary), var(--glass-highlight);
+}
 .task-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
 .task-item-actions { display: flex; align-items: center; gap: 4px; }
 .task-id { font-size: 12px; font-weight: 700; color: var(--muted-foreground); font-family: var(--font-mono); }
@@ -1668,7 +1699,7 @@ async function resumeTask(task: any, event: Event) {
 .del-btn:hover { background: var(--danger-light); color: var(--danger); }
 
 /* ── Detail panel ──────────────────────────────────── */
-.task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--page-canvas); }
+.task-detail { flex: 1; overflow-y: auto; padding: 20px 24px; background: var(--workspace-canvas); }
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
 .detail-header h3 { font-size: 17px; font-weight: 700; margin: 0 0 8px; }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -1695,6 +1726,8 @@ async function resumeTask(task: any, event: Event) {
   position: fixed; inset: 0; z-index: 100;
   display: flex; justify-content: flex-end;
   background: rgb(15 23 42 / 0.25);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 .workspace-panel {
   width: min(760px, 92vw); height: 100%;

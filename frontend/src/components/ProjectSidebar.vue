@@ -126,10 +126,17 @@ const icons: Record<string, string> = {
   <!-- Global project selector -->
   <div class="project-picker" :class="{ collapsed: collapsed }">
     <svg class="picker-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-    <select v-model="selectedProjectId" class="project-select">
+    <select
+      v-model="selectedProjectId"
+      class="project-select"
+      :title="store.currentProject?.name || '选择项目'"
+    >
       <option :value="null" disabled>选择项目…</option>
       <option v-for="p in store.switchableProjects" :key="p.id" :value="p.id">{{ p.name }}</option>
     </select>
+    <svg class="picker-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
   </div>
 
   <!-- Unread chat indicators for other projects -->
@@ -181,11 +188,16 @@ const icons: Record<string, string> = {
 .project-picker {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 14px; margin: 4px 10px 0;
-  background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md);
+  background: var(--glass-surface-soft); border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  backdrop-filter: blur(var(--glass-blur-sm));
   overflow: hidden;
   transition:
     border-color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast),
     padding var(--motion-slow) var(--motion-ease-standard),
     margin var(--motion-slow) var(--motion-ease-standard);
 }
@@ -202,6 +214,10 @@ const icons: Record<string, string> = {
   opacity: 0.7;
 }
 
+.project-picker.collapsed .picker-chevron {
+  display: none;
+}
+
 .project-picker.collapsed .project-select {
   position: absolute;
   inset: 0;
@@ -209,8 +225,25 @@ const icons: Record<string, string> = {
   opacity: 0;
   cursor: pointer;
 }
-.project-picker:hover { border-color: var(--ring); }
+.project-picker:hover {
+  border-color: color-mix(in oklch, var(--primary) 36%, var(--glass-border));
+  background: var(--glass-surface-strong);
+  box-shadow: var(--shadow-surface), var(--glass-highlight);
+}
 .picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
+.picker-chevron {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  pointer-events: none;
+  opacity: 0.72;
+  transition:
+    color var(--transition-fast),
+    transform var(--motion-base) var(--motion-ease-spring);
+}
+.project-picker:hover .picker-chevron {
+  color: var(--primary);
+  transform: translateY(1px);
+}
 
 /* ── Unread project chips ──────────────────────────────────── */
 .unread-projects {
@@ -247,10 +280,12 @@ const icons: Record<string, string> = {
 }
 
 .project-select {
-  flex: 1; min-width: 0; padding: 4px 0;
+  flex: 1; width: 100%; min-width: 0; padding: 4px 0;
   border: none; background: transparent; color: var(--foreground);
   font-size: 13px; font-weight: 500; font-family: var(--font-sans);
   outline: none; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  -webkit-appearance: none; appearance: none;
 }
 .project-select option {
   color: var(--foreground);
@@ -301,20 +336,46 @@ const icons: Record<string, string> = {
   transition: padding var(--motion-slow) var(--motion-ease-standard),
               gap var(--motion-slow) var(--motion-ease-standard),
               background var(--transition-fast),
-              color var(--transition-fast);
+              color var(--transition-fast),
+              transform var(--motion-base) var(--motion-ease-spring),
+              box-shadow var(--transition-fast);
   cursor: pointer;
   position: relative;
+}
+
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 10px var(--primary-glow);
+  opacity: 0;
+  transform: translate3d(-4px, -50%, 0) scaleY(0.35);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-base) var(--motion-ease-spring);
 }
 
 .nav-item:hover {
   background: var(--surface-hover);
   color: var(--foreground);
+  transform: translate3d(2px, 0, 0);
 }
 
 .nav-item.active {
   background: var(--primary-light);
   color: var(--primary);
   font-weight: 600;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 10%, transparent);
+}
+
+.nav-item.active::before {
+  opacity: 1;
+  transform: translate3d(0, -50%, 0) scaleY(1);
 }
 
 .nav-icon-wrap {
@@ -333,11 +394,18 @@ const icons: Record<string, string> = {
   justify-content: center;
   flex-shrink: 0;
   opacity: 0.7;
-  transition: opacity var(--motion-base) var(--motion-ease-standard);
+  transition:
+    opacity var(--motion-base) var(--motion-ease-standard),
+    transform var(--motion-base) var(--motion-ease-spring);
 }
 
 .nav-item.active .nav-icon {
   opacity: 1;
+  transform: scale(1.08);
+}
+
+.nav-item:hover .nav-icon {
+  transform: scale(1.08) rotate(-3deg);
 }
 
 .nav-label {
@@ -404,6 +472,10 @@ const icons: Record<string, string> = {
   justify-content: center;
   padding: 10px 0;
   gap: 0;
+}
+
+.sidebar-nav.collapsed .nav-item:hover {
+  transform: translate3d(0, -1px, 0);
 }
 
 .sidebar-nav.collapsed .nav-icon {

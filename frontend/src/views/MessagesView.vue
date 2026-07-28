@@ -277,17 +277,33 @@ onActivated(load)
 
 /* ── Tabs ───────────────────────────────────────────────────────────── */
 .tabs {
-  display: flex; gap: 4px; margin-bottom: 14px;
-  border-bottom: 1px solid var(--surface-border);
+  display: flex; gap: 4px; width: fit-content; margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--glass-surface-soft);
+  box-shadow: var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-sm));
+  backdrop-filter: blur(var(--glass-blur-sm));
 }
 .tab {
-  padding: 8px 14px; border: none; background: transparent;
+  padding: 7px 13px; border: none; border-radius: var(--radius-md); background: transparent;
   color: var(--muted-foreground); font-size: 13.5px; font-weight: 500;
-  cursor: pointer; border-bottom: 2px solid transparent;
-  transition: all var(--transition-fast);
+  cursor: pointer;
+  transition:
+    color var(--transition-fast),
+    background-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    transform var(--motion-fast) var(--motion-ease-spring);
 }
 .tab:hover { color: var(--foreground); }
-.tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
+.tab:active { transform: scale(0.97); }
+.tab.active {
+  color: var(--primary);
+  background: var(--glass-surface-strong);
+  box-shadow: var(--shadow-surface), inset 0 0 0 1px var(--primary-light);
+  font-weight: 650;
+}
 
 /* ── Empty ──────────────────────────────────────────────────────────── */
 .empty-card {

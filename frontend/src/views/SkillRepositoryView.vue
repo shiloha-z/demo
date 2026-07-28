@@ -563,12 +563,15 @@ function fmtTime(iso: string | null): string {
   width: 36px;
   height: 36px;
   border-radius: var(--radius-md);
-  background: var(--primary-light);
+  background:
+    linear-gradient(145deg, var(--primary-light), var(--glass-surface-strong));
   color: var(--primary);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 1px solid color-mix(in oklch, var(--primary) 14%, var(--glass-border));
+  box-shadow: var(--glass-highlight);
 }
 
 .skill-name {
@@ -589,12 +592,13 @@ function fmtTime(iso: string | null): string {
 }
 
 .skill-prompt-preview {
-  background: var(--page-canvas);
-  border: 1px solid var(--surface-border);
+  background: var(--glass-surface-soft);
+  border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   padding: 10px 12px;
   max-height: 80px;
   overflow: hidden;
+  box-shadow: inset 0 1px 8px color-mix(in oklch, var(--foreground) 3%, transparent);
 }
 
 .skill-prompt-preview pre {

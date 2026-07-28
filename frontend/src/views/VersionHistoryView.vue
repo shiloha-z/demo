@@ -226,16 +226,22 @@ function formatDate(d: string) {
 }
 .timeline-dot {
   width: 10px; height: 10px; border-radius: 50%;
-  background: var(--surface-border); border: 2px solid var(--surface-border);
+  background: var(--glass-surface-strong); border: 2px solid var(--surface-border);
   margin-top: 14px; flex-shrink: 0;
-  transition: all var(--transition-base);
+  box-shadow: 0 0 0 3px var(--glass-surface-soft);
+  transition:
+    background-color var(--transition-base),
+    border-color var(--transition-base),
+    box-shadow var(--transition-base),
+    transform var(--motion-base) var(--motion-ease-spring);
 }
 .timeline-dot.latest {
   background: var(--primary); border-color: var(--primary);
   box-shadow: 0 0 0 4px var(--primary-light);
 }
 .timeline-line {
-  width: 2px; flex: 1; min-height: 24px; background: var(--surface-border);
+  width: 2px; flex: 1; min-height: 24px;
+  background: linear-gradient(var(--primary-light), var(--surface-border), transparent);
 }
 
 .timeline-card {
@@ -253,12 +259,14 @@ function formatDate(d: string) {
 .timeline-item.focused .timeline-dot {
   background: var(--primary);
   box-shadow: 0 0 0 4px var(--primary-light);
+  transform: scale(1.16);
 }
 
 .card-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .commit-hash {
   font-size: 12px; font-weight: 700; color: var(--primary); background: var(--primary-light);
-  padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); flex-shrink: 0;
+  padding: 3px 7px; border-radius: var(--radius-sm); font-family: var(--font-mono); flex-shrink: 0;
+  border: 1px solid color-mix(in oklch, var(--primary) 16%, transparent);
 }
 .commit-message {
   font-size: 13.5px; font-weight: 500; color: var(--foreground);

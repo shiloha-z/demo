@@ -276,14 +276,19 @@ async function deleteSelected() {
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0; }
 
 .file-panels {
-  flex: 1; display: flex; border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg); overflow: hidden; background: var(--surface);
-  box-shadow: var(--shadow-surface);
+  flex: 1; display: flex; border: 1px solid var(--glass-border);
+  border-radius: var(--radius-xl); overflow: hidden; background: var(--glass-surface-strong);
+  box-shadow: var(--shadow-glass), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  backdrop-filter: blur(var(--glass-blur));
 }
 
 .file-tree-panel {
   width: 260px; border-right: 1px solid var(--surface-border);
-  background: var(--app-shell); display: flex; flex-direction: column;
+  background:
+    linear-gradient(160deg, var(--primary-lighter), transparent 46%),
+    var(--glass-surface-soft);
+  display: flex; flex-direction: column;
 }
 
 .tree-toolbar {
@@ -298,11 +303,11 @@ async function deleteSelected() {
 .file-tree-panel :deep(.file-tree) { flex: 1; overflow-y: auto; }
 
 .file-view-panel {
-  flex: 1; display: flex; flex-direction: column; background: var(--page-canvas);
+  flex: 1; display: flex; flex-direction: column; background: color-mix(in oklch, var(--workspace-canvas) 72%, transparent);
 }
 .file-path-bar {
   display: flex; align-items: center; gap: 6px;
-  padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--surface-border);
+  padding: 9px 14px; background: var(--glass-surface-soft); border-bottom: 1px solid var(--glass-border);
   font-size: 12px; font-family: var(--font-mono); color: var(--muted-foreground);
   flex-shrink: 0;
 }
@@ -316,6 +321,14 @@ async function deleteSelected() {
 .file-view-panel :deep(.monaco-container) { flex: 1; }
 
 .empty-view { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
-.empty-view-icon { color: var(--muted-foreground); opacity: 0.5; }
+.empty-view-icon {
+  width: 68px; height: 68px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-2xl);
+  color: var(--primary);
+  background: linear-gradient(145deg, var(--primary-light), var(--glass-surface-soft));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
+}
 .empty-view p { font-size: 13px; color: var(--muted-foreground); margin: 0; }
 </style>

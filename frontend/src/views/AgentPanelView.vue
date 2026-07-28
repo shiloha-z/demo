@@ -543,7 +543,12 @@ function openAgentMemory(a: any) {
 .agent-current-task {
   display: flex; align-items: center; gap: 6px;
   margin-top: 8px; padding: 6px 10px;
-  background: var(--primary-light); border-radius: var(--radius-sm);
+  background:
+    linear-gradient(90deg, var(--primary-light), transparent),
+    var(--glass-surface-soft);
+  border: 1px solid color-mix(in oklch, var(--primary) 16%, var(--glass-border));
+  border-radius: var(--radius-md);
+  box-shadow: var(--glass-highlight);
   font-size: 12px; color: var(--primary);
   overflow: hidden;
 }
@@ -561,7 +566,8 @@ function openAgentMemory(a: any) {
 .stat-last {
   padding: 1px 6px; border-radius: 99px;
   font-size: 10px; font-weight: 600;
-  background: var(--surface-hover);
+  background: var(--glass-surface-soft);
+  border: 1px solid var(--glass-border);
 }
 
 .task-agent-label { font-size: 13px; color: var(--muted-foreground); margin: 0; }

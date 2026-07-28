@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onActivated, computed } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuditStore, type AuditEntry } from '../stores/audit'
 import { useProjectStore } from '../stores/project'
@@ -67,6 +67,10 @@ onMounted(async () => {
     actions.value = opts.actions
     actorTypes.value = opts.actor_types
   } catch { /* ignore */ }
+})
+
+onActivated(async () => {
+  filters.value.project_id = projectStore.currentProject?.id ?? null
   await applyFilters()
 })
 </script>
@@ -153,11 +157,19 @@ onMounted(async () => {
 .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .f-select, .f-input {
   padding: 7px 10px; font-size: 13px; color: var(--foreground);
-  background: var(--surface); border: 1px solid var(--surface-border);
+  background: var(--glass-surface-soft); border: 1px solid var(--glass-border);
   border-radius: var(--radius-md); outline: none; font-family: var(--font-sans);
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
 }
 .f-input { width: 130px; }
-.f-select:focus, .f-input:focus { border-color: var(--ring); }
+.f-select:focus, .f-input:focus {
+  border-color: var(--primary);
+  background: var(--glass-surface-strong);
+  box-shadow: 0 0 0 3px var(--ring);
+}
 
 /* ── List ────────────────────────────────────────────────────────── */
 .audit-list { display: flex; flex-direction: column; gap: 8px; }
@@ -193,10 +205,15 @@ onMounted(async () => {
 .drawer-mask {
   position: fixed; inset: 0; background: rgba(15,23,42,0.45);
   display: flex; justify-content: flex-end; z-index: 50;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 .drawer {
-  width: 460px; max-width: 92vw; height: 100%; background: var(--app-shell);
-  border-left: 1px solid var(--surface-border); display: flex; flex-direction: column;
+  width: 460px; max-width: 92vw; height: 100%; background: var(--glass-surface-strong);
+  border-left: 1px solid var(--glass-border); display: flex; flex-direction: column;
+  box-shadow: -18px 0 46px rgba(15, 23, 42, 0.18), var(--glass-highlight);
+  -webkit-backdrop-filter: blur(var(--glass-blur-lg));
+  backdrop-filter: blur(var(--glass-blur-lg));
 }
 .drawer-head {
   display: flex; align-items: center; justify-content: space-between;
