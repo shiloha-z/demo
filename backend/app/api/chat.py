@@ -85,6 +85,17 @@ class ChatMessageResponse(BaseModel):
         )
 
 
+class ChatMemberProfileResponse(BaseModel):
+    id: int
+    username: str
+    display_name: str
+    avatar_url: str = ""
+    bio: str = ""
+    email: str = ""
+    phone: str = ""
+    role: str
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────
 
 @router.get("/chat/messages", response_model=list[ChatMessageResponse])
@@ -148,6 +159,46 @@ def get_project_members(
             members.append({"id": u.id, "username": u.username, "display_name": u.display_name or u.username, "avatar_url": _avatar_url(u.avatar_url), "role": pm.role.value if hasattr(pm.role, 'value') else str(pm.role)})
             seen_user_ids.add(u.id)
     return {"members": members}
+
+
+@router.get("/chat/members/{member_id}/profile", response_model=ChatMemberProfileResponse)
+def get_member_profile(
+    member_id: int,
+    project_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return the safe, project-visible portion of a member profile."""
+    project = require_project_member(project_id, user, db)
+    target = db.query(User).filter(User.id == member_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if project.owner_id == member_id:
+        role = "owner"
+    elif _user_belongs_to_project(project, member_id, db):
+        membership = db.query(ProjectMember).filter(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == member_id,
+        ).first()
+        role = (
+            membership.role.value
+            if membership and hasattr(membership.role, "value")
+            else str(membership.role) if membership else "member"
+        )
+    else:
+        role = "former_member"
+
+    return ChatMemberProfileResponse(
+        id=target.id,
+        username=target.username,
+        display_name=target.display_name or target.username,
+        avatar_url=_avatar_url(target.avatar_url),
+        bio=target.bio or "",
+        email=target.email or "",
+        phone=target.phone or "",
+        role=role,
+    )
 
 
 @router.post("/chat/upload")

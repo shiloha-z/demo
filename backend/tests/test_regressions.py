@@ -14,7 +14,7 @@ from app.api.messages import (
     mark_read,
     unread_message_count,
 )
-from app.api.chat import get_messages, get_project_members, send_message
+from app.api.chat import get_member_profile, get_messages, get_project_members, send_message
 from app.api.projects import ProjectCreate, create_project, delete_project
 from app.api.reviews import VoteRequest, cast_review_vote
 from app.api.skills import SkillHubImportRequest, import_skillhub_skill
@@ -346,6 +346,42 @@ class ChatAuthorizationTests(DatabaseTestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertEqual(self.db.query(ChatMessage).count(), 0)
+
+    def test_member_profile_exposes_only_project_safe_fields(self) -> None:
+        member = User(
+            username="member",
+            password_hash="x",
+            display_name="Member",
+            email="private@example.com",
+            phone="13800000000",
+            bio="Backend engineer",
+        )
+        self.db.add(member)
+        self.db.flush()
+        self.db.add(ProjectMember(
+            project_id=self.project.id,
+            user_id=member.id,
+            role=ProjectRole.MEMBER,
+        ))
+        self.db.commit()
+
+        profile = get_member_profile(member.id, self.project.id, self.db, self.owner)
+
+        self.assertEqual(profile.id, member.id)
+        self.assertEqual(profile.bio, "Backend engineer")
+        self.assertEqual(profile.role, "member")
+        self.assertFalse(hasattr(profile, "email"))
+        self.assertFalse(hasattr(profile, "phone"))
+
+    def test_member_profile_rejects_unrelated_user(self) -> None:
+        outsider = User(username="outsider", password_hash="x", display_name="Outsider")
+        self.db.add(outsider)
+        self.db.commit()
+
+        with self.assertRaises(HTTPException) as raised:
+            get_member_profile(outsider.id, self.project.id, self.db, self.owner)
+
+        self.assertEqual(raised.exception.status_code, 404)
 
 
 class ReviewThresholdTests(DatabaseTestCase):

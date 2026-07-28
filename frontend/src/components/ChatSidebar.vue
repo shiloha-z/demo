@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { useWebSocketStore } from '../stores/websocket'
 import { useAuthStore } from '../stores/auth'
 import { useProjectStore } from '../stores/project'
+import { useNotificationStore } from '../stores/notification'
 import { MessagePlugin } from 'tdesign-vue-next'
 import api, { getErrorMessage } from '../api'
 import { renderMarkdown } from '../utils/markdown'
@@ -20,19 +21,33 @@ const emit = defineEmits<{
 const ws = useWebSocketStore()
 const auth = useAuthStore()
 const projectStore = useProjectStore()
+const notifStore = useNotificationStore()
 
 // ── Chat mode: team | dm ──────────────────────────────────────────
 type ChatMode = 'team' | 'dm'
+interface ChatMember {
+  id: number
+  username: string
+  display_name: string
+  avatar_url?: string
+  role: string
+}
+interface ChatMemberProfile extends ChatMember {
+  bio: string
+  email: string
+  phone: string
+}
 const chatMode = ref<ChatMode>('team')
-const dmUser = ref<{ id: number; username: string; display_name: string } | null>(null)
-const members = ref<{ id: number; username: string; display_name: string; role: string }[]>([])
+const dmUser = ref<ChatMember | null>(null)
+const members = ref<ChatMember[]>([])
 
 // ── @mention autocomplete ─────────────────────────────────────────
 const mentionActive = ref(false)
 const mentionQuery = ref('')
 const mentionIndex = ref(0)
+const inputEl = ref<HTMLTextAreaElement>()
 const filteredMembers = computed(() => {
-  const q = mentionQuery.value.toLowerCase()
+  const q = mentionQuery.value.trim().toLocaleLowerCase()
   const onlineIds = new Set(onlineUsers.value.map(u => u.user_id))
   // Online members first, then the rest
   const sorted = [...members.value].sort((a, b) => {
@@ -42,31 +57,51 @@ const filteredMembers = computed(() => {
   })
   if (!q) return sorted.slice(0, 8)
   return sorted.filter(m =>
-    m.username.toLowerCase().includes(q) || m.display_name.toLowerCase().includes(q)
+    m.username.toLocaleLowerCase().includes(q)
+    || m.display_name.toLocaleLowerCase().includes(q)
   ).slice(0, 8)
 })
 
-function onInputWithMention(e: Event) {
-  const el = e.target as HTMLTextAreaElement
+function updateMentionFromCaret(el: HTMLTextAreaElement) {
   const val = el.value
   const cursor = el.selectionStart ?? 0
-  // Find @ before cursor
+  if (chatMode.value !== 'team') {
+    mentionActive.value = false
+    return
+  }
+  // Match the unfinished token immediately before the caret. Unlike \w,
+  // this also supports Chinese display-name queries.
   const beforeCursor = val.slice(0, cursor)
-  const match = beforeCursor.match(/@(\w*)$/)
+  const match = beforeCursor.match(/@([^\s@]*)$/u)
   if (match) {
+    const nextQuery = match[1]
+    if (!mentionActive.value || mentionQuery.value !== nextQuery) {
+      mentionIndex.value = 0
+    }
     mentionActive.value = true
-    mentionQuery.value = match[1]
-    mentionIndex.value = 0
+    mentionQuery.value = nextQuery
   } else {
     mentionActive.value = false
   }
+}
+
+function onInputWithMention(e: Event) {
+  updateMentionFromCaret(e.target as HTMLTextAreaElement)
   onInput()
 }
 
-function insertMention(member: typeof members.value[0]) {
-  const el = document.querySelector('.chat-input') as HTMLTextAreaElement | null
+function onInputCaretMove(e: Event) {
+  updateMentionFromCaret(e.target as HTMLTextAreaElement)
+}
+
+function closeMentionMenu() {
+  mentionActive.value = false
+}
+
+function insertMention(member: ChatMember) {
+  const el = inputEl.value
   if (!el) return
-  const val = el.value
+  const val = inputText.value
   const cursor = el.selectionStart ?? 0
   const beforeCursor = val.slice(0, cursor)
   const afterCursor = val.slice(cursor)
@@ -82,15 +117,42 @@ function insertMention(member: typeof members.value[0]) {
   })
 }
 
-function handleMentionKeydown(e: KeyboardEvent) {
-  if (!mentionActive.value) return
-  if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndex.value = Math.min(mentionIndex.value + 1, filteredMembers.value.length - 1) }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndex.value = Math.max(mentionIndex.value - 1, 0) }
+function handleMentionKeydown(e: KeyboardEvent): boolean {
+  if (!mentionActive.value) return false
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionIndex.value = Math.min(mentionIndex.value + 1, Math.max(filteredMembers.value.length - 1, 0))
+    return true
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionIndex.value = Math.max(mentionIndex.value - 1, 0)
+    return true
+  }
   else if (e.key === 'Enter' || e.key === 'Tab') {
     const m = filteredMembers.value[mentionIndex.value]
-    if (m) { e.preventDefault(); insertMention(m) }
+    if (m) {
+      e.preventDefault()
+      insertMention(m)
+      return true
+    }
+    mentionActive.value = false
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      return true
+    }
   }
-  else if (e.key === 'Escape') { mentionActive.value = false }
+  else if (e.key === 'Escape') {
+    e.preventDefault()
+    mentionActive.value = false
+    return true
+  }
+  return false
+}
+
+function handleChatKeydown(e: KeyboardEvent) {
+  if (handleMentionKeydown(e)) return
+  handleKeydown(e)
 }
 
 function renderMsgWithMentions(text: string): string {
@@ -157,6 +219,11 @@ function activeConversationKey(): string {
     : `${projectId}:team`
 }
 
+function dmUnreadForMember(memberId: number): number {
+  const pid = projectStore.currentProject?.id
+  return pid ? notifStore.dmUnread(pid, memberId) : 0
+}
+
 function markActiveConversationViewed() {
   const key = activeConversationKey()
   if (props.visible && key) emit('conversationViewed', key)
@@ -181,6 +248,11 @@ const newMessagesBelow = ref(0)
 const fileInput = ref<HTMLInputElement>()
 const uploading = ref(false)
 const lightboxImage = ref<string | null>(null)
+const memberProfile = ref<ChatMemberProfile | null>(null)
+const memberProfileOpen = ref(false)
+const memberProfileLoading = ref(false)
+const memberProfileError = ref('')
+let memberProfileRequest = 0
 
 let unsubChat: (() => void) | null = null
 let unsubOnline: (() => void) | null = null
@@ -224,6 +296,20 @@ const typingText = computed(() => {
   return `${names[0]} 等 ${names.length} 人正在输入...`
 })
 
+const memberProfileOnline = computed(() =>
+  memberProfile.value
+    ? onlineUsers.value.some(user => user.user_id === memberProfile.value?.id)
+    : false,
+)
+
+const canStartProfileDM = computed(() =>
+  Boolean(
+    memberProfile.value
+    && memberProfile.value.id !== auth.userId
+    && members.value.some(member => member.id === memberProfile.value?.id),
+  ),
+)
+
 // ── Lifecycle ──────────────────────────────────────────────────
 onMounted(async () => {
   setupWS()
@@ -231,6 +317,7 @@ onMounted(async () => {
     joinProjectRoom(projectStore.currentProject.id)
   }
   document.addEventListener('paste', onGlobalPaste)
+  document.addEventListener('keydown', onGlobalKeydown)
 })
 
 onUnmounted(() => {
@@ -243,10 +330,12 @@ onUnmounted(() => {
   for (const entry of typingUsers.value.values()) clearTimeout(entry.timer)
   if (focusTimer) clearTimeout(focusTimer)
   document.removeEventListener('paste', onGlobalPaste)
+  document.removeEventListener('keydown', onGlobalKeydown)
 })
 
 // Watch for project changes — switch chat room when user selects a different project
 watch(() => projectStore.currentProject?.id, (newId, oldId) => {
+  closeMemberProfile()
   if (newId && newId !== oldId) {
     joinProjectRoom(newId)
   } else if (!newId) {
@@ -267,6 +356,7 @@ watch(() => ws.connected, (connected, wasConnected) => {
 
 function switchToTeam() {
   sendTyping(false)
+  mentionActive.value = false
   chatMode.value = 'team'
   dmUser.value = null
   messages.value = []
@@ -275,14 +365,91 @@ function switchToTeam() {
   markActiveConversationViewed()
 }
 
-function switchToDM(user: typeof members.value[0]) {
+function switchToDM(user: ChatMember) {
   sendTyping(false)
+  mentionActive.value = false
   chatMode.value = 'dm'
   dmUser.value = user
   messages.value = []
   newMessagesBelow.value = 0
   void loadMessages()
   markActiveConversationViewed()
+}
+
+function roleLabel(role: string): string {
+  return {
+    owner: '项目负责人',
+    admin: '项目管理员',
+    member: '项目成员',
+    security_reviewer: '安全复核人',
+    auditor: '审计人员',
+    former_member: '历史成员',
+  }[role] || role || '项目成员'
+}
+
+async function openMemberProfile(message: ChatMsg) {
+  if (message.system || !message.user_id) return
+  const knownMember = members.value.find(member => member.id === message.user_id)
+  memberProfile.value = {
+    id: message.user_id,
+    username: message.username,
+    display_name: message.display_name || message.username,
+    avatar_url: message.avatar_url || knownMember?.avatar_url || '',
+    role: knownMember?.role || 'member',
+    bio: '',
+    email: '',
+    phone: '',
+  }
+  memberProfileError.value = ''
+  memberProfileOpen.value = true
+  memberProfileLoading.value = true
+  const requestId = ++memberProfileRequest
+  const projectId = projectStore.currentProject?.id
+  if (projectId == null) {
+    memberProfileLoading.value = false
+    return
+  }
+  try {
+    const { data } = await api.get(`/chat/members/${message.user_id}/profile`, {
+      params: { project_id: projectId },
+      silent: true,
+    } as any)
+    if (requestId !== memberProfileRequest || !memberProfileOpen.value) return
+    memberProfile.value = data
+  } catch (error) {
+    if (requestId !== memberProfileRequest || !memberProfileOpen.value) return
+    memberProfileError.value = getErrorMessage(error, '成员资料加载失败')
+  } finally {
+    if (requestId === memberProfileRequest) memberProfileLoading.value = false
+  }
+}
+
+function closeMemberProfile() {
+  memberProfileRequest += 1
+  memberProfileOpen.value = false
+  memberProfileLoading.value = false
+  memberProfileError.value = ''
+}
+
+function startProfileDM() {
+  const profile = memberProfile.value
+  if (!profile || !canStartProfileDM.value) return
+  const member = members.value.find(item => item.id === profile.id)
+  if (!member) {
+    MessagePlugin.warning('该用户已不是当前项目成员，无法发起私聊')
+    return
+  }
+  closeMemberProfile()
+  switchToDM(member)
+}
+
+function onGlobalKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape') return
+  if (memberProfileOpen.value) {
+    closeMemberProfile()
+  } else {
+    mentionActive.value = false
+  }
 }
 
 async function joinProjectRoom(projectId: number) {
@@ -311,10 +478,20 @@ async function rejoinAndReconcile(projectId: number) {
 function setupWS() {
   unsubChat = ws.on('chat_message', (data: ChatMsg & { system?: boolean }) => {
     const currentPid = projectStore.currentProject?.id
-    if (currentPid == null || data.project_id !== currentPid) return
-    const belongsToActiveConversation =
-      conversationKeyForMessage(data) === activeConversationKey()
+    if (currentPid == null) return
+    const isCurrentProject = data.project_id === currentPid
+    const belongsToActiveConversation = isCurrentProject
+      && conversationKeyForMessage(data) === activeConversationKey()
     const wasNearBottom = isNearBottom()
+
+    // Cross-project messages: still count as unread but don't display here.
+    if (!isCurrentProject) {
+      if (data.user_id !== auth.userId) {
+        emit('unreadCount', conversationKeyForMessage(data))
+      }
+      return
+    }
+
     if (!belongsToActiveConversation) {
       if (data.user_id !== auth.userId) {
         emit('unreadCount', conversationKeyForMessage(data))
@@ -745,6 +922,8 @@ watch(() => props.visible, (v) => {
     nextTick(() => {
       if (!focusRequestedMessage()) scrollToBottom()
     })
+  } else {
+    closeMemberProfile()
   }
 })
 
@@ -775,10 +954,6 @@ watch(() => props.focusMessageId, () => {
         </template>
         <template v-else>
           <span>团队聊天</span>
-          <template v-if="projectStore.currentProject">
-            <span class="chat-header-sep">·</span>
-            <span class="chat-header-project">{{ projectStore.currentProject.name }}</span>
-          </template>
           <span class="chat-badge" v-if="onlineUsers.length > 0">{{ onlineUsers.length }} 在线</span>
         </template>
       </div>
@@ -803,6 +978,7 @@ watch(() => props.focusMessageId, () => {
       >
         {{ m.display_name }}
         <span class="dm-chip-dot" :class="{ online: onlineUsers.some(u => u.user_id === m.id) }"></span>
+        <span class="dm-chip-unread" v-if="dmUnreadForMember(m.id) > 0">{{ dmUnreadForMember(m.id) > 99 ? '99+' : dmUnreadForMember(m.id) }}</span>
       </button>
     </div>
 
@@ -861,10 +1037,19 @@ watch(() => props.focusMessageId, () => {
 
           <!-- Normal message -->
           <template v-else>
-            <img v-if="msg.showAvatar && msg.avatar_url" class="msg-avatar-img" :src="msg.avatar_url" />
-            <div v-else-if="msg.showAvatar" class="msg-avatar" :style="{ background: avatarColor(msg.username) }">
-              {{ avatarInitials(msg.username) }}
-            </div>
+            <button
+              v-if="msg.showAvatar"
+              class="msg-avatar-trigger"
+              type="button"
+              :title="`查看 ${msg.display_name || msg.username} 的资料`"
+              :aria-label="`查看 ${msg.display_name || msg.username} 的资料`"
+              @click="openMemberProfile(msg)"
+            >
+              <img v-if="msg.avatar_url" class="msg-avatar-img" :src="msg.avatar_url" />
+              <span v-else class="msg-avatar" :style="{ background: avatarColor(msg.username) }">
+                {{ avatarInitials(msg.display_name || msg.username) }}
+              </span>
+            </button>
             <div class="msg-avatar-spacer" v-else />
             <div class="msg-body">
               <div class="msg-meta" v-if="msg.showMeta">
@@ -928,25 +1113,46 @@ watch(() => props.focusMessageId, () => {
       </div>
     </Transition>
 
-    <!-- ── @mention dropdown ──────────────── -->
-    <Transition name="menu-pop">
-      <div class="mention-dropdown" v-if="mentionActive && filteredMembers.length > 0">
-        <button
-          v-for="(m, i) in filteredMembers" :key="m.id"
-          class="mention-item"
-          :class="{ active: i === mentionIndex }"
-          @click="insertMention(m)"
-          @mouseenter="mentionIndex = i"
-        >
-          <span class="mention-name">{{ m.display_name }}</span>
-          <span class="mention-username">@{{ m.username }}</span>
-          <span class="mention-online-dot" v-if="onlineUsers.some(u => u.user_id === m.id)"></span>
-        </button>
-      </div>
-    </Transition>
-
     <!-- ── Input ──────────────────────────── -->
     <div class="chat-input-area">
+      <!-- This popup must stay inside the positioned input container. -->
+      <Transition name="menu-pop">
+        <div
+          v-if="mentionActive"
+          id="chat-mention-list"
+          class="mention-dropdown"
+          role="listbox"
+          aria-label="可提及的团队成员"
+        >
+          <div class="mention-dropdown-header">
+            <span>选择要提及的成员</span>
+            <span>↑↓ 选择 · Enter 补全</span>
+          </div>
+          <button
+            v-for="(m, i) in filteredMembers"
+            :id="`chat-mention-${m.id}`"
+            :key="m.id"
+            class="mention-item"
+            :class="{ active: i === mentionIndex }"
+            role="option"
+            :aria-selected="i === mentionIndex"
+            @mousedown.prevent="insertMention(m)"
+            @mouseenter="mentionIndex = i"
+          >
+            <span class="mention-avatar" :style="{ background: avatarColor(m.username) }">
+              {{ avatarInitials(m.display_name || m.username) }}
+            </span>
+            <span class="mention-member">
+              <span class="mention-name">{{ m.display_name }}</span>
+              <span class="mention-username">@{{ m.username }}</span>
+            </span>
+            <span class="mention-online-dot" v-if="onlineUsers.some(u => u.user_id === m.id)"></span>
+          </button>
+          <div v-if="filteredMembers.length === 0" class="mention-empty">
+            {{ members.length === 0 ? '当前项目暂无其他可提及成员' : `未找到“${mentionQuery}”` }}
+          </div>
+        </div>
+      </Transition>
       <input
         ref="fileInput"
         type="file"
@@ -963,13 +1169,20 @@ watch(() => props.focusMessageId, () => {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
       </button>
       <textarea
+        ref="inputEl"
         v-model="inputText"
         class="chat-input"
-        :placeholder="projectStore.currentProject ? '输入消息，Enter 发送，Shift+Enter 换行...' : '请先在左侧边栏选择一个项目'"
+        :placeholder="projectStore.currentProject ? '输入消息，输入 @ 提及团队成员...' : '请先在左侧边栏选择一个项目'"
         rows="2"
         maxlength="2000"
         :disabled="!projectStore.currentProject"
-        @keydown="handleMentionKeydown($event); handleKeydown($event)"
+        :aria-expanded="mentionActive"
+        aria-controls="chat-mention-list"
+        :aria-activedescendant="mentionActive && filteredMembers[mentionIndex] ? `chat-mention-${filteredMembers[mentionIndex].id}` : undefined"
+        @keydown="handleChatKeydown"
+        @keyup="onInputCaretMove"
+        @click="onInputCaretMove"
+        @blur="closeMentionMenu"
         @input="onInputWithMention"
       />
       <button
@@ -980,6 +1193,91 @@ watch(() => props.focusMessageId, () => {
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
       </button>
     </div>
+
+    <!-- ── Member profile ─────────────────── -->
+    <Teleport to="body">
+      <Transition name="profile-card-fade">
+        <div
+          v-if="memberProfileOpen && memberProfile"
+          class="member-profile-backdrop"
+          @click="closeMemberProfile"
+        >
+          <section
+            class="member-profile-card"
+            role="dialog"
+            aria-modal="true"
+            :aria-label="`${memberProfile.display_name} 的个人资料`"
+            @click.stop
+          >
+            <button class="member-profile-close" type="button" title="关闭" @click="closeMemberProfile">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+            <div class="member-profile-hero">
+              <img
+                v-if="memberProfile.avatar_url"
+                v-image-loading="memberProfile.avatar_url"
+                :src="memberProfile.avatar_url"
+                class="member-profile-avatar"
+                :alt="memberProfile.display_name"
+              />
+              <div
+                v-else
+                class="member-profile-avatar member-profile-avatar-fallback"
+                :style="{ background: avatarColor(memberProfile.username) }"
+              >
+                {{ avatarInitials(memberProfile.display_name || memberProfile.username) }}
+              </div>
+              <div class="member-profile-identity">
+                <h3>{{ memberProfile.display_name }}</h3>
+                <p>@{{ memberProfile.username }}</p>
+                <div class="member-profile-badges">
+                  <span class="member-role-badge">{{ roleLabel(memberProfile.role) }}</span>
+                  <span class="member-online-badge" :class="{ online: memberProfileOnline }">
+                    <i></i>{{ memberProfileOnline ? '在线' : '离线' }}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div class="member-profile-content">
+              <div class="member-profile-section-title">个人简介</div>
+              <p class="member-profile-bio">
+                {{ memberProfile.bio || '该成员暂未填写个人简介。' }}
+              </p>
+              <div class="member-profile-section-title" style="margin-top: 14px;">联系方式</div>
+              <div class="member-profile-contact">
+                <div class="contact-row">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                  <span>{{ memberProfile.email || '未填写邮箱' }}</span>
+                </div>
+                <div class="contact-row">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                  <span>{{ memberProfile.phone || '未填写电话' }}</span>
+                </div>
+              </div>
+              <div v-if="memberProfileLoading" class="member-profile-loading">
+                <span class="mini-spinner"></span> 正在加载资料...
+              </div>
+              <p v-else-if="memberProfileError" class="member-profile-error">
+                {{ memberProfileError }}
+              </p>
+            </div>
+            <div class="member-profile-actions">
+              <span v-if="memberProfile.id === auth.userId" class="member-profile-self">这是你自己</span>
+              <button
+                v-else
+                class="member-profile-dm"
+                type="button"
+                :disabled="!canStartProfileDM"
+                @click="startProfileDM"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                发起私聊
+              </button>
+            </div>
+          </section>
+        </div>
+      </Transition>
+    </Teleport>
 
     <!-- ── Lightbox ──────────────────────── -->
     <Teleport to="body">
@@ -1041,8 +1339,6 @@ watch(() => props.focusMessageId, () => {
   flex-shrink: 0;
 }
 .chat-header-left { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; color: var(--foreground); }
-.chat-header-sep { font-weight: 400; color: var(--muted-foreground); font-size: 12px; }
-.chat-header-project { font-size: 12px; color: var(--primary); max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-badge { font-size: 10.5px; font-weight: 600; color: var(--success); background: var(--success-light); padding: 1px 7px; border-radius: 999px; }
 .chat-header-actions { display: flex; gap: 2px; }
 .chat-icon-btn {
@@ -1106,11 +1402,25 @@ watch(() => props.focusMessageId, () => {
 .msg-avatar {
   width: 32px; height: 32px; border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0; margin-top: 2px;
+  font-size: 12px; font-weight: 700; color: #fff; flex-shrink: 0;
 }
 .msg-avatar-img {
   width: 32px; height: 32px; border-radius: var(--radius-md);
-  object-fit: cover; flex-shrink: 0; margin-top: 2px;
+  object-fit: cover; flex-shrink: 0;
+}
+.msg-avatar-trigger {
+  width: 32px; height: 32px; margin-top: 2px; padding: 0;
+  border: none; border-radius: var(--radius-md); background: transparent;
+  flex-shrink: 0; cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease-standard), box-shadow var(--motion-fast) var(--motion-ease-standard);
+}
+.msg-avatar-trigger:hover {
+  transform: translateY(-1px) scale(1.04);
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px color-mix(in srgb, var(--primary) 45%, transparent);
+}
+.msg-avatar-trigger:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 .msg-avatar-spacer { width: 32px; flex-shrink: 0; }
 .msg-body { max-width: 75%; min-width: 0; }
@@ -1177,6 +1487,122 @@ watch(() => props.focusMessageId, () => {
 .chat-msg.mine .msg-file-size { color: rgba(255,255,255,0.6); }
 .msg-file-dl { flex-shrink: 0; color: var(--muted-foreground); }
 .chat-msg.mine .msg-file-dl { color: rgba(255,255,255,0.7); }
+
+/* ── Member profile card ──────────────── */
+.member-profile-backdrop {
+  position: fixed; inset: 0; z-index: 10000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.46);
+  backdrop-filter: blur(3px);
+}
+.member-profile-card {
+  position: relative;
+  width: min(380px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.3);
+}
+.member-profile-close {
+  position: absolute; top: 12px; right: 12px; z-index: 1;
+  width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  color: var(--muted-foreground); cursor: pointer;
+}
+.member-profile-close:hover { background: var(--surface-hover); color: var(--foreground); }
+.member-profile-hero {
+  display: flex; align-items: center; gap: 16px;
+  padding: 28px 26px 22px;
+  background:
+    radial-gradient(circle at 12% 15%, color-mix(in srgb, var(--primary) 18%, transparent), transparent 42%),
+    var(--surface-hover);
+  border-bottom: 1px solid var(--surface-border);
+}
+.member-profile-avatar {
+  width: 72px; height: 72px; flex-shrink: 0;
+  border-radius: 20px; object-fit: cover;
+  box-shadow: 0 5px 18px rgba(15, 23, 42, 0.16);
+}
+.member-profile-avatar-fallback {
+  display: flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 22px; font-weight: 750;
+}
+.member-profile-identity { min-width: 0; }
+.member-profile-identity h3 {
+  margin: 0; max-width: 210px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 18px; line-height: 1.35;
+}
+.member-profile-identity p {
+  margin: 3px 0 10px; color: var(--muted-foreground); font-size: 12px;
+}
+.member-profile-badges { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.member-role-badge,
+.member-online-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 7px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--surface-border);
+  color: var(--muted-foreground); font-size: 10.5px; font-weight: 600;
+}
+.member-online-badge i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.55;
+}
+.member-online-badge.online { color: var(--success); }
+.member-online-badge.online i { background: var(--success); opacity: 1; }
+.member-profile-content { min-height: 112px; padding: 20px 26px 16px; }
+.member-profile-section-title {
+  margin-bottom: 7px; color: var(--muted-foreground);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
+}
+.member-profile-bio {
+  margin: 0; color: var(--foreground);
+  font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+}
+.member-profile-contact {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.contact-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--muted-foreground);
+}
+.contact-row svg { flex-shrink: 0; opacity: 0.5; }
+.member-profile-loading {
+  display: flex; align-items: center; gap: 7px;
+  margin-top: 12px; color: var(--muted-foreground); font-size: 11px;
+}
+.member-profile-error {
+  margin: 12px 0 0; color: var(--danger); font-size: 11px;
+}
+.member-profile-actions {
+  min-height: 62px; padding: 12px 26px 18px;
+  display: flex; justify-content: flex-end; align-items: center;
+}
+.member-profile-self { color: var(--muted-foreground); font-size: 12px; }
+.member-profile-dm {
+  min-height: 36px; padding: 0 15px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  border: none; border-radius: var(--radius-md);
+  background: var(--primary); color: var(--primary-foreground);
+  font-size: 12px; font-weight: 650; cursor: pointer;
+  transition: transform var(--motion-fast) var(--motion-ease-standard), background var(--motion-fast) var(--motion-ease-standard);
+}
+.member-profile-dm:hover:not(:disabled) { background: var(--primary-hover); transform: translateY(-1px); }
+.member-profile-dm:disabled { opacity: 0.45; cursor: not-allowed; }
+.profile-card-fade-enter-active,
+.profile-card-fade-leave-active { transition: opacity var(--motion-base) var(--motion-ease-standard); }
+.profile-card-fade-enter-active .member-profile-card,
+.profile-card-fade-leave-active .member-profile-card {
+  transition: transform var(--motion-base) var(--motion-ease-standard), opacity var(--motion-base) var(--motion-ease-standard);
+}
+.profile-card-fade-enter-from,
+.profile-card-fade-leave-to { opacity: 0; }
+.profile-card-fade-enter-from .member-profile-card,
+.profile-card-fade-leave-to .member-profile-card { opacity: 0; transform: translateY(8px) scale(0.98); }
 
 /* ── Lightbox ────────────────────────── */
 .lightbox-backdrop {
@@ -1325,6 +1751,19 @@ watch(() => props.focusMessageId, () => {
 .dm-chip:hover, .dm-chip.active { border-color: var(--primary); color: var(--primary); }
 .dm-chip-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); opacity: 0.4; }
 .dm-chip-dot.online { background: var(--success); opacity: 1; }
+.dm-chip-unread {
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px; font-weight: 700;
+  line-height: 16px; text-align: center;
+  animation: chipBadgePulse 2s ease-in-out infinite;
+}
+@keyframes chipBadgePulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.12); box-shadow: 0 0 6px var(--danger); }
+}
 
 .mention-tag {
   color: var(--primary); background: var(--primary-light);
@@ -1335,8 +1774,17 @@ watch(() => props.focusMessageId, () => {
   position: absolute; bottom: calc(100% + 4px); left: 16px; right: 16px;
   max-height: 200px; overflow-y: auto;
   background: var(--surface); border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); box-shadow: 0 -4px 16px rgba(0,0,0,0.1);
+  border-radius: var(--radius-md); box-shadow: 0 -8px 24px rgba(0,0,0,0.14);
   z-index: 20;
+}
+.mention-dropdown-header {
+  position: sticky; top: 0; z-index: 1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--surface-border);
+  background: color-mix(in srgb, var(--surface) 94%, var(--primary));
+  color: var(--muted-foreground);
+  font-size: 10.5px;
 }
 .mention-item {
   display: flex; align-items: center; gap: 8px;
@@ -1345,7 +1793,19 @@ watch(() => props.focusMessageId, () => {
   font-size: 13px; cursor: pointer; text-align: left;
 }
 .mention-item:hover, .mention-item.active { background: var(--surface-hover); }
-.mention-name { font-weight: 500; }
-.mention-username { font-size: 11px; color: var(--muted-foreground); margin-left: auto; }
+.mention-avatar {
+  width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff; font-size: 9.5px; font-weight: 700;
+}
+.mention-member { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.mention-name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mention-username { font-size: 11px; color: var(--muted-foreground); }
 .mention-online-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); flex-shrink: 0; }
+.mention-empty {
+  padding: 18px 12px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-align: center;
+}
 </style>

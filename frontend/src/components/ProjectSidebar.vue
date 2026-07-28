@@ -3,6 +3,7 @@ import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useProjectStore } from '../stores/project'
 import { useWebSocketStore } from '../stores/websocket'
+import { useNotificationStore } from '../stores/notification'
 import api from '../api'
 
 const props = defineProps<{ collapsed: boolean }>()
@@ -10,8 +11,22 @@ const props = defineProps<{ collapsed: boolean }>()
 const route = useRoute()
 const store = useProjectStore()
 const wsStore = useWebSocketStore()
+const notifStore = useNotificationStore()
 
 const pendingCount = ref(0)
+
+/** Projects (other than current) that have unread chat messages. */
+const otherProjectsWithUnread = computed(() => {
+  const currentId = store.currentProject?.id
+  return store.switchableProjects
+    .filter(p => p.id !== currentId && notifStore.projectChatUnread(p.id) > 0)
+    .map(p => ({ id: p.id, name: p.name, count: notifStore.projectChatUnread(p.id) }))
+})
+
+function switchToProject(projectId: number) {
+  const p = store.switchableProjects.find(p => p.id === projectId) || null
+  store.setCurrentProject(p)
+}
 
 async function fetchPendingCount() {
   const pid = store.currentProject?.id
@@ -117,6 +132,21 @@ const icons: Record<string, string> = {
     </select>
   </div>
 
+  <!-- Unread chat indicators for other projects -->
+  <TransitionGroup name="list" tag="div" class="unread-projects" :class="{ collapsed: collapsed }">
+    <button
+      v-for="p in otherProjectsWithUnread"
+      :key="p.id"
+      class="unread-project-chip"
+      @click="switchToProject(p.id)"
+      :title="`切换到「${p.name}」查看未读消息`"
+    >
+      <span class="unread-project-dot"></span>
+      <span class="unread-project-name">{{ p.name }}</span>
+      <span class="unread-project-count">{{ p.count > 99 ? '99+' : p.count }}</span>
+    </button>
+  </TransitionGroup>
+
   <nav class="sidebar-nav" :class="{ collapsed: collapsed }">
     <div v-for="section in sections" :key="section.label" class="nav-section">
       <div class="nav-section-label" :class="{ 'fade-out': collapsed }">{{ section.label }}</div>
@@ -181,6 +211,41 @@ const icons: Record<string, string> = {
 }
 .project-picker:hover { border-color: var(--ring); }
 .picker-icon { color: var(--muted-foreground); flex-shrink: 0; opacity: 0.6; }
+
+/* ── Unread project chips ──────────────────────────────────── */
+.unread-projects {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 0 10px 4px; margin: 0 4px;
+  overflow: hidden;
+}
+.unread-projects.collapsed { display: none; }
+.unread-project-chip {
+  display: flex; align-items: center; gap: 7px;
+  width: 100%; padding: 5px 8px;
+  border: none; border-radius: var(--radius-sm);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-size: 12px; font-family: var(--font-sans);
+  cursor: pointer; text-align: left;
+  transition: background var(--transition-fast);
+}
+.unread-project-chip:hover { background: color-mix(in srgb, var(--primary) 18%, var(--surface)); }
+.unread-project-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--danger); flex-shrink: 0;
+  animation: sidebarDotPulse 2s ease-in-out infinite;
+}
+.unread-project-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.unread-project-count {
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: var(--danger); color: #fff;
+  font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+@keyframes sidebarDotPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
 .project-select {
   flex: 1; min-width: 0; padding: 4px 0;
   border: none; background: transparent; color: var(--foreground);
