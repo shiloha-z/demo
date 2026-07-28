@@ -97,6 +97,13 @@
   transition: transform 0.22s var(--motion-ease-spring) !important;
 }
 
+/* Skip layout and paint for long-list cards until they approach the viewport.
+   The intrinsic size keeps scrollbars stable before the real height is known. */
+:where(.audit-card, .msg-card, .review-item) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 88px;
+}
+
 /* Unified button press feedback */
 :where(button, .t-button, a.btn, .topbar-icon-btn, .nav-item, .t-tag):active:not(:disabled) {
   transform: scale(0.96) !important;
@@ -978,8 +985,8 @@
 /* Active only during a dark/light switch so normal hover states stay snappy. */
 html.theme-anim,
 html.theme-anim * {
-  transition: background-color 0.32s ease, border-color 0.32s ease,
-    color 0.32s ease, fill 0.32s ease, box-shadow 0.32s ease !important;
+  transition: background-color 0.24s ease, border-color 0.24s ease,
+    color 0.24s ease, fill 0.24s ease !important;
 }
 
 /* ── Visualization band (overview charts) ───────────────────────── */

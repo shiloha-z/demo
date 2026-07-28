@@ -911,6 +911,8 @@ function handleLogout() {
 .app-main {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   /* The light spots live on app-root only. Keeping this layer translucent
      makes the main area and chat panel sample the same fixed backdrop. */
   background: var(--workspace-canvas);

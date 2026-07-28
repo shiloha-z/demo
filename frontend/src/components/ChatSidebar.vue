@@ -989,7 +989,7 @@ watch(() => props.focusMessageId, () => {
     </div>
 
     <!-- ── Messages ───────────────────────── -->
-    <div class="chat-messages" ref="scrollEl" @scroll="onScroll">
+    <div class="chat-messages" ref="scrollEl" @scroll.passive="onScroll">
       <div v-if="loading && messages.length === 0" class="chat-status">
         <span class="mini-spinner"></span> 加载中...
       </div>
@@ -1319,37 +1319,24 @@ watch(() => props.focusMessageId, () => {
   border-left: 1px solid var(--glass-border);
   box-shadow: -12px 0 34px color-mix(in oklch, var(--primary-glow) 34%, transparent), var(--glass-highlight);
   transition:
-    width var(--chat-open-duration) var(--motion-ease-spring),
     transform var(--chat-open-duration) var(--motion-ease-spring),
     opacity var(--motion-base) var(--motion-ease-standard),
-    box-shadow var(--motion-slow) var(--motion-ease-standard),
-    -webkit-backdrop-filter 150ms var(--motion-ease-standard) 130ms,
-    backdrop-filter 150ms var(--motion-ease-standard) 130ms,
     visibility 0s linear;
   overflow: hidden;
   z-index: 200;
-  contain: layout style;
-  transform: translate3d(0, 0, 0) scaleX(1);
+  contain: layout paint style;
+  transform: translate3d(0, 0, 0);
   transform-origin: right center;
-  will-change: width, transform, opacity;
+  will-change: transform, opacity;
 }
 .chat-panel:not(.open) {
-  width: 0;
-  border-left: none;
   opacity: 0;
-  transform: translate3d(18px, 0, 0) scaleX(0.985);
-  -webkit-backdrop-filter: blur(0) saturate(1);
-  backdrop-filter: blur(0) saturate(1);
-  box-shadow: none;
+  transform: translate3d(100%, 0, 0);
   visibility: hidden;
   pointer-events: none;
   transition:
-    width var(--motion-slow) var(--motion-ease-exit),
     transform var(--motion-slow) var(--motion-ease-exit),
     opacity var(--motion-fast) var(--motion-ease-exit),
-    box-shadow var(--motion-fast) var(--motion-ease-exit),
-    -webkit-backdrop-filter 80ms linear,
-    backdrop-filter 80ms linear,
     visibility 0s linear var(--motion-slow);
 }
 .chat-panel::before {

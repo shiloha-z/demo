@@ -25,14 +25,6 @@ const max = computed(() => Math.max(1, ...props.items.map((i) => i.value)))
 const labelStep = computed(() => Math.max(1, Math.ceil(props.items.length / 8)))
 const labelVisible = (i: number) => !props.dense || i % labelStep.value === 0
 const pct = (v: number) => (max.value > 0 ? (v / max.value) * 100 : 0)
-
-function barGradient(color: string, i: number): string {
-  return `grad-${i}`
-}
-
-// Generate unique gradient IDs per instance
-let gradId = 0
-const prefix = `bc${++gradId}`
 </script>
 
 <template>

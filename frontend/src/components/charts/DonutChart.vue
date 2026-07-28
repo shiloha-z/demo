@@ -40,12 +40,12 @@ const arcs = computed(() => {
   if (total.value === 0) return []
   let acc = 0
   const gap = 1.2 // small gap between segments (degrees worth of circumference)
-  return props.segments
-    .filter((s) => s.value > 0)
-    .map((s, i, arr) => {
+  const visibleSegments = props.segments.filter((s) => s.value > 0)
+  return visibleSegments
+    .map((s) => {
       const rawLen = (s.value / total.value) * circumference.value
       // Only apply gap when there are 2+ segments
-      const len = arr.length > 1 ? Math.max(2, rawLen - gap) : rawLen
+      const len = visibleSegments.length > 1 ? Math.max(2, rawLen - gap) : rawLen
       const arc = { len: animated.value ? len : 0, offset: -acc, color: s.color }
       acc += rawLen
       return arc
