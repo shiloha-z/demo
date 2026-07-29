@@ -295,7 +295,6 @@ function handleLogout() {
             class="topbar-project-select"
             placeholder="选择项目…"
             borderless
-            filterable
             :popup-props="{ overlayClassName: 'project-select-popup' }"
           >
             <t-option
@@ -481,6 +480,9 @@ function handleLogout() {
   gap: 10px;
   padding: 16px 18px;
   border-bottom: 1px solid var(--surface-border);
+  transition:
+    padding var(--motion-slow) var(--motion-ease-standard),
+    gap var(--motion-slow) var(--motion-ease-standard);
   flex-shrink: 0;
   min-height: 57px;
 }
@@ -494,6 +496,9 @@ function handleLogout() {
   flex-shrink: 0;
   transition:
     opacity var(--motion-base) var(--motion-ease-standard),
+    max-width var(--motion-slow) var(--motion-ease-standard),
+    margin var(--motion-slow) var(--motion-ease-standard),
+    padding var(--motion-slow) var(--motion-ease-standard),
     transform var(--motion-base) var(--motion-ease-spring),
     box-shadow var(--transition-base);
   border-radius: 10px;
@@ -514,7 +519,9 @@ function handleLogout() {
   white-space: nowrap;
   transition:
     opacity var(--motion-base) var(--motion-ease-standard),
-    transform var(--motion-slow) var(--motion-ease-standard);
+    max-width var(--motion-slow) var(--motion-ease-standard),
+    margin var(--motion-slow) var(--motion-ease-standard),
+    padding var(--motion-slow) var(--motion-ease-standard);
 }
 
 .app-sidebar.collapsed .sidebar-header {
@@ -527,7 +534,10 @@ function handleLogout() {
 .app-sidebar.collapsed .sidebar-title {
   opacity: 0;
   pointer-events: none;
-  position: absolute;
+  max-width: 0;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
 }
 
 .sidebar-collapse-btn {
@@ -598,6 +608,7 @@ function handleLogout() {
   justify-content: center;
   padding: 12px 0;
   gap: 0;
+  position: relative;
 }
 
 .user-avatar {
@@ -635,7 +646,7 @@ function handleLogout() {
 .app-sidebar.collapsed .user-info {
   opacity: 0;
   pointer-events: none;
-  flex: 0;
+  position: absolute;
 }
 
 .user-name {
@@ -669,6 +680,7 @@ function handleLogout() {
 .app-sidebar.collapsed .user-menu-arrow {
   opacity: 0;
   pointer-events: none;
+  position: absolute;
 }
 
 /* ── User dropdown ─────────────────────────────────────────────── */
@@ -784,7 +796,7 @@ function handleLogout() {
   align-items: center;
 }
 .topbar-project-select {
-  max-width: 180px; min-width: 120px;
+  max-width: 180px; min-width: 100px;
 }
 .topbar-project-select :deep(.t-input) {
   border: none !important;
@@ -794,10 +806,12 @@ function handleLogout() {
   font-size: 13px; font-weight: 600;
   color: var(--primary);
   height: auto; min-height: 0;
+  cursor: pointer;
 }
 .topbar-project-select :deep(.t-input__inner) {
   font-size: 13px; font-weight: 600;
   color: var(--primary);
+  cursor: pointer;
 }
 .topbar-project-select :deep(.t-input__suffix) { opacity: 0.6; }
 
@@ -952,7 +966,7 @@ function handleLogout() {
 
   .app-sidebar.collapsed .sidebar-logo,
   .app-sidebar.collapsed .sidebar-title {
-    position: static;
+    max-width: none;
     opacity: 1;
     pointer-events: auto;
   }
