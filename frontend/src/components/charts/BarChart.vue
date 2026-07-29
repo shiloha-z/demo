@@ -111,7 +111,9 @@ const pct = (v: number) => (max.value > 0 ? (v / max.value) * 100 : 0)
   color: var(--muted-foreground);
   margin-top: 4px;
   white-space: nowrap;
-  overflow: visible;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 .bar-label.hidden { visibility: hidden; }
 .bar-value.hidden { display: none; }
