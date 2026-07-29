@@ -870,6 +870,23 @@
   background: var(--glass-surface-strong) !important;
 }
 
+/* ── Unified select dropdown options ────────────────────────────── */
+.t-select-option {
+  border-radius: var(--radius-sm) !important;
+  font-size: 13px !important;
+  padding: 7px 10px !important;
+  margin: 1px 4px !important;
+  transition: background var(--transition-fast) !important;
+}
+.t-select-option:hover {
+  background: var(--surface-hover) !important;
+}
+.t-select-option.t-is-selected {
+  color: var(--primary) !important;
+  background: var(--primary-light) !important;
+  font-weight: 600;
+}
+
 :where(.t-message, .t-notification) {
   background: var(--glass-surface-strong) !important;
   border-color: var(--glass-border) !important;

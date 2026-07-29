@@ -377,18 +377,18 @@ async function handleJoinProject(p: any, event: Event) {
             <span>{{ formatTime(p.created_at) }}</span>
           </div>
         </div>
-        <button v-if="!p.is_member" class="btn-join" @click.stop="handleJoinProject(p, $event)" title="申请加入" :disabled="joining">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
-        </button>
-        <button class="btn-members" @click.stop="openMembers(p)" title="成员管理">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        </button>
-        <button class="btn-memory" @click.stop="openProjectMemory(p)" title="项目记忆">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        </button>
-        <button class="btn-delete" @click="deleteProject(p, $event)" title="删除项目">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-        </button>
+        <t-button v-if="!p.is_member" shape="square" variant="text" size="small" @click.stop="handleJoinProject(p, $event)" title="申请加入" :disabled="joining">
+          <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg></template>
+        </t-button>
+        <t-button shape="square" variant="text" size="small" @click.stop="openMembers(p)" title="成员管理">
+          <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></template>
+        </t-button>
+        <t-button shape="square" variant="text" size="small" @click.stop="openProjectMemory(p)" title="项目记忆">
+          <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg></template>
+        </t-button>
+        <t-button shape="square" variant="text" size="small" theme="danger" @click="deleteProject(p, $event)" title="删除项目">
+          <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg></template>
+        </t-button>
         <svg class="project-card-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="9 18 15 12 9 6"/></svg>
       </article>
       </TransitionGroup>
@@ -588,10 +588,10 @@ async function handleJoinProject(p: any, event: Event) {
   align-items: center;
   gap: 4px;
   padding: 4px;
-  border: 1px solid var(--surface-border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: var(--shadow-surface);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--glass-surface-soft);
+  backdrop-filter: blur(var(--glass-blur-sm)) saturate(var(--glass-saturate));
 }
 
 .filter-tab {
@@ -629,11 +629,11 @@ async function handleJoinProject(p: any, event: Event) {
 
 .project-search :deep(.t-input),
 .project-sort :deep(.t-input) {
-  background: var(--surface);
+  background: var(--glass-surface-soft);
 }
 
 /* ── Project grid ───────────────────────────────────────────────── */
-.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(390px, 1fr)); gap: 14px; }
+.project-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
 .project-card {
   display: flex; align-items: center; gap: 14px;
   background: var(--card-bg); border: var(--card-border);
@@ -668,39 +668,6 @@ async function handleJoinProject(p: any, event: Event) {
 .project-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 11px; color: var(--muted-foreground); }
 .project-card-arrow { color: var(--muted-foreground); flex-shrink: 0; }
 .project-card:hover .project-card-arrow { color: var(--primary); }
-
-.btn-delete {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
-  border: none; background: transparent; color: var(--muted-foreground);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.btn-delete:hover { background: var(--danger-light); color: var(--danger); }
-
-.btn-members {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
-  border: none; background: transparent; color: var(--muted-foreground);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.btn-members:hover { background: var(--primary-light); color: var(--primary); }
-
-.btn-memory {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
-  border: none; background: transparent; color: var(--muted-foreground);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.btn-memory:hover { background: var(--info-light); color: var(--info); }
-
-.btn-join {
-  width: 28px; height: 28px; border-radius: var(--radius-sm);
-  border: none; background: transparent; color: var(--muted-foreground);
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0;
-}
-.btn-join:hover { background: var(--success-light); color: var(--success); }
-.btn-join:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* ── Project detail dialog ─────────────────────────────────────── */
 .detail-body { display: flex; flex-direction: column; gap: 10px; }

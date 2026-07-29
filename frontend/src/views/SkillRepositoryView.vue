@@ -514,9 +514,9 @@ function fmtTime(iso: string | null): string {
   gap: 16px;
   margin-bottom: 16px;
   padding: 14px 18px;
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  background: var(--card-bg);
 }
 .external-source-card strong { font-size: 14px; }
 .external-source-card p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 13px; }
@@ -591,11 +591,11 @@ function fmtTime(iso: string | null): string {
 }
 
 .skill-card {
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-surface);
-  padding: 16px 18px;
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: var(--card-padding);
   display: flex;
   flex-direction: column;
   gap: 10px;

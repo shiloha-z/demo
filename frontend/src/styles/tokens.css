@@ -248,3 +248,17 @@
   --theme-hue-end: 45;
   --theme-chroma: 0.16;
 }
+
+/* ── Reduced motion ────────────────────────────────────────────────── */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+.reduced-motion {
+  --glass-blur-sm: 0px;
+  --glass-blur: 0px;
+  --glass-blur-lg: 0px;
+}

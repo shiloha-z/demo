@@ -24,10 +24,18 @@ export const useThemeStore = defineStore('theme', () => {
       ? storedColorTheme as ColorTheme
       : 'indigo',
   )
+  const reducedMotion = ref(localStorage.getItem('reduced-motion') === '1')
 
   function applyTheme() {
     document.documentElement.classList.toggle('dark', isDark.value)
+    document.documentElement.classList.toggle('reduced-motion', reducedMotion.value)
     document.documentElement.dataset.colorTheme = colorTheme.value
+  }
+
+  function toggleReducedMotion() {
+    reducedMotion.value = !reducedMotion.value
+    localStorage.setItem('reduced-motion', reducedMotion.value ? '1' : '0')
+    applyTheme()
   }
 
   function animateThemeChange() {
@@ -57,5 +65,5 @@ export const useThemeStore = defineStore('theme', () => {
     applyTheme()
   }
 
-  return { isDark, colorTheme, toggleDark, setColorTheme, initTheme }
+  return { isDark, colorTheme, reducedMotion, toggleDark, setColorTheme, toggleReducedMotion, initTheme }
 })

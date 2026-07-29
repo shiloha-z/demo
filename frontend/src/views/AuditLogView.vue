@@ -171,18 +171,15 @@ const dailyEvents = computed(() => {
 
     <!-- Filters -->
     <div class="filter-bar">
-      <select v-model="filters.project_id" class="f-select" @change="applyFilters">
-        <option :value="null">全部项目</option>
-        <option v-for="o in projectOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
-      </select>
-      <select v-model="filters.actor_type" class="f-select" @change="applyFilters">
-        <option value="">全部操作方</option>
-        <option v-for="t in actorTypes" :key="t" :value="t">{{ actorMeta[t]?.label || t }}</option>
-      </select>
-      <select v-model="filters.action" class="f-select" @change="applyFilters">
-        <option value="">全部动作</option>
-        <option v-for="a in actions" :key="a.value" :value="a.value">{{ a.label }}</option>
-      </select>
+      <t-select v-model="filters.project_id" size="small" style="width:140px" placeholder="全部项目" clearable @change="applyFilters">
+        <t-option v-for="o in projectOptions" :key="o.value" :value="o.value" :label="o.label" />
+      </t-select>
+      <t-select v-model="filters.actor_type" size="small" style="width:130px" placeholder="全部操作方" clearable @change="applyFilters">
+        <t-option v-for="t in actorTypes" :key="t" :value="t" :label="actorMeta[t]?.label || t" />
+      </t-select>
+      <t-select v-model="filters.action" size="small" style="width:140px" placeholder="全部动作" clearable @change="applyFilters">
+        <t-option v-for="a in actions" :key="a.value" :value="a.value" :label="a.label" />
+      </t-select>
       <input v-model.number="filters.task_id" type="number" placeholder="按任务 ID" class="f-input" @change="applyFilters" />
       <t-button theme="default" variant="outline" size="small" @click="applyFilters">刷新</t-button>
     </div>
@@ -208,7 +205,9 @@ const dailyEvents = computed(() => {
         <div class="drawer" @click.stop>
           <div class="drawer-head">
             <h2>责任链 · 任务 #{{ chainTaskId }}</h2>
-            <button class="drawer-close" @click="showChain = false">×</button>
+            <t-button shape="square" variant="text" size="small" @click="showChain = false">
+              <template #icon><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></template>
+            </t-button>
           </div>
           <div v-if="!chainData" class="empty-card"><p>加载中…</p></div>
           <div v-else class="chain">
@@ -239,9 +238,9 @@ const dailyEvents = computed(() => {
 .page-desc { margin: 4px 0 0; font-size: 13px; color: var(--muted-foreground); }
 
 /* ── Filters ─────────────────────────────────────────────────────── */
-.filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.f-select, .f-input {
-  padding: 7px 10px; font-size: 13px; color: var(--foreground);
+.filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; }
+.f-input {
+  padding: 7px 10px; font-size: 13px; color: var(--foreground); width: 130px;
   background: var(--glass-surface-soft); border: 1px solid var(--glass-border);
   border-radius: var(--radius-md); outline: none; font-family: var(--font-sans);
   transition:
@@ -249,8 +248,7 @@ const dailyEvents = computed(() => {
     box-shadow var(--transition-fast),
     background-color var(--transition-fast);
 }
-.f-input { width: 130px; }
-.f-select:focus, .f-input:focus {
+.f-input:focus {
   border-color: var(--primary);
   background: var(--glass-surface-strong);
   box-shadow: 0 0 0 3px var(--ring);
@@ -306,12 +304,6 @@ const dailyEvents = computed(() => {
   padding: 16px 18px; border-bottom: 1px solid var(--surface-border);
 }
 .drawer-head h2 { margin: 0; font-size: 15px; font-weight: 600; color: var(--foreground); }
-.drawer-close {
-  border: none; background: transparent; font-size: 22px; color: var(--muted-foreground);
-  cursor: pointer; line-height: 1;
-}
-.drawer-close:hover { color: var(--foreground); }
-
 .chain { padding: 16px 18px; overflow-y: auto; }
 .chain-node { margin-top: 12px; padding-top: 12px; border-top: 1px dashed var(--surface-border); }
 .chain-node-label { font-size: 12px; font-weight: 600; color: var(--muted-foreground); margin-bottom: 8px; }

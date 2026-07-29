@@ -173,9 +173,7 @@ function handleAvatarLoadError() {
           <span class="profile-field-hint">{{ profile.bio.length }} / 500</span>
         </label>
 
-        <button class="profile-save-btn" :disabled="saving" @click="saveProfile">
-          {{ saving ? '保存中...' : '保存修改' }}
-        </button>
+        <t-button theme="primary" :loading="saving" @click="saveProfile">保存修改</t-button>
 
         <p v-if="message" class="profile-message" :class="{ error: message.includes('失败') }">
           {{ message }}
@@ -349,36 +347,6 @@ function handleAvatarLoadError() {
   border-color: var(--primary);
   background: var(--glass-surface-strong);
   box-shadow: 0 0 0 3px var(--ring);
-}
-
-.profile-save-btn {
-  align-self: flex-start;
-  padding: 9px 24px;
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 14px;
-  font-weight: 600;
-  font-family: var(--font-sans);
-  cursor: pointer;
-  box-shadow: 0 8px 20px var(--primary-glow);
-  transition:
-    background-color var(--transition-fast),
-    box-shadow var(--transition-fast),
-    transform var(--motion-fast) var(--motion-ease-spring);
-}
-
-.profile-save-btn:hover {
-  background: var(--primary-hover);
-  box-shadow: 0 11px 26px var(--primary-glow);
-  transform: translateY(-1px);
-}
-.profile-save-btn:active { transform: scale(0.98); }
-
-.profile-save-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .profile-message {

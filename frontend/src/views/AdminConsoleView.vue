@@ -145,9 +145,7 @@ onMounted(() => {
           <input type="checkbox" v-model="promoteForm.is_system_admin" />
           <span>{{ promoteForm.is_system_admin ? '授予' : '撤销' }}</span>
         </label>
-        <button class="btn-primary" :disabled="promoteLoading" @click="promoteAdmin">
-          {{ promoteLoading ? '处理中…' : '执行' }}
-        </button>
+        <t-button theme="primary" size="small" :loading="promoteLoading" @click="promoteAdmin">执行</t-button>
       </div>
       <p class="card-hint">
         授予后该账号可访问管理后台、修改银行化安全策略、配置模型白名单等。所有变更记入审计日志。
@@ -157,9 +155,7 @@ onMounted(() => {
     <div class="users-card">
       <div class="card-header">
         <h3 class="card-title">账号列表</h3>
-        <button class="btn-ghost" @click="loadUsers" :disabled="loading">
-          {{ loading ? '加载中…' : '刷新' }}
-        </button>
+        <t-button variant="outline" size="small" :loading="loading" @click="loadUsers">刷新</t-button>
       </div>
       <div class="table-wrap">
         <table class="data-table">
@@ -188,11 +184,13 @@ onMounted(() => {
               <td>{{ u.agent_count }}</td>
               <td>{{ u.skill_count }}</td>
               <td>
-                <button
+                <t-button
                   v-if="u.id !== auth.userId"
-                  class="btn-danger-sm"
+                  size="small"
+                  theme="danger"
+                  variant="text"
                   @click="deleteUser(u.id, u.username)"
-                >删除</button>
+                >删除</t-button>
                 <span v-else class="tag-self">当前账号</span>
               </td>
             </tr>
@@ -331,31 +329,6 @@ onMounted(() => {
   transition: all var(--transition-fast);
 }
 
-.btn-primary {
-  background: var(--primary);
-  color: var(--primary-foreground);
-  border: 1px solid var(--primary);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.btn-ghost {
-  background: transparent;
-  color: var(--foreground);
-  border: 1px solid var(--surface-border);
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background: var(--surface-hover);
-}
-
 .card-hint {
   font-size: 12px;
   color: var(--muted-foreground);
@@ -406,22 +379,6 @@ onMounted(() => {
   color: var(--muted-foreground);
 }
 
-.btn-danger-sm {
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  background: transparent;
-  color: var(--danger);
-  border: 1px solid var(--danger);
-  cursor: pointer;
-  font-family: var(--font-sans);
-  transition: all var(--transition-fast);
-}
-
-.btn-danger-sm:hover {
-  background: var(--danger);
-  color: #fff;
-}
 
 .empty-row {
   text-align: center;

@@ -262,12 +262,9 @@ defineExpose({ refresh: loadMemories })
         <input v-model="query" type="search" placeholder="搜索经验、错误或决策…" />
         <button v-if="query" aria-label="清除搜索" @click="query = ''">×</button>
       </label>
-      <select v-model="memoryType" class="memory-type-filter" aria-label="按记忆类型筛选">
-        <option value="">全部类型</option>
-        <option v-for="[type, count] in typeOptions" :key="type" :value="type">
-          {{ typeLabel(type) }} ({{ count }})
-        </option>
-      </select>
+      <t-select v-model="memoryType" size="small" style="width:140px" placeholder="全部类型" clearable>
+        <t-option v-for="[type, count] in typeOptions" :key="type" :value="type" :label="`${typeLabel(type)} (${count})`" />
+      </t-select>
       <button v-if="!title" class="memory-refresh" :class="{ spinning: loading }" title="刷新记忆" @click="loadMemories">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
       </button>

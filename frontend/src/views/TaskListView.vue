@@ -1224,12 +1224,12 @@ async function resumeTask(task: any, event: Event) {
                   </div>
                 </div>
                 <div class="archived-item-acts">
-                  <button class="restore-btn" title="恢复" @click="unarchiveTask(t, $event)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-                  </button>
-                  <button class="del-btn" title="删除" @click="deleteOne(t, $event)">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                  </button>
+                  <t-button shape="square" variant="text" size="small" title="恢复" @click="unarchiveTask(t, $event)">
+                    <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></template>
+                  </t-button>
+                  <t-button shape="square" variant="text" size="small" theme="danger" title="删除" @click="deleteOne(t, $event)">
+                    <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></template>
+                  </t-button>
                 </div>
               </div>
             </div>
@@ -1275,10 +1275,10 @@ async function resumeTask(task: any, event: Event) {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
                 <span>工作空间</span>
               </button>
-              <button class="workspace-btn" @click="openChain()">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
-                <span>责任链</span>
-              </button>
+              <t-button size="small" variant="outline" @click="openChain()">
+                <template #icon><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></template>
+                责任链
+              </t-button>
               <div class="detail-time" v-if="taskDetail.created_at">
                 {{ formatDate(taskDetail.created_at) }}
               </div>
@@ -1735,17 +1735,6 @@ async function resumeTask(task: any, event: Event) {
 .archived-item-acts { display: flex; gap: 2px; flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
 .archived-item:hover .archived-item-acts { opacity: 1; }
 
-.restore-btn, .del-btn {
-  width: 24px; height: 24px; border-radius: var(--radius-sm);
-  border: none; background: transparent; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all var(--transition-fast);
-}
-.restore-btn { color: var(--muted-foreground); }
-.restore-btn:hover { background: var(--primary-light); color: var(--primary); }
-.del-btn { color: var(--muted-foreground); }
-.del-btn:hover { background: var(--danger-light); color: var(--danger); }
-
 /* ── Detail panel ──────────────────────────────────── */
 .task-detail { flex: 1; overflow-y: auto; padding: 22px 28px; background: var(--workspace-canvas); }
 .detail-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 22px; }
@@ -1755,20 +1744,6 @@ async function resumeTask(task: any, event: Event) {
 .detail-time { font-size: 12px; color: var(--muted-foreground); flex-shrink: 0; }
 
 /* ── Workspace button ────────────────────────────── */
-.workspace-btn {
-  display: flex; align-items: center; gap: 5px;
-  padding: 5px 12px; border: 1px solid var(--surface-border);
-  border-radius: var(--radius-md); background: var(--surface);
-  color: var(--muted-foreground); font-size: 12px; font-weight: 500;
-  font-family: var(--font-sans); cursor: pointer;
-  transition: all var(--transition-fast);
-  flex-shrink: 0;
-}
-.workspace-btn:hover, .workspace-btn.active {
-  border-color: var(--primary); color: var(--primary);
-  background: var(--primary-light);
-}
-
 /* ── Workspace panel ─────────────────────────────── */
 .workspace-backdrop {
   position: fixed; inset: 0; z-index: 100;

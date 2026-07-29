@@ -155,6 +155,16 @@ function setDarkMode(value: boolean) {
             <button type="button" :class="{ active: theme.isDark }" @click="setDarkMode(true)">暗色</button>
           </div>
         </div>
+        <div class="appearance-row appearance-row--mode">
+          <div class="appearance-label">
+            <strong>减弱画面效果</strong>
+            <span>关闭模糊、动画和过渡效果，降低 GPU 占用</span>
+          </div>
+          <div class="mode-options" aria-label="减弱画面效果">
+            <button type="button" :class="{ active: !theme.reducedMotion }" @click="theme.toggleReducedMotion()">标准</button>
+            <button type="button" :class="{ active: theme.reducedMotion }" @click="theme.toggleReducedMotion()">减弱</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -407,10 +417,10 @@ function setDarkMode(value: boolean) {
 .settings-grid { display: flex; flex-direction: column; gap: 16px; }
 .settings-card {
   flex-shrink: 0;
-  background: var(--surface);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-surface);
+  background: var(--card-bg);
+  border: var(--card-border);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
   overflow: hidden;
 }
 .memory-settings-card { margin-top: 24px; }
