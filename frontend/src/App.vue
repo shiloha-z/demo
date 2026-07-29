@@ -782,6 +782,7 @@ function handleLogout() {
 }
 
 .topbar-left {
+  flex: 1 1 0;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -789,14 +790,14 @@ function handleLogout() {
 }
 
 .topbar-center {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
+  min-width: 0;
+  margin: 0 8px;
 }
 .topbar-project-select {
-  max-width: 180px; min-width: 100px;
+  max-width: 200px; min-width: 120px;
 }
 .topbar-project-select :deep(.t-input) {
   border: none !important;
@@ -812,13 +813,28 @@ function handleLogout() {
   font-size: 13px; font-weight: 600;
   color: var(--primary);
   cursor: pointer;
+  padding: 2px 22px 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.topbar-project-select :deep(.t-input__prefix),
+.topbar-project-select :deep(.t-tag) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .topbar-project-select :deep(.t-input__suffix) { opacity: 0.6; }
 
 .topbar-right {
+  flex: 1 1 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
 }
 
 /* ── Unified topbar icon buttons ──────────────────────────────────── */

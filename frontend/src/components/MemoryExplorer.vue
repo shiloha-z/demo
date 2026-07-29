@@ -48,11 +48,7 @@ const panelTitle = computed(() => props.title || {
   project: '项目记忆',
   agent: 'Agent 记忆',
 }[props.scope])
-const expandableMemoryIds = computed(() => (
-  memories.value
-    .filter(memory => memory.document.length > 220)
-    .map(memory => memory.id)
-))
+const expandableMemoryIds = computed(() => memories.value.map(memory => memory.id))
 const allDocumentsExpanded = computed(() => (
   expandableMemoryIds.value.length > 0
   && expandableMemoryIds.value.every(id => expanded.value.has(id))
@@ -318,7 +314,7 @@ defineExpose({ refresh: loadMemories })
       >
         <div
           class="memory-document"
-          :class="{ collapsed: memory.document.length > 220 && !expanded.has(memory.id) }"
+          :class="{ collapsed: !expanded.has(memory.id) }"
         >
           <template v-for="(segment, index) in highlightedSegments(memory.document)" :key="index">
             <mark v-if="segment.match">{{ segment.text }}</mark>
@@ -326,7 +322,6 @@ defineExpose({ refresh: loadMemories })
           </template>
         </div>
         <button
-          v-if="memory.document.length > 220"
           class="memory-expand"
           @click="toggleExpanded(memory.id)"
         >
@@ -562,7 +557,6 @@ defineExpose({ refresh: loadMemories })
 }
 .memory-item {
   position: relative;
-  overflow: hidden;
   padding: 11px 12px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);
@@ -605,12 +599,12 @@ defineExpose({ refresh: loadMemories })
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .memory-document.collapsed {
-  display: -webkit-box;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 4;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .memory-document mark {
   padding: 0 2px;

@@ -296,6 +296,12 @@ function setDarkMode(value: boolean) {
   padding-top: 16px;
   border-top: 1px solid var(--glass-border);
 }
+
+/* Global memory viewer: let the card stop clipping the explorer's rounded
+   content so memory text can never be cut off by the card border. */
+.memory-settings-card {
+  overflow: visible;
+}
 .appearance-label {
   display: flex;
   align-items: baseline;

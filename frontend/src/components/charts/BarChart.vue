@@ -107,13 +107,11 @@ const pct = (v: number) => (max.value > 0 ? (v / max.value) * 100 : 0)
   transition: height 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .bar-label {
-  font-size: 10px;
+  font-size: 9.5px;
   color: var(--muted-foreground);
   margin-top: 4px;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+  overflow: visible;
 }
 .bar-label.hidden { visibility: hidden; }
 .bar-value.hidden { display: none; }
