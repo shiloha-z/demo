@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../views/LoginView.vue'
 import DashboardView from '../views/DashboardView.vue'
 import RiskDashboardView from '../views/RiskDashboardView.vue'
+import MemoryAtlasView from '../views/MemoryAtlasView.vue'
 import FileManagerView from '../views/FileManagerView.vue'
 import AgentPanelView from '../views/AgentPanelView.vue'
 import TaskListView from '../views/TaskListView.vue'
@@ -35,6 +36,11 @@ const router = createRouter({
       path: '/risk-dashboard',
       name: 'RiskDashboard',
       component: RiskDashboardView,
+    },
+    {
+      path: '/memory-atlas',
+      name: 'MemoryAtlas',
+      component: MemoryAtlasView,
     },
     {
       path: '/files',
